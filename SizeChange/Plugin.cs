@@ -143,7 +143,10 @@ public sealed class Plugin : IDalamudPlugin
     
     private unsafe void OnFrameworkUpdate(IFramework framework)
     {
-        bool disable = (ClientState.IsPvP || !Configuration.Enable|| (Configuration.OnlyActiveInCombat && !Condition[ConditionFlag.InCombat]));
+        bool disable = ClientState.IsPvP || !Configuration.Enable;
+        bool outOfCombat =
+            Configuration.OnlyActiveInCombat &&
+            !Condition[ConditionFlag.InCombat];
         
         var player = ObjectTable.LocalPlayer;
             if (player == null) return;
@@ -158,12 +161,18 @@ public sealed class Plugin : IDalamudPlugin
                 (Character*)actor.Address,
                 Configuration.GrowFromDamage,
                 Configuration.GrowthFromDelta,
-                disable || (!isLocalPlayer && !Configuration.AlterAnyone));
+                disable || (!isLocalPlayer && !Configuration.AlterAnyone),
+                outOfCombat);
         }
     }
 
     // find the actor's health and shield value and uses that to adjust the model's scale
-    public unsafe void AdjustScale(Character* actor, bool growFromDamage, bool growthFromDelta, bool disable)
+    public unsafe void AdjustScale(
+        Character* actor,
+        bool growFromDamage,
+        bool growthFromDelta,
+        bool disable,
+        bool outOfCombat)
     {
         if (actor == null) return;
         float maxhp = actor->MaxHealth;
@@ -207,7 +216,7 @@ public sealed class Plugin : IDalamudPlugin
                 charState.HasPreviousHealth = true;
             }
 
-            if (growthFromDelta && !disable)
+            if (growthFromDelta && !disable && !outOfCombat)
             {
                 // Only add growth while the effect is active. Health is still
                 // sampled while disabled, preventing retroactive growth later.
@@ -219,11 +228,25 @@ public sealed class Plugin : IDalamudPlugin
                 }
             }
 
+            if (growthFromDelta && Configuration.LimitDeltaGrowth)
+            {
+                charState.GrowthMultiplier = Math.Min(
+                    charState.GrowthMultiplier,
+                    Configuration.DeltaMaxScaleMultiplier);
+            }
+
             // Ambient decay belongs only to the Growth From Delta mode.
             if (growthFromDelta && charState.GrowthMultiplier > 1.0f)
             {
                 float deltaSeconds = (float)Framework.UpdateDelta.TotalSeconds;
-                float shrinkAmount = Configuration.AmbientShrinkRate * deltaSeconds;
+                float decayMultiplier =
+                    outOfCombat && !disable
+                        ? Configuration.OutOfCombatDecayMultiplier
+                        : 1.0f;
+                float shrinkAmount =
+                    Configuration.AmbientShrinkRate *
+                    decayMultiplier *
+                    deltaSeconds;
                 charState.GrowthMultiplier = Math.Max(1.0f, charState.GrowthMultiplier - shrinkAmount);
             }
 
@@ -231,16 +254,18 @@ public sealed class Plugin : IDalamudPlugin
                 ? charState.PlayerScale
                 : growthFromDelta
                     ? charState.PlayerScale * charState.GrowthMultiplier
-                    : growFromDamage
-                        ? Math.Clamp(
-                            Configuration.MaxScaleMultiplier -
-                            (Configuration.MaxScaleMultiplier * hpRatio),
-                            Configuration.MinScaleMultiplier,
-                            Configuration.MaxScaleMultiplier) * charState.PlayerScale
-                        : Math.Clamp(
-                            hpRatio,
-                            Configuration.MinScaleMultiplier,
-                            float.PositiveInfinity) * charState.PlayerScale;
+                    : outOfCombat
+                        ? charState.PlayerScale
+                        : growFromDamage
+                            ? Math.Clamp(
+                                Configuration.MaxScaleMultiplier -
+                                (Configuration.MaxScaleMultiplier * hpRatio),
+                                Configuration.MinScaleMultiplier,
+                                Configuration.MaxScaleMultiplier) * charState.PlayerScale
+                            : Math.Clamp(
+                                hpRatio,
+                                Configuration.MinScaleMultiplier,
+                                float.PositiveInfinity) * charState.PlayerScale;
             Logger.Information("targetScale is {targetScale}", targetScale);
 
             
