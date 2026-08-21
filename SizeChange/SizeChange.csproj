@@ -3,7 +3,7 @@
   <PropertyGroup>
     <Version>1.0.0.0</Version>
     <Description>Changes size of characters based on how much health they have!</Description>
-    <PackageProjectUrl>https://github.com/InsubstantialCoder/SizeChange</PackageProjectUrl>
+    <PackageProjectUrl>https://github.com/AeonOrtha/SizeChange</PackageProjectUrl>
     <PackageLicenseExpression>AGPL-3.0-or-later</PackageLicenseExpression>
     <IsPackable>false</IsPackable>
     <RootNamespace>SizeChange</RootNamespace>

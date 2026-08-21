@@ -1,11 +1,11 @@
 {
-  "Author": "InsubstantialCoder",
-  "Name": "SizeChange",
-  "Punchline": "Changes characters sizes based on their Health!",
-  "Description": "This plugin will shrink and grow characters based on how much health they have, affects you and your party \n\n/sizechange to open the config window.",
-  "ApplicableVersion": "any",
-  "Tags": [
-      "funny"
-  ],
-    "RepoUrl": "https://github.com/InsubstantialCoder/SizeChange"
+    "Author": "InsubstantialCoder",
+    "Name": "SizeChange",
+    "Punchline": "Changes characters sizes based on their Health!",
+    "Description": "This plugin will shrink and grow characters based on how much health they have, affects you and your party \n\n/sizechange to open the config window.",
+    "ApplicableVersion": "any",
+    "Tags": [
+        "funny"
+    ],
+    "RepoUrl": "https://github.com/AeonOrtha/SizeChange"
 }

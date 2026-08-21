@@ -20,6 +20,9 @@ namespace SizeChange;
 struct SCCharacterState {
     public float PlayerScale;
     public float PreviousScale;
+    public float PreviousHealth;
+    public float GrowthMultiplier;
+    public bool HasPreviousHealth;
 }
 
 public sealed class Plugin : IDalamudPlugin
@@ -70,14 +73,17 @@ public sealed class Plugin : IDalamudPlugin
 
     public void Dispose()
     {
+        Framework.Update -= OnFrameworkUpdate;
         PluginInterface.UiBuilder.Draw -= WindowSystem.Draw;
         PluginInterface.UiBuilder.OpenConfigUi -= ToggleConfigUi;
+        PluginInterface.UiBuilder.OpenMainUi -= ToggleConfigUi;
         
         WindowSystem.RemoveAllWindows();
 
         ConfigWindow.Dispose();
 
         CommandManager.RemoveHandler(CommandName_SizeChange);
+        CommandManager.RemoveHandler(CommandName_Scale);
     }
 
     private unsafe void OnCommand(string command, string args)
@@ -121,10 +127,14 @@ public sealed class Plugin : IDalamudPlugin
         }
         else
         {
-            charState = new SCCharacterState();
+            charState = new SCCharacterState
+            {
+                GrowthMultiplier = 1.0f
+            };
         }
         charState.PlayerScale = scale;
         var draw = (CharacterBase*)actor->DrawObject;
+        if (draw == null) return;
         var currentScale = draw->Scale.Y;
         charState.PreviousScale = currentScale;
 
@@ -144,15 +154,20 @@ public sealed class Plugin : IDalamudPlugin
             if (actor == null) continue;
             bool isLocalPlayer = ((Character*)player.Address)->EntityId == ((Character*)thing.Address)->EntityId;
             
-            AdjustScale((Character*)actor.Address, Configuration.GrowFromDamage, disable || (!isLocalPlayer && !Configuration.AlterAnyone));
+            AdjustScale(
+                (Character*)actor.Address,
+                Configuration.GrowFromDamage,
+                Configuration.GrowthFromDelta,
+                disable || (!isLocalPlayer && !Configuration.AlterAnyone));
         }
     }
 
     // find the actor's health and shield value and uses that to adjust the model's scale
-    public unsafe void AdjustScale(Character* actor, bool growFromDamage, bool disable)
+    public unsafe void AdjustScale(Character* actor, bool growFromDamage, bool growthFromDelta, bool disable)
     {
         if (actor == null) return;
         float maxhp = actor->MaxHealth;
+        if (maxhp <= 0f) return;
         float shield = (actor->ShieldValue / 100f) * maxhp;
         float health = actor->Health + shield;
         float hpRatio = health / maxhp;
@@ -173,17 +188,59 @@ public sealed class Plugin : IDalamudPlugin
             }
             else
             {
-                charState = new SCCharacterState();
-                charState.PlayerScale = 1.0f;
+                charState = new SCCharacterState
+                {
+                    PlayerScale = 1.0f,
+                    GrowthMultiplier = 1.0f
+                };
             }
             Logger.Information("Previous scale is {scale}", previousScale);
             if (previousScale != scale)
             {
                 charState.PlayerScale = scale;
             }
-            float targetScale = disable ? charState.PlayerScale : growFromDamage ? 
-            Math.Clamp(Configuration.MaxScaleMultiplier - (Configuration.MaxScaleMultiplier * hpRatio), Configuration.MinScaleMultiplier, Configuration.MaxScaleMultiplier)*charState.PlayerScale : 
-            Math.Clamp(hpRatio, Configuration.MinScaleMultiplier, float.PositiveInfinity)*charState.PlayerScale;
+
+            if (!charState.HasPreviousHealth)
+            {
+                charState.PreviousHealth = health;
+                charState.GrowthMultiplier = Math.Max(1.0f, charState.GrowthMultiplier);
+                charState.HasPreviousHealth = true;
+            }
+
+            if (growthFromDelta && !disable)
+            {
+                // Only add growth while the effect is active. Health is still
+                // sampled while disabled, preventing retroactive growth later.
+                float healthLost = charState.PreviousHealth - health;
+                if (healthLost > 0f)
+                {
+                    float healthLostRatio = healthLost / maxhp;
+                    charState.GrowthMultiplier += healthLostRatio * Configuration.DeltaGrowthMultiplier;
+                }
+            }
+
+            // Ambient decay belongs only to the Growth From Delta mode.
+            if (growthFromDelta && charState.GrowthMultiplier > 1.0f)
+            {
+                float deltaSeconds = (float)Framework.UpdateDelta.TotalSeconds;
+                float shrinkAmount = Configuration.AmbientShrinkRate * deltaSeconds;
+                charState.GrowthMultiplier = Math.Max(1.0f, charState.GrowthMultiplier - shrinkAmount);
+            }
+
+            float targetScale = disable
+                ? charState.PlayerScale
+                : growthFromDelta
+                    ? charState.PlayerScale * charState.GrowthMultiplier
+                    : growFromDamage
+                        ? Math.Clamp(
+                            Configuration.MaxScaleMultiplier -
+                            (Configuration.MaxScaleMultiplier * hpRatio),
+                            Configuration.MinScaleMultiplier,
+                            Configuration.MaxScaleMultiplier) * charState.PlayerScale
+                        : Math.Clamp(
+                            hpRatio,
+                            Configuration.MinScaleMultiplier,
+                            float.PositiveInfinity) * charState.PlayerScale;
             Logger.Information("targetScale is {targetScale}", targetScale);
 
             
@@ -191,6 +248,7 @@ public sealed class Plugin : IDalamudPlugin
             Logger.Information("scale after lerp is {scale}", scale);
             draw->Scale = new Vector3(scale, scale, scale);
             actor->Scale = scale;
+            charState.PreviousHealth = health;
             charState.PreviousScale = scale;
             CharacterIdToLastScaleMap[actor->EntityId] = charState;
         }

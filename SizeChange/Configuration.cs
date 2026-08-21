@@ -14,15 +14,23 @@ public class Configuration : IPluginConfiguration
     public float Speed { get; set; } = 2.0f;
     // the minimum size of the model
     public float MinScaleMultiplier { get; set; } = 0.1f;
+    // maximum size used by the original Grow From Damage mode
     public float MaxScaleMultiplier { get; set; } = 1.0f;
+    // amplitude applied to each detected health-loss ratio in Growth From Delta
+    public float DeltaGrowthMultiplier { get; set; } = 1.0f;
+    // amount removed from accumulated damage growth per second
+    public float AmbientShrinkRate { get; set; } = 0.05f;
     public bool OnlyActiveInCombat { get; set; } = false;
     public bool Enable { get; set; } = true;
     public bool GrowFromDamage { get; set; } = false;
+    public bool GrowthFromDelta { get; set; } = false;
     
     public void Save()
     {
-        if (MinScaleMultiplier > MaxScaleMultiplier){ MinScaleMultiplier = MaxScaleMultiplier; }
+        if (MinScaleMultiplier > MaxScaleMultiplier) { MinScaleMultiplier = MaxScaleMultiplier; }
         if (MaxScaleMultiplier < MinScaleMultiplier) { MaxScaleMultiplier = MinScaleMultiplier; }
+        if (DeltaGrowthMultiplier < 0) { DeltaGrowthMultiplier = 0.0f; }
+        if (AmbientShrinkRate < 0) { AmbientShrinkRate = 0.0f; }
         if (Speed <= 0)
         {
             Speed = 0.1f;
