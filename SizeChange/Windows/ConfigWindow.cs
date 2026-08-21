@@ -26,7 +26,12 @@ public class ConfigWindow : Window, IDisposable
         var minScaleMultiplier = configuration.MinScaleMultiplier;
         var maxScaleMultiplier = configuration.MaxScaleMultiplier;
         var deltaGrowthMultiplier = configuration.DeltaGrowthMultiplier;
+        var limitDeltaGrowth = configuration.LimitDeltaGrowth;
+        var deltaMaxScaleMultiplier = configuration.DeltaMaxScaleMultiplier;
         var ambientShrinkRate = configuration.AmbientShrinkRate;
+        var outOfCombatDecayMultiplier = configuration.OutOfCombatDecayMultiplier;
+        var enableDeltaHeightOffset = configuration.EnableDeltaHeightOffset;
+        var deltaHeightOffsetPerScale = configuration.DeltaHeightOffsetPerScale;
         var AlterAnyone = configuration.AlterAnyone;
         var Enable = configuration.Enable;
         var GrowFromDamage = configuration.GrowFromDamage;
@@ -103,10 +108,46 @@ public class ConfigWindow : Window, IDisposable
             configuration.Save();
         }
 
+        if (GrowthFromDelta && ImGui.Checkbox("Limit Delta Growth", ref limitDeltaGrowth))
+        {
+            configuration.LimitDeltaGrowth = limitDeltaGrowth;
+            configuration.Save();
+        }
+
+        if (GrowthFromDelta && limitDeltaGrowth &&
+            ImGui.DragFloat("Delta Maximum Size Multiplier", ref deltaMaxScaleMultiplier, 0.1F, 1.00F, 100.00F))
+        {
+            if (deltaMaxScaleMultiplier < 1.00F){ deltaMaxScaleMultiplier = 1.00F; }
+            configuration.DeltaMaxScaleMultiplier = deltaMaxScaleMultiplier;
+            configuration.Save();
+        }
+
         if (GrowthFromDelta && ImGui.DragFloat("Ambient Shrink Per Second", ref ambientShrinkRate, 0.01F, 0.00F, 10.00F))
         {
             if (ambientShrinkRate < 0.00F){ ambientShrinkRate = 0.00F; }
             configuration.AmbientShrinkRate = ambientShrinkRate;
+            configuration.Save();
+        }
+
+        if (GrowthFromDelta && OnlyActiveInCombat &&
+            ImGui.DragFloat("Out of Combat Decay Multiplier", ref outOfCombatDecayMultiplier, 0.5F, 1.00F, 100.00F))
+        {
+            if (outOfCombatDecayMultiplier < 1.00F){ outOfCombatDecayMultiplier = 1.00F; }
+            configuration.OutOfCombatDecayMultiplier = outOfCombatDecayMultiplier;
+            configuration.Save();
+        }
+
+        if (GrowthFromDelta && ImGui.Checkbox("Enable Growth Height Offset", ref enableDeltaHeightOffset))
+        {
+            configuration.EnableDeltaHeightOffset = enableDeltaHeightOffset;
+            configuration.Save();
+        }
+
+        if (GrowthFromDelta && enableDeltaHeightOffset &&
+            ImGui.DragFloat("Height Offset Per Extra 1x", ref deltaHeightOffsetPerScale, 0.01F, 0.00F, 5.00F))
+        {
+            if (deltaHeightOffsetPerScale < 0.00F){ deltaHeightOffsetPerScale = 0.00F; }
+            configuration.DeltaHeightOffsetPerScale = deltaHeightOffsetPerScale;
             configuration.Save();
         }
 
@@ -116,7 +157,12 @@ public class ConfigWindow : Window, IDisposable
             configuration.MinScaleMultiplier = 0.1f;
             configuration.MaxScaleMultiplier = 1.0f;
             configuration.DeltaGrowthMultiplier = 1.0f;
+            configuration.LimitDeltaGrowth = false;
+            configuration.DeltaMaxScaleMultiplier = 5.0f;
             configuration.AmbientShrinkRate = 0.05f;
+            configuration.OutOfCombatDecayMultiplier = 10.0f;
+            configuration.EnableDeltaHeightOffset = false;
+            configuration.DeltaHeightOffsetPerScale = 0.5f;
             configuration.Speed = 2.0f;
             configuration.Enable = true;
             configuration.OnlyActiveInCombat = false;
