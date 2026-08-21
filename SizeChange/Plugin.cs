@@ -23,6 +23,9 @@ struct SCCharacterState {
     public float PreviousHealth;
     public float GrowthMultiplier;
     public bool HasPreviousHealth;
+    public float BaseDrawOffsetY;
+    public float LastAppliedDrawOffsetY;
+    public bool HasDrawOffset;
 }
 
 public sealed class Plugin : IDalamudPlugin
@@ -71,9 +74,12 @@ public sealed class Plugin : IDalamudPlugin
         PluginInterface.UiBuilder.OpenMainUi += ToggleConfigUi;
     }
 
-    public void Dispose()
+    public unsafe void Dispose()
     {
         Framework.Update -= OnFrameworkUpdate;
+
+        RestoreHeightOffsets();
+
         PluginInterface.UiBuilder.Draw -= WindowSystem.Draw;
         PluginInterface.UiBuilder.OpenConfigUi -= ToggleConfigUi;
         PluginInterface.UiBuilder.OpenMainUi -= ToggleConfigUi;
@@ -84,6 +90,28 @@ public sealed class Plugin : IDalamudPlugin
 
         CommandManager.RemoveHandler(CommandName_SizeChange);
         CommandManager.RemoveHandler(CommandName_Scale);
+    }
+
+    private unsafe void RestoreHeightOffsets()
+    {
+        foreach (var thing in ObjectTable.PlayerObjects)
+        {
+            if (thing == null) continue;
+
+            var actor = (Character*)thing.Address;
+            if (actor == null ||
+                !CharacterIdToLastScaleMap.TryGetValue(actor->EntityId, out var charState) ||
+                !charState.HasDrawOffset)
+            {
+                continue;
+            }
+
+            var currentOffset = actor->GameObject.DrawOffset;
+            actor->GameObject.SetDrawOffset(
+                currentOffset.X,
+                charState.BaseDrawOffsetY,
+                currentOffset.Z);
+        }
     }
 
     private unsafe void OnCommand(string command, string args)
@@ -273,10 +301,62 @@ public sealed class Plugin : IDalamudPlugin
             Logger.Information("scale after lerp is {scale}", scale);
             draw->Scale = new Vector3(scale, scale, scale);
             actor->Scale = scale;
+
+            float desiredHeightOffset = 0f;
+            if (growthFromDelta &&
+                Configuration.EnableDeltaHeightOffset &&
+                charState.PlayerScale > 0f)
+            {
+                // Follow the visible, lerped scale so height returns at the
+                // same pace as normal and out-of-combat delta decay.
+                float visibleScaleMultiplier = scale / charState.PlayerScale;
+                desiredHeightOffset =
+                    Math.Max(0f, visibleScaleMultiplier - 1f) *
+                    Configuration.DeltaHeightOffsetPerScale;
+            }
+
+            if (charState.HasDrawOffset || desiredHeightOffset > 0f)
+            {
+                ApplyHeightOffset(actor, ref charState, desiredHeightOffset);
+            }
+
             charState.PreviousHealth = health;
             charState.PreviousScale = scale;
             CharacterIdToLastScaleMap[actor->EntityId] = charState;
         }
+    }
+
+    private unsafe void ApplyHeightOffset(
+        Character* actor,
+        ref SCCharacterState charState,
+        float desiredHeightOffset)
+    {
+        const float tolerance = 0.0001f;
+        var currentOffset = actor->GameObject.DrawOffset;
+
+        if (!charState.HasDrawOffset)
+        {
+            charState.BaseDrawOffsetY = currentOffset.Y;
+            charState.LastAppliedDrawOffsetY = currentOffset.Y;
+            charState.HasDrawOffset = true;
+        }
+        else if (MathF.Abs(currentOffset.Y - charState.LastAppliedDrawOffsetY) > tolerance)
+        {
+            // Preserve legitimate base-offset changes made by the game while
+            // this plugin is running instead of accumulating our own offset.
+            charState.BaseDrawOffsetY = currentOffset.Y;
+        }
+
+        float targetY = charState.BaseDrawOffsetY + desiredHeightOffset;
+        if (MathF.Abs(currentOffset.Y - targetY) > tolerance)
+        {
+            actor->GameObject.SetDrawOffset(
+                currentOffset.X,
+                targetY,
+                currentOffset.Z);
+        }
+
+        charState.LastAppliedDrawOffsetY = actor->GameObject.DrawOffset.Y;
     }
     
     public void ToggleConfigUi() => ConfigWindow.Toggle();

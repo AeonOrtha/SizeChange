@@ -25,6 +25,10 @@ public class Configuration : IPluginConfiguration
     public float AmbientShrinkRate { get; set; } = 0.05f;
     // multiplier applied to ambient shrink after combat ends
     public float OutOfCombatDecayMultiplier { get; set; } = 10.0f;
+    // move the visual root upward as Growth From Delta increases the scale
+    public bool EnableDeltaHeightOffset { get; set; } = false;
+    // Y offset added for each visible 1x of scale above the player's base scale
+    public float DeltaHeightOffsetPerScale { get; set; } = 0.5f;
     public bool OnlyActiveInCombat { get; set; } = false;
     public bool Enable { get; set; } = true;
     public bool GrowFromDamage { get; set; } = false;
@@ -38,6 +42,7 @@ public class Configuration : IPluginConfiguration
         if (DeltaMaxScaleMultiplier < 1.0f) { DeltaMaxScaleMultiplier = 1.0f; }
         if (AmbientShrinkRate < 0) { AmbientShrinkRate = 0.0f; }
         if (OutOfCombatDecayMultiplier < 1.0f) { OutOfCombatDecayMultiplier = 1.0f; }
+        if (DeltaHeightOffsetPerScale < 0) { DeltaHeightOffsetPerScale = 0.0f; }
         if (Speed <= 0)
         {
             Speed = 0.1f;
