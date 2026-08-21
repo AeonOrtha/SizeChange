@@ -25,9 +25,12 @@ public class ConfigWindow : Window, IDisposable
         var speed = configuration.Speed;
         var minScaleMultiplier = configuration.MinScaleMultiplier;
         var maxScaleMultiplier = configuration.MaxScaleMultiplier;
+        var deltaGrowthMultiplier = configuration.DeltaGrowthMultiplier;
+        var ambientShrinkRate = configuration.AmbientShrinkRate;
         var AlterAnyone = configuration.AlterAnyone;
         var Enable = configuration.Enable;
         var GrowFromDamage = configuration.GrowFromDamage;
+        var GrowthFromDelta = configuration.GrowthFromDelta;
         var OnlyActiveInCombat = configuration.OnlyActiveInCombat;
 
         if (ImGui.Checkbox("Enable", ref Enable))
@@ -51,6 +54,22 @@ public class ConfigWindow : Window, IDisposable
         if (ImGui.Checkbox("Grow From Damage", ref GrowFromDamage))
         {
             configuration.GrowFromDamage = GrowFromDamage;
+            if (GrowFromDamage)
+            {
+                GrowthFromDelta = false;
+                configuration.GrowthFromDelta = false;
+            }
+            configuration.Save();
+        }
+
+        if (ImGui.Checkbox("Growth From Delta", ref GrowthFromDelta))
+        {
+            configuration.GrowthFromDelta = GrowthFromDelta;
+            if (GrowthFromDelta)
+            {
+                GrowFromDamage = false;
+                configuration.GrowFromDamage = false;
+            }
             configuration.Save();
         }
 
@@ -70,10 +89,24 @@ public class ConfigWindow : Window, IDisposable
             configuration.Save();
         }
 
-        if (GrowFromDamage && ImGui.DragFloat("Maximum Size Multiplier", ref maxScaleMultiplier, 0.1F, 0.01F, 10.00F))
+        if (GrowFromDamage && ImGui.DragFloat("Maximum Size Multiplier", ref maxScaleMultiplier, 0.1F, 1.00F, 10.00F))
         {
             if (maxScaleMultiplier < 1.00F){ maxScaleMultiplier = 1.00F; }
             configuration.MaxScaleMultiplier = maxScaleMultiplier;
+            configuration.Save();
+        }
+
+        if (GrowthFromDelta && ImGui.DragFloat("Damage Growth Multiplier", ref deltaGrowthMultiplier, 0.1F, 0.00F, 10.00F))
+        {
+            if (deltaGrowthMultiplier < 0.00F){ deltaGrowthMultiplier = 0.00F; }
+            configuration.DeltaGrowthMultiplier = deltaGrowthMultiplier;
+            configuration.Save();
+        }
+
+        if (GrowthFromDelta && ImGui.DragFloat("Ambient Shrink Per Second", ref ambientShrinkRate, 0.01F, 0.00F, 10.00F))
+        {
+            if (ambientShrinkRate < 0.00F){ ambientShrinkRate = 0.00F; }
+            configuration.AmbientShrinkRate = ambientShrinkRate;
             configuration.Save();
         }
 
@@ -82,10 +115,13 @@ public class ConfigWindow : Window, IDisposable
             configuration.AlterAnyone = false;
             configuration.MinScaleMultiplier = 0.1f;
             configuration.MaxScaleMultiplier = 1.0f;
+            configuration.DeltaGrowthMultiplier = 1.0f;
+            configuration.AmbientShrinkRate = 0.05f;
             configuration.Speed = 2.0f;
             configuration.Enable = true;
             configuration.OnlyActiveInCombat = false;
             configuration.GrowFromDamage = false;
+            configuration.GrowthFromDelta = false;
             configuration.Save();
         }
         

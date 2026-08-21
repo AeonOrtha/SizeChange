@@ -4,7 +4,8 @@ on:
   push:
     tags-ignore:
       - testing_*
-
+permissions:
+  contents: write
 jobs:
   build:
     runs-on: windows-latest
