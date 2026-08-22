@@ -1,5 +1,6 @@
 using Dalamud.Configuration;
 using System;
+using System.Collections.Generic;
 
 namespace SizeChange;
 
@@ -8,8 +9,10 @@ public class Configuration : IPluginConfiguration
 {
     public int Version { get; set; } = 0;
     
-    // if true will shrink or grow any player
-    public bool AlterAnyone { get; set; } = false;
+    // Apply SizeChange to the local player.
+    public bool AffectSelf { get; set; } = true;
+    // Exact, case-insensitive player names that SizeChange should affect.
+    public List<string> TrackedPlayerNames { get; set; } = new();
     // the speed at which the model scales, higher is faster
     public float Speed { get; set; } = 2.0f;
     // the minimum size of the model
@@ -46,6 +49,21 @@ public class Configuration : IPluginConfiguration
         if (Speed <= 0)
         {
             Speed = 0.1f;
+        }
+
+        TrackedPlayerNames ??= new List<string>();
+        var uniqueNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        for (int index = 0; index < TrackedPlayerNames.Count;)
+        {
+            string playerName = TrackedPlayerNames[index].Trim();
+            if (playerName.Length == 0 || !uniqueNames.Add(playerName))
+            {
+                TrackedPlayerNames.RemoveAt(index);
+                continue;
+            }
+
+            TrackedPlayerNames[index] = playerName;
+            index++;
         }
         
         Plugin.PluginInterface.SavePluginConfig(this);

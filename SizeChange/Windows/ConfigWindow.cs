@@ -7,7 +7,10 @@ namespace SizeChange.Windows;
 
 public class ConfigWindow : Window, IDisposable
 {
+    private readonly Plugin plugin;
     private readonly Configuration configuration;
+    private string trackedPlayerNameInput = string.Empty;
+    private string trackedPlayerInputError = string.Empty;
     
     public ConfigWindow(Plugin plugin) : base("SizeChange Config")
     {
@@ -15,7 +18,9 @@ public class ConfigWindow : Window, IDisposable
         //Size = new Vector2(350, 280);
         SizeCondition = ImGuiCond.Always;
 
+        this.plugin = plugin;
         configuration = plugin.Configuration;
+        configuration.TrackedPlayerNames ??= new();
     }
 
     public void Dispose() { }
@@ -32,7 +37,7 @@ public class ConfigWindow : Window, IDisposable
         var outOfCombatDecayMultiplier = configuration.OutOfCombatDecayMultiplier;
         var enableDeltaHeightOffset = configuration.EnableDeltaHeightOffset;
         var deltaHeightOffsetPerScale = configuration.DeltaHeightOffsetPerScale;
-        var AlterAnyone = configuration.AlterAnyone;
+        var affectSelf = configuration.AffectSelf;
         var Enable = configuration.Enable;
         var GrowFromDamage = configuration.GrowFromDamage;
         var GrowthFromDelta = configuration.GrowthFromDelta;
@@ -44,11 +49,15 @@ public class ConfigWindow : Window, IDisposable
             configuration.Save();
         }
         
-        if (ImGui.Checkbox("Scale Anyone", ref AlterAnyone))
+        string localPlayerName =
+            Plugin.ObjectTable.LocalPlayer?.Name.TextValue ?? "Not logged in";
+        if (ImGui.Checkbox($"Grow Self ({localPlayerName})", ref affectSelf))
         {
-            configuration.AlterAnyone = AlterAnyone;
+            configuration.AffectSelf = affectSelf;
             configuration.Save();
         }
+
+        DrawTrackedPlayers();
 
         if (ImGui.Checkbox("Only Active in Combat", ref OnlyActiveInCombat))
         {
@@ -153,7 +162,9 @@ public class ConfigWindow : Window, IDisposable
 
         if (ImGui.Button("Default")) 
         {
-            configuration.AlterAnyone = false;
+            configuration.AffectSelf = true;
+            configuration.TrackedPlayerNames.Clear();
+            plugin.InvalidateTrackedPlayerCache();
             configuration.MinScaleMultiplier = 0.1f;
             configuration.MaxScaleMultiplier = 1.0f;
             configuration.DeltaGrowthMultiplier = 1.0f;
@@ -172,5 +183,80 @@ public class ConfigWindow : Window, IDisposable
         }
         
         ImGui.Text("This plugin is disabled in PVP");
+    }
+
+    private void DrawTrackedPlayers()
+    {
+        ImGui.Separator();
+        ImGui.Text("Specific Players");
+        ImGui.TextWrapped(
+            "Add players as Character Name@Home World. Saved names are always active until removed.");
+
+        bool submitted = ImGui.InputText(
+            "Character Name@Home World",
+            ref trackedPlayerNameInput,
+            64,
+            ImGuiInputTextFlags.EnterReturnsTrue);
+        ImGui.SameLine();
+        if (ImGui.Button("+") || submitted)
+        {
+            AddTrackedPlayer();
+        }
+
+        if (trackedPlayerInputError.Length > 0)
+        {
+            ImGui.TextColored(
+                new Vector4(1f, 0.35f, 0.35f, 1f),
+                trackedPlayerInputError);
+        }
+
+        for (int index = 0; index < configuration.TrackedPlayerNames.Count; index++)
+        {
+            ImGui.TextUnformatted(configuration.TrackedPlayerNames[index]);
+            ImGui.SameLine();
+            if (ImGui.SmallButton($"Remove##tracked-player-remove-{index}"))
+            {
+                configuration.TrackedPlayerNames.RemoveAt(index);
+                configuration.Save();
+                plugin.InvalidateTrackedPlayerCache();
+                index--;
+            }
+        }
+    }
+
+    private void AddTrackedPlayer()
+    {
+        string playerName = trackedPlayerNameInput.Trim();
+        if (playerName.Length == 0)
+        {
+            trackedPlayerInputError = "Enter a player as Character Name@Home World.";
+            return;
+        }
+
+        int separatorIndex = playerName.LastIndexOf('@');
+        bool validIdentity = separatorIndex > 0 &&
+                             separatorIndex < playerName.Length - 1;
+        if (!validIdentity)
+        {
+            trackedPlayerInputError = "Use the format Character Name@Home World.";
+            return;
+        }
+
+        bool alreadyTracked = configuration.TrackedPlayerNames.Exists(
+            trackedPlayerName => string.Equals(
+                trackedPlayerName,
+                playerName,
+                StringComparison.OrdinalIgnoreCase));
+        if (!alreadyTracked)
+        {
+            configuration.TrackedPlayerNames.Add(playerName);
+            configuration.Save();
+            plugin.InvalidateTrackedPlayerCache();
+        }
+
+        trackedPlayerInputError = alreadyTracked
+            ? "That player is already in the list."
+            : string.Empty;
+        trackedPlayerNameInput = string.Empty;
     }
 }

@@ -14,6 +14,7 @@ using Dalamud.Game.ClientState.Conditions;
 using Dalamud.Game.ClientState.Objects.Enums;
 using Dalamud.Game.ClientState.Objects.SubKinds;
 using Dalamud.Game.ClientState.Objects.Types;
+using Lumina.Extensions;
 
 namespace SizeChange;
 
@@ -42,12 +43,17 @@ public sealed class Plugin : IDalamudPlugin
     private const string CommandName_Scale = "/scale";
     private const string Parameter_Enable = "enable";
     private const string Parameter_Disable = "disable";
+    private const float TrackedPlayerRefreshIntervalSeconds = 1.0f;
 
     public Configuration Configuration { get; init; }
 
     public readonly WindowSystem WindowSystem = new("SizeChange");
     private ConfigWindow ConfigWindow { get; init; }
     private Dictionary<uint, SCCharacterState> CharacterIdToLastScaleMap = new Dictionary<uint, SCCharacterState>();
+    private readonly Dictionary<string, uint> TrackedPlayerEntityIds =
+        new(StringComparer.OrdinalIgnoreCase);
+    private float TrackedPlayerRefreshElapsed = TrackedPlayerRefreshIntervalSeconds;
+    private bool TrackedPlayerRefreshRequested = true;
     public Plugin()
     {
         Framework.Update += OnFrameworkUpdate;
@@ -177,19 +183,64 @@ public sealed class Plugin : IDalamudPlugin
             !Condition[ConditionFlag.InCombat];
         
         var player = ObjectTable.LocalPlayer;
-            if (player == null) return;
+        if (player == null) return;
 
-        foreach (var thing in ObjectTable.PlayerObjects)
+        float deltaSeconds = (float)Framework.UpdateDelta.TotalSeconds;
+        TrackedPlayerRefreshElapsed += deltaSeconds;
+        if (TrackedPlayerRefreshRequested ||
+            TrackedPlayerRefreshElapsed >= TrackedPlayerRefreshIntervalSeconds)
         {
-            var actor = thing;
-            if (actor == null) continue;
-            bool isLocalPlayer = ((Character*)player.Address)->EntityId == ((Character*)thing.Address)->EntityId;
-            
-            AdjustScale(
-                (Character*)actor.Address,
-                Configuration.GrowFromDamage,
-                Configuration.GrowthFromDelta,
-                disable || (!isLocalPlayer && !Configuration.AlterAnyone),
+            RefreshTrackedPlayerCache();
+        }
+
+        var processedEntityIds = new HashSet<uint>();
+        var localActor = (Character*)player.Address;
+        ProcessSelectedActor(
+            localActor,
+            Configuration.AffectSelf,
+            disable,
+            outOfCombat);
+        processedEntityIds.Add(localActor->EntityId);
+
+        foreach (var trackedPlayer in TrackedPlayerEntityIds)
+        {
+            var gameObject = ObjectTable.SearchByEntityId(trackedPlayer.Value);
+            if (gameObject is not IPlayerCharacter playerCharacter ||
+                !string.Equals(
+                    GetPlayerIdentity(playerCharacter),
+                    trackedPlayer.Key,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                TrackedPlayerRefreshRequested = true;
+                continue;
+            }
+
+            var actor = (Character*)playerCharacter.Address;
+            ProcessSelectedActor(actor, true, disable, outOfCombat);
+            processedEntityIds.Add(actor->EntityId);
+        }
+
+        // Return actors that were removed from the saved list, without
+        // scanning every currently spawned player on every framework tick.
+        var previousEntityIds = new List<uint>(CharacterIdToLastScaleMap.Keys);
+        foreach (uint entityId in previousEntityIds)
+        {
+            if (processedEntityIds.Contains(entityId))
+            {
+                continue;
+            }
+
+            var gameObject = ObjectTable.SearchByEntityId(entityId);
+            if (gameObject == null)
+            {
+                CharacterIdToLastScaleMap.Remove(entityId);
+                continue;
+            }
+
+            ProcessSelectedActor(
+                (Character*)gameObject.Address,
+                false,
+                disable,
                 outOfCombat);
         }
     }
@@ -227,7 +278,10 @@ public sealed class Plugin : IDalamudPlugin
             {
                 charState = new SCCharacterState
                 {
-                    PlayerScale = 1.0f,
+                    // Preserve the scale supplied by the game or another
+                    // appearance plugin as this actor's individual base.
+                    PlayerScale = scale,
+                    PreviousScale = scale,
                     GrowthMultiplier = 1.0f
                 };
             }
@@ -357,6 +411,108 @@ public sealed class Plugin : IDalamudPlugin
         }
 
         charState.LastAppliedDrawOffsetY = actor->GameObject.DrawOffset.Y;
+    }
+
+    private void RefreshTrackedPlayerCache()
+    {
+        TrackedPlayerEntityIds.Clear();
+        TrackedPlayerRefreshElapsed = 0f;
+        TrackedPlayerRefreshRequested = false;
+
+        if (Configuration.TrackedPlayerNames == null ||
+            Configuration.TrackedPlayerNames.Count == 0)
+        {
+            return;
+        }
+
+        var desiredIdentities = new HashSet<string>(
+            Configuration.TrackedPlayerNames,
+            StringComparer.OrdinalIgnoreCase);
+        uint localPlayerEntityId = ObjectTable.LocalPlayer?.EntityId ?? 0;
+
+        // This is the only full player-object scan. It runs on demand and at
+        // most once per second, not on every framework update.
+        foreach (var gameObject in ObjectTable.PlayerObjects)
+        {
+            if (gameObject is not IPlayerCharacter playerCharacter ||
+                playerCharacter.EntityId == localPlayerEntityId)
+            {
+                continue;
+            }
+
+            string identity = GetPlayerIdentity(playerCharacter);
+            if (desiredIdentities.Contains(identity))
+            {
+                TrackedPlayerEntityIds[identity] = playerCharacter.EntityId;
+            }
+        }
+    }
+
+    private unsafe void ProcessSelectedActor(
+        Character* actor,
+        bool isSelected,
+        bool disable,
+        bool outOfCombat)
+    {
+        if (actor == null ||
+            (!isSelected &&
+             !CharacterIdToLastScaleMap.ContainsKey(actor->EntityId)))
+        {
+            return;
+        }
+
+        AdjustScale(
+            actor,
+            Configuration.GrowFromDamage,
+            Configuration.GrowthFromDelta,
+            disable || !isSelected,
+            outOfCombat);
+
+        if (!isSelected)
+        {
+            RemoveStateAfterReturn(actor);
+        }
+    }
+
+    private static string GetPlayerIdentity(IPlayerCharacter playerCharacter)
+        => $"{playerCharacter.Name.TextValue}@" +
+           playerCharacter.HomeWorld.Value.Name.ExtractText();
+
+    internal void InvalidateTrackedPlayerCache()
+        => TrackedPlayerRefreshRequested = true;
+
+    private unsafe void RemoveStateAfterReturn(Character* actor)
+    {
+        if (!CharacterIdToLastScaleMap.TryGetValue(actor->EntityId, out var charState))
+        {
+            return;
+        }
+
+        var draw = (CharacterBase*)actor->DrawObject;
+        if (draw == null ||
+            MathF.Abs(draw->Scale.Y - charState.PlayerScale) >= 0.001f ||
+            (charState.HasDrawOffset &&
+             MathF.Abs(charState.LastAppliedDrawOffsetY - charState.BaseDrawOffsetY) >= 0.001f))
+        {
+            return;
+        }
+
+        draw->Scale = new Vector3(
+            charState.PlayerScale,
+            charState.PlayerScale,
+            charState.PlayerScale);
+        actor->Scale = charState.PlayerScale;
+
+        if (charState.HasDrawOffset)
+        {
+            var currentOffset = actor->GameObject.DrawOffset;
+            actor->GameObject.SetDrawOffset(
+                currentOffset.X,
+                charState.BaseDrawOffsetY,
+                currentOffset.Z);
+        }
+
+        CharacterIdToLastScaleMap.Remove(actor->EntityId);
     }
     
     public void ToggleConfigUi() => ConfigWindow.Toggle();
