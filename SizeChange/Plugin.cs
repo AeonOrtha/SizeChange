@@ -194,7 +194,7 @@ public sealed class Plugin : IDalamudPlugin
         }
     }
 
-    // find the actor's health and shield value and uses that to adjust the model's scale
+    // find the actor's health and shield value and uses that to adjust the model's scale 
     public unsafe void AdjustScale(
         Character* actor,
         bool growFromDamage,

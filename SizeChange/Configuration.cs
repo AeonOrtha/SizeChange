@@ -1,4 +1,4 @@
-﻿using Dalamud.Configuration;
+using Dalamud.Configuration;
 using System;
 
 namespace SizeChange;
@@ -21,7 +21,7 @@ public class Configuration : IPluginConfiguration
     // optionally cap the total multiplier accumulated by Growth From Delta
     public bool LimitDeltaGrowth { get; set; } = false;
     public float DeltaMaxScaleMultiplier { get; set; } = 5.0f;
-    // amount removed from accumulated damage growth per second
+    // amount removed from accumulated damage growth per second 
     public float AmbientShrinkRate { get; set; } = 0.05f;
     // multiplier applied to ambient shrink after combat ends
     public float OutOfCombatDecayMultiplier { get; set; } = 10.0f;

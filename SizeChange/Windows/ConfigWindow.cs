@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface.Windowing;
@@ -151,7 +151,7 @@ public class ConfigWindow : Window, IDisposable
             configuration.Save();
         }
 
-        if (ImGui.Button("Default"))
+        if (ImGui.Button("Default")) 
         {
             configuration.AlterAnyone = false;
             configuration.MinScaleMultiplier = 0.1f;
