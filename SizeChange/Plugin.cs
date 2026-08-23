@@ -364,7 +364,8 @@ public sealed class Plugin : IDalamudPlugin
 
         charState.ActorGroup = actorGroup;
 
-        if (MathF.Abs(previousScale - scale) > 0.0001f)
+        if (!settings.GrowthFromDelta &&
+            MathF.Abs(previousScale - scale) > 0.0001f)
         {
             charState.PlayerScale = scale;
         }
@@ -430,7 +431,18 @@ public sealed class Plugin : IDalamudPlugin
                             settings.MinScaleMultiplier,
                             float.PositiveInfinity) * charState.PlayerScale;
 
+        float maximumAllowedScale = float.PositiveInfinity;
+        if (settings.GrowthFromDelta && settings.LimitDeltaGrowth)
+        {
+            maximumAllowedScale =
+                charState.PlayerScale * settings.DeltaMaxScaleMultiplier;
+            targetScale = Math.Min(targetScale, maximumAllowedScale);
+        }
+
         scale = float.Lerp(previousScale, targetScale, settings.Speed / 100f);
+        // Enforce the cap on the final visible scale as well as the target. This
+        // immediately brings an actor back inside a newly enabled or lowered cap.
+        scale = Math.Min(scale, maximumAllowedScale);
         draw->Scale = new Vector3(scale, scale, scale);
         actor->Scale = scale;
 
@@ -471,13 +483,9 @@ public sealed class Plugin : IDalamudPlugin
             charState.LastAppliedDrawOffsetY = currentOffset.Y;
             charState.HasDrawOffset = true;
         }
-        else if (MathF.Abs(currentOffset.Y - charState.LastAppliedDrawOffsetY) > tolerance)
-        {
-            // Preserve legitimate base-offset changes made by the game or another
-            // plugin instead of accumulating SizeChange's own offset.
-            charState.BaseDrawOffsetY = currentOffset.Y;
-        }
-
+        // Keep this captured base stable while the actor is managed. Re-learning
+        // another plugin's rewritten offset here can repeatedly add our own
+        // height contribution and launch a listed actor upward every frame.
         float targetY = charState.BaseDrawOffsetY + desiredHeightOffset;
         if (MathF.Abs(currentOffset.Y - targetY) > tolerance)
         {
