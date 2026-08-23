@@ -13,6 +13,8 @@ public class ConfigWindow : Window, IDisposable
     private string trackedPlayerInputError = string.Empty;
     private string trackedMonsterNameInput = string.Empty;
     private string trackedMonsterInputError = string.Empty;
+    private string growthSoundTestResult = string.Empty;
+    private bool growthSoundTestSucceeded;
 
     public ConfigWindow(Plugin plugin) : base("SizeChange Config")
     {
@@ -413,7 +415,7 @@ public class ConfigWindow : Window, IDisposable
         {
             ImGui.TextWrapped(
                 "The SCD is played positionally at the actor that actually gained size. " +
-                "Self uses the Player sound-volume rule; added players and monsters use Other.");
+                "It uses FFXIV's native SCD preview route.");
 
             string deltaGrowthSoundPath = settings.DeltaGrowthSoundPath;
             if (ImGui.InputText(
@@ -422,6 +424,7 @@ public class ConfigWindow : Window, IDisposable
                     256))
             {
                 settings.DeltaGrowthSoundPath = deltaGrowthSoundPath;
+                growthSoundTestResult = string.Empty;
                 configuration.Save();
             }
 
@@ -435,7 +438,37 @@ public class ConfigWindow : Window, IDisposable
             {
                 settings.DeltaGrowthSoundVolume =
                     Math.Clamp(deltaGrowthSoundVolume, 0f, 1f);
+                growthSoundTestResult = string.Empty;
                 configuration.Save();
+            }
+
+            int deltaGrowthSoundIndex = settings.DeltaGrowthSoundIndex;
+            if (ImGui.DragInt(
+                    $"SCD Sound Index##{id}",
+                    ref deltaGrowthSoundIndex,
+                    1f,
+                    0,
+                    255))
+            {
+                settings.DeltaGrowthSoundIndex = Math.Max(0, deltaGrowthSoundIndex);
+                growthSoundTestResult = string.Empty;
+                configuration.Save();
+            }
+
+            if (ImGui.Button($"Test Sound at Yourself##{id}"))
+            {
+                growthSoundTestResult = plugin.TestDeltaGrowthSound(settings);
+                growthSoundTestSucceeded =
+                    growthSoundTestResult.StartsWith("Playback request accepted", StringComparison.Ordinal);
+            }
+
+            if (growthSoundTestResult.Length > 0)
+            {
+                ImGui.TextColored(
+                    growthSoundTestSucceeded
+                        ? new Vector4(0.35f, 1f, 0.45f, 1f)
+                        : new Vector4(1f, 0.35f, 0.35f, 1f),
+                    growthSoundTestResult);
             }
         }
     }
