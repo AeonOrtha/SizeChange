@@ -45,6 +45,8 @@ public sealed class Plugin : IDalamudPlugin
     [PluginService] internal static IFramework Framework { get; private set; } = null!;
     [PluginService] internal static IClientState ClientState { get; private set; } = null!;
     [PluginService] internal static ICondition Condition { get; private set; } = null!;
+    [PluginService] internal static IDataManager DataManager { get; private set; } = null!;
+    [PluginService] internal static IGameInteropProvider GameInteropProvider { get; private set; } = null!;
 
     private const string CommandName_SizeChange = "/sizechange";
     private const string CommandName_Scale = "/scale";
@@ -60,6 +62,7 @@ public sealed class Plugin : IDalamudPlugin
     private readonly Dictionary<string, uint> TrackedPlayerEntityIds =
         new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<uint> TrackedMonsterEntityIds = new();
+    private readonly GrowthSoundPlayer GrowthSoundPlayer;
     private float TrackedActorRefreshElapsed = TrackedActorRefreshIntervalSeconds;
     private bool TrackedActorRefreshRequested = true;
 
@@ -70,6 +73,8 @@ public sealed class Plugin : IDalamudPlugin
         {
             Configuration.Save();
         }
+
+        GrowthSoundPlayer = new GrowthSoundPlayer();
 
         ConfigWindow = new ConfigWindow(this);
         WindowSystem.AddWindow(ConfigWindow);
@@ -94,6 +99,7 @@ public sealed class Plugin : IDalamudPlugin
     {
         Framework.Update -= OnFrameworkUpdate;
         RestoreCharacterTransforms();
+        GrowthSoundPlayer.Dispose();
 
         PluginInterface.UiBuilder.Draw -= WindowSystem.Draw;
         PluginInterface.UiBuilder.OpenConfigUi -= ToggleConfigUi;
@@ -377,6 +383,8 @@ public sealed class Plugin : IDalamudPlugin
             charState.HasPreviousHealth = true;
         }
 
+        bool receivedGrowthDamage = false;
+        float growthMultiplierBeforeDamage = charState.GrowthMultiplier;
         if (settings.GrowthFromDelta && !disable && !outOfCombat)
         {
             // Only add growth while the effect is active. Health is sampled while
@@ -385,8 +393,13 @@ public sealed class Plugin : IDalamudPlugin
             if (healthLost > 0f)
             {
                 float healthLostRatio = healthLost / maxhp;
-                charState.GrowthMultiplier +=
+                float addedGrowth =
                     healthLostRatio * settings.DeltaGrowthMultiplier;
+                if (addedGrowth > 0f)
+                {
+                    charState.GrowthMultiplier += addedGrowth;
+                    receivedGrowthDamage = true;
+                }
             }
         }
 
@@ -395,6 +408,15 @@ public sealed class Plugin : IDalamudPlugin
             charState.GrowthMultiplier = Math.Min(
                 charState.GrowthMultiplier,
                 settings.DeltaMaxScaleMultiplier);
+        }
+
+        // Play once for a sampled damage event, and only if that event was able
+        // to increase the multiplier. Hits received at the configured cap do not
+        // retrigger the sound.
+        if (receivedGrowthDamage &&
+            charState.GrowthMultiplier > growthMultiplierBeforeDamage)
+        {
+            TryPlayDeltaGrowthSound(actor, settings, false);
         }
 
         // Ambient decay is exclusive to Growth From Delta.
@@ -467,6 +489,92 @@ public sealed class Plugin : IDalamudPlugin
         charState.PreviousHealth = health;
         charState.PreviousScale = scale;
         CharacterIdToLastScaleMap[actor->EntityId] = charState;
+    }
+
+    internal unsafe string TestDeltaGrowthSound(GrowthSettings settings)
+    {
+        var localPlayer = ObjectTable.LocalPlayer;
+        if (localPlayer == null)
+        {
+            return "Cannot test: the local player is unavailable.";
+        }
+
+        string? error = TryPlayDeltaGrowthSound(
+            (Character*)localPlayer.Address,
+            settings,
+            true);
+        if (error != null)
+        {
+            return error;
+        }
+
+        int soundCount = GetScdSoundCount(settings.DeltaGrowthSoundPath);
+        return $"Playback request accepted. SCD entries: {soundCount}; " +
+               $"requested index: {settings.DeltaGrowthSoundIndex}.";
+    }
+
+    private unsafe string? TryPlayDeltaGrowthSound(
+        Character* actor,
+        GrowthSettings settings,
+        bool ignoreEnabled)
+    {
+        if ((!ignoreEnabled && !settings.EnableDeltaGrowthSound) ||
+            settings.DeltaGrowthSoundVolume <= 0f)
+        {
+            return "Sound is disabled or its volume is zero.";
+        }
+
+        string path = settings.DeltaGrowthSoundPath.Trim().Replace('\\', '/');
+        if (!path.StartsWith("sound/", StringComparison.OrdinalIgnoreCase) ||
+            !path.EndsWith(".scd", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Invalid path: use a game path beginning with sound/ and ending in .scd.";
+        }
+
+        if (!DataManager.FileExists(path))
+        {
+            return $"SCD was not found in the game data: {path}";
+        }
+
+        int soundCount = GetScdSoundCount(path);
+        if (soundCount <= 0)
+        {
+            return "The SCD was found, but it contains no playable sound entries.";
+        }
+
+        if (settings.DeltaGrowthSoundIndex >= soundCount)
+        {
+            return $"Sound index {settings.DeltaGrowthSoundIndex} is outside this " +
+                   $"SCD's range of 0 to {soundCount - 1}.";
+        }
+
+        var position = actor->GameObject.Position;
+        if (!float.IsFinite(position.X) ||
+            !float.IsFinite(position.Y) ||
+            !float.IsFinite(position.Z))
+        {
+            return "The actor has an invalid world position.";
+        }
+
+        return GrowthSoundPlayer.TryPlay(
+            path,
+            settings.DeltaGrowthSoundIndex,
+            settings.DeltaGrowthSoundVolume,
+            position);
+    }
+
+    private static int GetScdSoundCount(string path)
+    {
+        // Standard SCD files have a 0x30-byte header followed by a little-endian
+        // Int16 sound-entry count. Reading only that count avoids shipping a full
+        // SCD parser merely to validate a configured index.
+        byte[]? data = DataManager.GetFile(path)?.Data;
+        if (data == null || data.Length < 0x32)
+        {
+            return 0;
+        }
+
+        return BitConverter.ToUInt16(data, 0x30);
     }
 
     private unsafe void ApplyHeightOffset(
