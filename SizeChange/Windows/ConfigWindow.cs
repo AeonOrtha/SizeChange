@@ -401,5 +401,42 @@ public class ConfigWindow : Window, IDisposable
                 configuration.Save();
             }
         }
+
+        bool enableDeltaGrowthSound = settings.EnableDeltaGrowthSound;
+        if (ImGui.Checkbox($"Play Sound When Delta Growth Triggers##{id}", ref enableDeltaGrowthSound))
+        {
+            settings.EnableDeltaGrowthSound = enableDeltaGrowthSound;
+            configuration.Save();
+        }
+
+        if (settings.EnableDeltaGrowthSound)
+        {
+            ImGui.TextWrapped(
+                "The SCD is played positionally at the actor that actually gained size. " +
+                "Self uses the Player sound-volume rule; added players and monsters use Other.");
+
+            string deltaGrowthSoundPath = settings.DeltaGrowthSoundPath;
+            if (ImGui.InputText(
+                    $"Growth SCD Path##{id}",
+                    ref deltaGrowthSoundPath,
+                    256))
+            {
+                settings.DeltaGrowthSoundPath = deltaGrowthSoundPath;
+                configuration.Save();
+            }
+
+            float deltaGrowthSoundVolume = settings.DeltaGrowthSoundVolume;
+            if (ImGui.DragFloat(
+                    $"Growth Sound Volume##{id}",
+                    ref deltaGrowthSoundVolume,
+                    0.01f,
+                    0.00f,
+                    1.00f))
+            {
+                settings.DeltaGrowthSoundVolume =
+                    Math.Clamp(deltaGrowthSoundVolume, 0f, 1f);
+                configuration.Save();
+            }
+        }
     }
 }

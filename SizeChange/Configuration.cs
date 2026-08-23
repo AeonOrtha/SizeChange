@@ -7,6 +7,9 @@ namespace SizeChange;
 [Serializable]
 public class GrowthSettings
 {
+    public const string DefaultDeltaGrowthSoundPath =
+        "sound/vfx/monster5/se_vfx_monster_inferno_lpowerrise_c.scd";
+
     public float Speed { get; set; } = 2.0f;
     public float MinScaleMultiplier { get; set; } = 0.1f;
     public float MaxScaleMultiplier { get; set; } = 1.0f;
@@ -17,6 +20,9 @@ public class GrowthSettings
     public float OutOfCombatDecayMultiplier { get; set; } = 10.0f;
     public bool EnableDeltaHeightOffset { get; set; }
     public float DeltaHeightOffsetPerScale { get; set; } = 0.5f;
+    public bool EnableDeltaGrowthSound { get; set; }
+    public string DeltaGrowthSoundPath { get; set; } = DefaultDeltaGrowthSoundPath;
+    public float DeltaGrowthSoundVolume { get; set; } = 1.0f;
     public bool OnlyActiveInCombat { get; set; }
     public bool GrowFromDamage { get; set; }
     public bool GrowthFromDelta { get; set; }
@@ -31,6 +37,10 @@ public class GrowthSettings
         AmbientShrinkRate = Math.Max(0f, AmbientShrinkRate);
         OutOfCombatDecayMultiplier = Math.Max(1f, OutOfCombatDecayMultiplier);
         DeltaHeightOffsetPerScale = Math.Max(0f, DeltaHeightOffsetPerScale);
+        DeltaGrowthSoundPath = string.IsNullOrWhiteSpace(DeltaGrowthSoundPath)
+            ? DefaultDeltaGrowthSoundPath
+            : DeltaGrowthSoundPath.Trim().Replace('\\', '/');
+        DeltaGrowthSoundVolume = Math.Clamp(DeltaGrowthSoundVolume, 0f, 1f);
 
         if (GrowFromDamage && GrowthFromDelta)
         {
@@ -53,6 +63,9 @@ public class GrowthSettings
             OutOfCombatDecayMultiplier = settings.OutOfCombatDecayMultiplier,
             EnableDeltaHeightOffset = settings.EnableDeltaHeightOffset,
             DeltaHeightOffsetPerScale = settings.DeltaHeightOffsetPerScale,
+            EnableDeltaGrowthSound = settings.EnableDeltaGrowthSound,
+            DeltaGrowthSoundPath = settings.DeltaGrowthSoundPath,
+            DeltaGrowthSoundVolume = settings.DeltaGrowthSoundVolume,
             OnlyActiveInCombat = settings.OnlyActiveInCombat,
             GrowFromDamage = settings.GrowFromDamage,
             GrowthFromDelta = settings.GrowthFromDelta,
