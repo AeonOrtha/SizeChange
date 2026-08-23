@@ -5,67 +5,186 @@ using System.Collections.Generic;
 namespace SizeChange;
 
 [Serializable]
+public class GrowthSettings
+{
+    public float Speed { get; set; } = 2.0f;
+    public float MinScaleMultiplier { get; set; } = 0.1f;
+    public float MaxScaleMultiplier { get; set; } = 1.0f;
+    public float DeltaGrowthMultiplier { get; set; } = 1.0f;
+    public bool LimitDeltaGrowth { get; set; }
+    public float DeltaMaxScaleMultiplier { get; set; } = 5.0f;
+    public float AmbientShrinkRate { get; set; } = 0.05f;
+    public float OutOfCombatDecayMultiplier { get; set; } = 10.0f;
+    public bool EnableDeltaHeightOffset { get; set; }
+    public float DeltaHeightOffsetPerScale { get; set; } = 0.5f;
+    public bool OnlyActiveInCombat { get; set; }
+    public bool GrowFromDamage { get; set; }
+    public bool GrowthFromDelta { get; set; }
+
+    public void Validate()
+    {
+        Speed = Math.Clamp(Speed, 0.1f, 100f);
+        MinScaleMultiplier = Math.Clamp(MinScaleMultiplier, 0.01f, 1f);
+        MaxScaleMultiplier = Math.Max(1f, MaxScaleMultiplier);
+        DeltaGrowthMultiplier = Math.Max(0f, DeltaGrowthMultiplier);
+        DeltaMaxScaleMultiplier = Math.Max(1f, DeltaMaxScaleMultiplier);
+        AmbientShrinkRate = Math.Max(0f, AmbientShrinkRate);
+        OutOfCombatDecayMultiplier = Math.Max(1f, OutOfCombatDecayMultiplier);
+        DeltaHeightOffsetPerScale = Math.Max(0f, DeltaHeightOffsetPerScale);
+
+        if (GrowFromDamage && GrowthFromDelta)
+        {
+            GrowFromDamage = false;
+        }
+    }
+
+    public static GrowthSettings Defaults() => new();
+
+    public static GrowthSettings CopyOf(GrowthSettings settings)
+        => new()
+        {
+            Speed = settings.Speed,
+            MinScaleMultiplier = settings.MinScaleMultiplier,
+            MaxScaleMultiplier = settings.MaxScaleMultiplier,
+            DeltaGrowthMultiplier = settings.DeltaGrowthMultiplier,
+            LimitDeltaGrowth = settings.LimitDeltaGrowth,
+            DeltaMaxScaleMultiplier = settings.DeltaMaxScaleMultiplier,
+            AmbientShrinkRate = settings.AmbientShrinkRate,
+            OutOfCombatDecayMultiplier = settings.OutOfCombatDecayMultiplier,
+            EnableDeltaHeightOffset = settings.EnableDeltaHeightOffset,
+            DeltaHeightOffsetPerScale = settings.DeltaHeightOffsetPerScale,
+            OnlyActiveInCombat = settings.OnlyActiveInCombat,
+            GrowFromDamage = settings.GrowFromDamage,
+            GrowthFromDelta = settings.GrowthFromDelta,
+        };
+}
+
+[Serializable]
 public class Configuration : IPluginConfiguration
 {
-    public int Version { get; set; } = 0;
-    
-    // Apply SizeChange to the local player.
-    public bool AffectSelf { get; set; } = true;
-    // Exact, case-insensitive player names that SizeChange should affect.
-    public List<string> TrackedPlayerNames { get; set; } = new();
-    // the speed at which the model scales, higher is faster
-    public float Speed { get; set; } = 2.0f;
-    // the minimum size of the model
-    public float MinScaleMultiplier { get; set; } = 0.1f;
-    // maximum size used by the original Grow From Damage mode
-    public float MaxScaleMultiplier { get; set; } = 1.0f;
-    // amplitude applied to each detected health-loss ratio in Growth From Delta
-    public float DeltaGrowthMultiplier { get; set; } = 1.0f;
-    // optionally cap the total multiplier accumulated by Growth From Delta
-    public bool LimitDeltaGrowth { get; set; } = false;
-    public float DeltaMaxScaleMultiplier { get; set; } = 5.0f;
-    // amount removed from accumulated damage growth per second 
-    public float AmbientShrinkRate { get; set; } = 0.05f;
-    // multiplier applied to ambient shrink after combat ends
-    public float OutOfCombatDecayMultiplier { get; set; } = 10.0f;
-    // move the visual root upward as Growth From Delta increases the scale
-    public bool EnableDeltaHeightOffset { get; set; } = false;
-    // Y offset added for each visible 1x of scale above the player's base scale
-    public float DeltaHeightOffsetPerScale { get; set; } = 0.5f;
-    public bool OnlyActiveInCombat { get; set; } = false;
+    private const int CurrentVersion = 1;
+
+    public int Version { get; set; }
     public bool Enable { get; set; } = true;
-    public bool GrowFromDamage { get; set; } = false;
-    public bool GrowthFromDelta { get; set; } = false;
-    
-    public void Save()
+    public bool AffectSelf { get; set; } = true;
+
+    public GrowthSettings SelfSettings { get; set; } = GrowthSettings.Defaults();
+    public GrowthSettings PlayerSettings { get; set; } = GrowthSettings.Defaults();
+    public GrowthSettings MonsterSettings { get; set; } = GrowthSettings.Defaults();
+
+    // Players keep the existing Character Name@Home World identity format.
+    public List<string> TrackedPlayerNames { get; set; } = new();
+    // Monsters use their exact displayed battle-NPC name, case-insensitively.
+    public List<string> TrackedMonsterNames { get; set; } = new();
+
+    // Version-0 fields are retained so released 1.3.4.2 configurations can be
+    // migrated without losing the user's existing growth behavior.
+    public float Speed { get; set; } = 2.0f;
+    public float MinScaleMultiplier { get; set; } = 0.1f;
+    public float MaxScaleMultiplier { get; set; } = 1.0f;
+    public float DeltaGrowthMultiplier { get; set; } = 1.0f;
+    public bool LimitDeltaGrowth { get; set; }
+    public float DeltaMaxScaleMultiplier { get; set; } = 5.0f;
+    public float AmbientShrinkRate { get; set; } = 0.05f;
+    public float OutOfCombatDecayMultiplier { get; set; } = 10.0f;
+    public bool EnableDeltaHeightOffset { get; set; }
+    public float DeltaHeightOffsetPerScale { get; set; } = 0.5f;
+    public bool OnlyActiveInCombat { get; set; }
+    public bool GrowFromDamage { get; set; }
+    public bool GrowthFromDelta { get; set; }
+
+    public bool Migrate()
     {
-        if (MinScaleMultiplier > MaxScaleMultiplier) { MinScaleMultiplier = MaxScaleMultiplier; }
-        if (MaxScaleMultiplier < MinScaleMultiplier) { MaxScaleMultiplier = MinScaleMultiplier; }
-        if (DeltaGrowthMultiplier < 0) { DeltaGrowthMultiplier = 0.0f; }
-        if (DeltaMaxScaleMultiplier < 1.0f) { DeltaMaxScaleMultiplier = 1.0f; }
-        if (AmbientShrinkRate < 0) { AmbientShrinkRate = 0.0f; }
-        if (OutOfCombatDecayMultiplier < 1.0f) { OutOfCombatDecayMultiplier = 1.0f; }
-        if (DeltaHeightOffsetPerScale < 0) { DeltaHeightOffsetPerScale = 0.0f; }
-        if (Speed <= 0)
+        if (Version >= CurrentVersion)
         {
-            Speed = 0.1f;
+            EnsureValid();
+            return false;
         }
 
-        TrackedPlayerNames ??= new List<string>();
-        var uniqueNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        for (int index = 0; index < TrackedPlayerNames.Count;)
+        var releasedSettings = new GrowthSettings
         {
-            string playerName = TrackedPlayerNames[index].Trim();
-            if (playerName.Length == 0 || !uniqueNames.Add(playerName))
+            Speed = Speed,
+            MinScaleMultiplier = MinScaleMultiplier,
+            MaxScaleMultiplier = MaxScaleMultiplier,
+            DeltaGrowthMultiplier = DeltaGrowthMultiplier,
+            LimitDeltaGrowth = LimitDeltaGrowth,
+            DeltaMaxScaleMultiplier = DeltaMaxScaleMultiplier,
+            AmbientShrinkRate = AmbientShrinkRate,
+            OutOfCombatDecayMultiplier = OutOfCombatDecayMultiplier,
+            EnableDeltaHeightOffset = EnableDeltaHeightOffset,
+            DeltaHeightOffsetPerScale = DeltaHeightOffsetPerScale,
+            OnlyActiveInCombat = OnlyActiveInCombat,
+            GrowFromDamage = GrowFromDamage,
+            GrowthFromDelta = GrowthFromDelta,
+        };
+        releasedSettings.Validate();
+
+        SelfSettings = GrowthSettings.CopyOf(releasedSettings);
+        PlayerSettings = GrowthSettings.CopyOf(releasedSettings);
+        MonsterSettings = GrowthSettings.CopyOf(releasedSettings);
+        Version = CurrentVersion;
+        EnsureValid();
+        return true;
+    }
+
+    public bool IsMonsterTracked(string monsterName)
+    {
+        if (string.IsNullOrWhiteSpace(monsterName))
+        {
+            return false;
+        }
+
+        string candidate = monsterName.Trim();
+        foreach (string trackedName in TrackedMonsterNames)
+        {
+            if (!string.IsNullOrWhiteSpace(trackedName) &&
+                string.Equals(
+                    trackedName.Trim(),
+                    candidate,
+                    StringComparison.OrdinalIgnoreCase))
             {
-                TrackedPlayerNames.RemoveAt(index);
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public void EnsureValid()
+    {
+        SelfSettings ??= GrowthSettings.Defaults();
+        PlayerSettings ??= GrowthSettings.Defaults();
+        MonsterSettings ??= GrowthSettings.Defaults();
+        TrackedPlayerNames ??= new List<string>();
+        TrackedMonsterNames ??= new List<string>();
+
+        SelfSettings.Validate();
+        PlayerSettings.Validate();
+        MonsterSettings.Validate();
+        NormalizeNames(TrackedPlayerNames);
+        NormalizeNames(TrackedMonsterNames);
+    }
+
+    public void Save()
+    {
+        EnsureValid();
+        Plugin.PluginInterface.SavePluginConfig(this);
+    }
+
+    private static void NormalizeNames(List<string> names)
+    {
+        var uniqueNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        for (int index = 0; index < names.Count;)
+        {
+            string name = names[index]?.Trim() ?? string.Empty;
+            if (name.Length == 0 || !uniqueNames.Add(name))
+            {
+                names.RemoveAt(index);
                 continue;
             }
 
-            TrackedPlayerNames[index] = playerName;
+            names[index] = name;
             index++;
         }
-        
-        Plugin.PluginInterface.SavePluginConfig(this);
     }
 }
