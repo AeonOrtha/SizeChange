@@ -24,6 +24,7 @@ public class GrowthSettings
     public string DeltaGrowthSoundPath { get; set; } = DefaultDeltaGrowthSoundPath;
     public int DeltaGrowthSoundIndex { get; set; }
     public float DeltaGrowthSoundVolume { get; set; } = 1.0f;
+    public float DeltaGrowthSoundCooldownSeconds { get; set; } = 1.0f;
     public bool OnlyActiveInCombat { get; set; }
     public bool GrowFromDamage { get; set; }
     public bool GrowthFromDelta { get; set; }
@@ -43,6 +44,8 @@ public class GrowthSettings
             : DeltaGrowthSoundPath.Trim().Replace('\\', '/');
         DeltaGrowthSoundIndex = Math.Max(0, DeltaGrowthSoundIndex);
         DeltaGrowthSoundVolume = Math.Clamp(DeltaGrowthSoundVolume, 0f, 1f);
+        DeltaGrowthSoundCooldownSeconds =
+            Math.Clamp(DeltaGrowthSoundCooldownSeconds, 0f, 60f);
 
         if (GrowFromDamage && GrowthFromDelta)
         {
@@ -69,6 +72,7 @@ public class GrowthSettings
             DeltaGrowthSoundPath = settings.DeltaGrowthSoundPath,
             DeltaGrowthSoundIndex = settings.DeltaGrowthSoundIndex,
             DeltaGrowthSoundVolume = settings.DeltaGrowthSoundVolume,
+            DeltaGrowthSoundCooldownSeconds = settings.DeltaGrowthSoundCooldownSeconds,
             OnlyActiveInCombat = settings.OnlyActiveInCombat,
             GrowFromDamage = settings.GrowFromDamage,
             GrowthFromDelta = settings.GrowthFromDelta,

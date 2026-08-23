@@ -35,6 +35,7 @@ struct SCCharacterState
     public float BaseDrawOffsetY;
     public float LastAppliedDrawOffsetY;
     public bool HasDrawOffset;
+    public long LastDeltaGrowthSoundTick;
 }
 
 public sealed class Plugin : IDalamudPlugin
@@ -410,13 +411,25 @@ public sealed class Plugin : IDalamudPlugin
                 settings.DeltaMaxScaleMultiplier);
         }
 
-        // Play once for a sampled damage event, and only if that event was able
-        // to increase the multiplier. Hits received at the configured cap do not
-        // retrigger the sound.
+        // Play only if this damage sample actually increased growth. The
+        // per-actor cooldown prevents rapid attacks against one target from
+        // producing a sound on every framework update.
         if (receivedGrowthDamage &&
             charState.GrowthMultiplier > growthMultiplierBeforeDamage)
         {
-            TryPlayDeltaGrowthSound(actor, settings, false);
+            long currentTick = Environment.TickCount64;
+            long cooldownMilliseconds =
+                (long)(settings.DeltaGrowthSoundCooldownSeconds * 1000f);
+            bool cooldownElapsed =
+                cooldownMilliseconds <= 0 ||
+                charState.LastDeltaGrowthSoundTick == 0 ||
+                currentTick - charState.LastDeltaGrowthSoundTick >= cooldownMilliseconds;
+
+            if (cooldownElapsed &&
+                TryPlayDeltaGrowthSound(actor, settings, false) == null)
+            {
+                charState.LastDeltaGrowthSoundTick = currentTick;
+            }
         }
 
         // Ambient decay is exclusive to Growth From Delta.

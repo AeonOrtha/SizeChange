@@ -455,6 +455,25 @@ public class ConfigWindow : Window, IDisposable
                 configuration.Save();
             }
 
+            float deltaGrowthSoundCooldown =
+                settings.DeltaGrowthSoundCooldownSeconds;
+            if (ImGui.DragFloat(
+                    $"Minimum Seconds Between Sounds##{id}",
+                    ref deltaGrowthSoundCooldown,
+                    0.05f,
+                    0.00f,
+                    10.00f,
+                    "%.2f"))
+            {
+                settings.DeltaGrowthSoundCooldownSeconds =
+                    Math.Clamp(deltaGrowthSoundCooldown, 0f, 60f);
+                configuration.Save();
+            }
+
+            ImGui.TextWrapped(
+                "The cooldown is tracked separately for each actor. Set it to 0 " +
+                "to allow every detected damage event to trigger sound.");
+
             if (ImGui.Button($"Test Sound at Yourself##{id}"))
             {
                 growthSoundTestResult = plugin.TestDeltaGrowthSound(settings);
