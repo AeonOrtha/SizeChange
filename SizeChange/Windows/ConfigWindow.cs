@@ -11,186 +11,104 @@ public class ConfigWindow : Window, IDisposable
     private readonly Configuration configuration;
     private string trackedPlayerNameInput = string.Empty;
     private string trackedPlayerInputError = string.Empty;
-    
+    private string trackedMonsterNameInput = string.Empty;
+    private string trackedMonsterInputError = string.Empty;
+
     public ConfigWindow(Plugin plugin) : base("SizeChange Config")
     {
-
-        //Size = new Vector2(350, 280);
         SizeCondition = ImGuiCond.Always;
-
         this.plugin = plugin;
         configuration = plugin.Configuration;
-        configuration.TrackedPlayerNames ??= new();
+        configuration.EnsureValid();
     }
 
     public void Dispose() { }
 
     public override void Draw()
     {
-        var speed = configuration.Speed;
-        var minScaleMultiplier = configuration.MinScaleMultiplier;
-        var maxScaleMultiplier = configuration.MaxScaleMultiplier;
-        var deltaGrowthMultiplier = configuration.DeltaGrowthMultiplier;
-        var limitDeltaGrowth = configuration.LimitDeltaGrowth;
-        var deltaMaxScaleMultiplier = configuration.DeltaMaxScaleMultiplier;
-        var ambientShrinkRate = configuration.AmbientShrinkRate;
-        var outOfCombatDecayMultiplier = configuration.OutOfCombatDecayMultiplier;
-        var enableDeltaHeightOffset = configuration.EnableDeltaHeightOffset;
-        var deltaHeightOffsetPerScale = configuration.DeltaHeightOffsetPerScale;
-        var affectSelf = configuration.AffectSelf;
-        var Enable = configuration.Enable;
-        var GrowFromDamage = configuration.GrowFromDamage;
-        var GrowthFromDelta = configuration.GrowthFromDelta;
-        var OnlyActiveInCombat = configuration.OnlyActiveInCombat;
-
-        if (ImGui.Checkbox("Enable", ref Enable))
+        bool enabled = configuration.Enable;
+        if (ImGui.Checkbox("Enable SizeChange", ref enabled))
         {
-            configuration.Enable = Enable;
+            configuration.Enable = enabled;
             configuration.Save();
         }
-        
+
+        ImGui.TextWrapped(
+            "Your character, specifically added players, and specifically added monsters " +
+            "each have independent growth settings.");
+
+        if (ImGui.BeginTabBar("SizeChangeTargetProfiles"))
+        {
+            DrawSelfTab();
+            DrawPlayerTab();
+            DrawMonsterTab();
+            ImGui.EndTabBar();
+        }
+
+        ImGui.Separator();
+        ImGui.Text("This plugin is disabled in PvP.");
+    }
+
+    private void DrawSelfTab()
+    {
+        if (!ImGui.BeginTabItem("Your Character")) return;
+
+        bool affectSelf = configuration.AffectSelf;
         string localPlayerName =
             Plugin.ObjectTable.LocalPlayer?.Name.TextValue ?? "Not logged in";
-        if (ImGui.Checkbox($"Grow Self ({localPlayerName})", ref affectSelf))
+        if (ImGui.Checkbox($"Enable for Self ({localPlayerName})", ref affectSelf))
         {
             configuration.AffectSelf = affectSelf;
             configuration.Save();
         }
 
+        DrawGrowthSettings(configuration.SelfSettings, "self");
+        if (ImGui.Button("Reset Self Settings"))
+        {
+            configuration.SelfSettings = GrowthSettings.Defaults();
+            configuration.Save();
+        }
+
+        ImGui.EndTabItem();
+    }
+
+    private void DrawPlayerTab()
+    {
+        if (!ImGui.BeginTabItem("Added Players")) return;
+
         DrawTrackedPlayers();
-
-        if (ImGui.Checkbox("Only Active in Combat", ref OnlyActiveInCombat))
+        ImGui.Separator();
+        DrawGrowthSettings(configuration.PlayerSettings, "players");
+        if (ImGui.Button("Reset Player Settings"))
         {
-            configuration.OnlyActiveInCombat = OnlyActiveInCombat;
-            configuration.Save();
-        }
-        
-        if (ImGui.Checkbox("Grow From Damage", ref GrowFromDamage))
-        {
-            configuration.GrowFromDamage = GrowFromDamage;
-            if (GrowFromDamage)
-            {
-                GrowthFromDelta = false;
-                configuration.GrowthFromDelta = false;
-            }
+            configuration.PlayerSettings = GrowthSettings.Defaults();
             configuration.Save();
         }
 
-        if (ImGui.Checkbox("Growth From Delta", ref GrowthFromDelta))
+        ImGui.EndTabItem();
+    }
+
+    private void DrawMonsterTab()
+    {
+        if (!ImGui.BeginTabItem("Added Monsters")) return;
+
+        DrawTrackedMonsters();
+        ImGui.Separator();
+        DrawGrowthSettings(configuration.MonsterSettings, "monsters");
+        if (ImGui.Button("Reset Monster Settings"))
         {
-            configuration.GrowthFromDelta = GrowthFromDelta;
-            if (GrowthFromDelta)
-            {
-                GrowFromDamage = false;
-                configuration.GrowFromDamage = false;
-            }
+            configuration.MonsterSettings = GrowthSettings.Defaults();
             configuration.Save();
         }
 
-        if (ImGui.DragFloat("Speed", ref speed, 0.1F, 0.1F, 100.0F))
-        {
-            if(speed <= 0){
-                speed = 0.1f;
-            }
-            configuration.Speed = speed;
-            configuration.Save();
-        }
-
-        if (ImGui.DragFloat("Minimum Size Multiplier", ref minScaleMultiplier, 0.01F, 0.01F, 1.00F))
-        {
-            if (minScaleMultiplier > 1.00F){ minScaleMultiplier = 1.00F; }
-            configuration.MinScaleMultiplier = minScaleMultiplier;
-            configuration.Save();
-        }
-
-        if (GrowFromDamage && ImGui.DragFloat("Maximum Size Multiplier", ref maxScaleMultiplier, 0.1F, 1.00F, 10.00F))
-        {
-            if (maxScaleMultiplier < 1.00F){ maxScaleMultiplier = 1.00F; }
-            configuration.MaxScaleMultiplier = maxScaleMultiplier;
-            configuration.Save();
-        }
-
-        if (GrowthFromDelta && ImGui.DragFloat("Damage Growth Multiplier", ref deltaGrowthMultiplier, 0.1F, 0.00F, 10.00F))
-        {
-            if (deltaGrowthMultiplier < 0.00F){ deltaGrowthMultiplier = 0.00F; }
-            configuration.DeltaGrowthMultiplier = deltaGrowthMultiplier;
-            configuration.Save();
-        }
-
-        if (GrowthFromDelta && ImGui.Checkbox("Limit Delta Growth", ref limitDeltaGrowth))
-        {
-            configuration.LimitDeltaGrowth = limitDeltaGrowth;
-            configuration.Save();
-        }
-
-        if (GrowthFromDelta && limitDeltaGrowth &&
-            ImGui.DragFloat("Delta Maximum Size Multiplier", ref deltaMaxScaleMultiplier, 0.1F, 1.00F, 100.00F))
-        {
-            if (deltaMaxScaleMultiplier < 1.00F){ deltaMaxScaleMultiplier = 1.00F; }
-            configuration.DeltaMaxScaleMultiplier = deltaMaxScaleMultiplier;
-            configuration.Save();
-        }
-
-        if (GrowthFromDelta && ImGui.DragFloat("Ambient Shrink Per Second", ref ambientShrinkRate, 0.01F, 0.00F, 10.00F))
-        {
-            if (ambientShrinkRate < 0.00F){ ambientShrinkRate = 0.00F; }
-            configuration.AmbientShrinkRate = ambientShrinkRate;
-            configuration.Save();
-        }
-
-        if (GrowthFromDelta && OnlyActiveInCombat &&
-            ImGui.DragFloat("Out of Combat Decay Multiplier", ref outOfCombatDecayMultiplier, 0.5F, 1.00F, 100.00F))
-        {
-            if (outOfCombatDecayMultiplier < 1.00F){ outOfCombatDecayMultiplier = 1.00F; }
-            configuration.OutOfCombatDecayMultiplier = outOfCombatDecayMultiplier;
-            configuration.Save();
-        }
-
-        if (GrowthFromDelta && ImGui.Checkbox("Enable Growth Height Offset", ref enableDeltaHeightOffset))
-        {
-            configuration.EnableDeltaHeightOffset = enableDeltaHeightOffset;
-            configuration.Save();
-        }
-
-        if (GrowthFromDelta && enableDeltaHeightOffset &&
-            ImGui.DragFloat("Height Offset Per Extra 1x", ref deltaHeightOffsetPerScale, 0.01F, 0.00F, 5.00F))
-        {
-            if (deltaHeightOffsetPerScale < 0.00F){ deltaHeightOffsetPerScale = 0.00F; }
-            configuration.DeltaHeightOffsetPerScale = deltaHeightOffsetPerScale;
-            configuration.Save();
-        }
-
-        if (ImGui.Button("Default")) 
-        {
-            configuration.AffectSelf = true;
-            configuration.TrackedPlayerNames.Clear();
-            plugin.InvalidateTrackedPlayerCache();
-            configuration.MinScaleMultiplier = 0.1f;
-            configuration.MaxScaleMultiplier = 1.0f;
-            configuration.DeltaGrowthMultiplier = 1.0f;
-            configuration.LimitDeltaGrowth = false;
-            configuration.DeltaMaxScaleMultiplier = 5.0f;
-            configuration.AmbientShrinkRate = 0.05f;
-            configuration.OutOfCombatDecayMultiplier = 10.0f;
-            configuration.EnableDeltaHeightOffset = false;
-            configuration.DeltaHeightOffsetPerScale = 0.5f;
-            configuration.Speed = 2.0f;
-            configuration.Enable = true;
-            configuration.OnlyActiveInCombat = false;
-            configuration.GrowFromDamage = false;
-            configuration.GrowthFromDelta = false;
-            configuration.Save();
-        }
-        
-        ImGui.Text("This plugin is disabled in PVP");
+        ImGui.EndTabItem();
     }
 
     private void DrawTrackedPlayers()
     {
-        ImGui.Separator();
         ImGui.Text("Specific Players");
         ImGui.TextWrapped(
-            "Add players as Character Name@Home World. Saved names are always active until removed.");
+            "Add players as Character Name@Home World. Only saved players use the player settings.");
 
         bool submitted = ImGui.InputText(
             "Character Name@Home World",
@@ -198,16 +116,17 @@ public class ConfigWindow : Window, IDisposable
             64,
             ImGuiInputTextFlags.EnterReturnsTrue);
         ImGui.SameLine();
-        if (ImGui.Button("+") || submitted)
+        if (ImGui.Button("Add##player") || submitted)
         {
             AddTrackedPlayer();
         }
 
-        if (trackedPlayerInputError.Length > 0)
+        DrawInputError(trackedPlayerInputError);
+
+        if (configuration.TrackedPlayerNames.Count == 0)
         {
-            ImGui.TextColored(
-                new Vector4(1f, 0.35f, 0.35f, 1f),
-                trackedPlayerInputError);
+            ImGui.TextDisabled("No additional players are enabled.");
+            return;
         }
 
         for (int index = 0; index < configuration.TrackedPlayerNames.Count; index++)
@@ -218,7 +137,47 @@ public class ConfigWindow : Window, IDisposable
             {
                 configuration.TrackedPlayerNames.RemoveAt(index);
                 configuration.Save();
-                plugin.InvalidateTrackedPlayerCache();
+                plugin.InvalidateTrackedActorCaches();
+                index--;
+            }
+        }
+    }
+
+    private void DrawTrackedMonsters()
+    {
+        ImGui.Text("Specific Monsters");
+        ImGui.TextWrapped(
+            "Add the exact displayed monster name, such as Behemoth. Matching is " +
+            "case-insensitive and affects every currently loaded monster with that name.");
+
+        bool submitted = ImGui.InputText(
+            "Exact Monster Name",
+            ref trackedMonsterNameInput,
+            128,
+            ImGuiInputTextFlags.EnterReturnsTrue);
+        ImGui.SameLine();
+        if (ImGui.Button("Add##monster") || submitted)
+        {
+            AddTrackedMonster();
+        }
+
+        DrawInputError(trackedMonsterInputError);
+
+        if (configuration.TrackedMonsterNames.Count == 0)
+        {
+            ImGui.TextDisabled("No monsters are enabled.");
+            return;
+        }
+
+        for (int index = 0; index < configuration.TrackedMonsterNames.Count; index++)
+        {
+            ImGui.TextUnformatted(configuration.TrackedMonsterNames[index]);
+            ImGui.SameLine();
+            if (ImGui.SmallButton($"Remove##tracked-monster-remove-{index}"))
+            {
+                configuration.TrackedMonsterNames.RemoveAt(index);
+                configuration.Save();
+                plugin.InvalidateTrackedActorCaches();
                 index--;
             }
         }
@@ -226,16 +185,16 @@ public class ConfigWindow : Window, IDisposable
 
     private void AddTrackedPlayer()
     {
-        string playerName = trackedPlayerNameInput.Trim();
-        if (playerName.Length == 0)
+        string playerIdentity = trackedPlayerNameInput.Trim();
+        if (playerIdentity.Length == 0)
         {
             trackedPlayerInputError = "Enter a player as Character Name@Home World.";
             return;
         }
 
-        int separatorIndex = playerName.LastIndexOf('@');
+        int separatorIndex = playerIdentity.LastIndexOf('@');
         bool validIdentity = separatorIndex > 0 &&
-                             separatorIndex < playerName.Length - 1;
+                             separatorIndex < playerIdentity.Length - 1;
         if (!validIdentity)
         {
             trackedPlayerInputError = "Use the format Character Name@Home World.";
@@ -243,20 +202,204 @@ public class ConfigWindow : Window, IDisposable
         }
 
         bool alreadyTracked = configuration.TrackedPlayerNames.Exists(
-            trackedPlayerName => string.Equals(
-                trackedPlayerName,
-                playerName,
+            trackedPlayer => string.Equals(
+                trackedPlayer,
+                playerIdentity,
                 StringComparison.OrdinalIgnoreCase));
-        if (!alreadyTracked)
+        if (alreadyTracked)
         {
-            configuration.TrackedPlayerNames.Add(playerName);
-            configuration.Save();
-            plugin.InvalidateTrackedPlayerCache();
+            trackedPlayerInputError = "That player is already in the list.";
+            return;
         }
 
-        trackedPlayerInputError = alreadyTracked
-            ? "That player is already in the list."
-            : string.Empty;
+        configuration.TrackedPlayerNames.Add(playerIdentity);
+        configuration.Save();
+        plugin.InvalidateTrackedActorCaches();
+        trackedPlayerInputError = string.Empty;
         trackedPlayerNameInput = string.Empty;
+    }
+
+    private void AddTrackedMonster()
+    {
+        string monsterName = trackedMonsterNameInput.Trim();
+        if (monsterName.Length == 0)
+        {
+            trackedMonsterInputError = "Enter an exact monster name.";
+            return;
+        }
+
+        if (configuration.IsMonsterTracked(monsterName))
+        {
+            trackedMonsterInputError = "That monster is already in the list.";
+            return;
+        }
+
+        configuration.TrackedMonsterNames.Add(monsterName);
+        configuration.Save();
+        plugin.InvalidateTrackedActorCaches();
+        trackedMonsterInputError = string.Empty;
+        trackedMonsterNameInput = string.Empty;
+    }
+
+    private static void DrawInputError(string error)
+    {
+        if (error.Length == 0) return;
+
+        ImGui.TextColored(
+            new Vector4(1f, 0.35f, 0.35f, 1f),
+            error);
+    }
+
+    private void DrawGrowthSettings(GrowthSettings settings, string id)
+    {
+        bool onlyActiveInCombat = settings.OnlyActiveInCombat;
+        if (ImGui.Checkbox($"Only Active in Combat##{id}", ref onlyActiveInCombat))
+        {
+            settings.OnlyActiveInCombat = onlyActiveInCombat;
+            configuration.Save();
+        }
+
+        bool growFromDamage = settings.GrowFromDamage;
+        if (ImGui.Checkbox($"Grow From Damage##{id}", ref growFromDamage))
+        {
+            settings.GrowFromDamage = growFromDamage;
+            if (growFromDamage)
+            {
+                settings.GrowthFromDelta = false;
+            }
+
+            configuration.Save();
+        }
+
+        bool growthFromDelta = settings.GrowthFromDelta;
+        if (ImGui.Checkbox($"Growth From Delta##{id}", ref growthFromDelta))
+        {
+            settings.GrowthFromDelta = growthFromDelta;
+            if (growthFromDelta)
+            {
+                settings.GrowFromDamage = false;
+            }
+
+            configuration.Save();
+        }
+
+        float speed = settings.Speed;
+        if (ImGui.DragFloat($"Speed##{id}", ref speed, 0.1f, 0.1f, 100.0f))
+        {
+            settings.Speed = Math.Clamp(speed, 0.1f, 100f);
+            configuration.Save();
+        }
+
+        float minScaleMultiplier = settings.MinScaleMultiplier;
+        if (ImGui.DragFloat(
+                $"Minimum Size Multiplier##{id}",
+                ref minScaleMultiplier,
+                0.01f,
+                0.01f,
+                1.00f))
+        {
+            settings.MinScaleMultiplier = Math.Clamp(minScaleMultiplier, 0.01f, 1f);
+            configuration.Save();
+        }
+
+        if (settings.GrowFromDamage)
+        {
+            float maxScaleMultiplier = settings.MaxScaleMultiplier;
+            if (ImGui.DragFloat(
+                    $"Maximum Size Multiplier##{id}",
+                    ref maxScaleMultiplier,
+                    0.1f,
+                    1.00f,
+                    10.00f))
+            {
+                settings.MaxScaleMultiplier = Math.Max(1f, maxScaleMultiplier);
+                configuration.Save();
+            }
+        }
+
+        if (!settings.GrowthFromDelta) return;
+
+        float deltaGrowthMultiplier = settings.DeltaGrowthMultiplier;
+        if (ImGui.DragFloat(
+                $"Damage Growth Multiplier##{id}",
+                ref deltaGrowthMultiplier,
+                0.1f,
+                0.00f,
+                10.00f))
+        {
+            settings.DeltaGrowthMultiplier = Math.Max(0f, deltaGrowthMultiplier);
+            configuration.Save();
+        }
+
+        bool limitDeltaGrowth = settings.LimitDeltaGrowth;
+        if (ImGui.Checkbox($"Limit Delta Growth##{id}", ref limitDeltaGrowth))
+        {
+            settings.LimitDeltaGrowth = limitDeltaGrowth;
+            configuration.Save();
+        }
+
+        if (settings.LimitDeltaGrowth)
+        {
+            float deltaMaxScaleMultiplier = settings.DeltaMaxScaleMultiplier;
+            if (ImGui.DragFloat(
+                    $"Delta Maximum Size Multiplier##{id}",
+                    ref deltaMaxScaleMultiplier,
+                    0.1f,
+                    1.00f,
+                    100.00f))
+            {
+                settings.DeltaMaxScaleMultiplier = Math.Max(1f, deltaMaxScaleMultiplier);
+                configuration.Save();
+            }
+        }
+
+        float ambientShrinkRate = settings.AmbientShrinkRate;
+        if (ImGui.DragFloat(
+                $"Ambient Shrink Per Second##{id}",
+                ref ambientShrinkRate,
+                0.01f,
+                0.00f,
+                10.00f))
+        {
+            settings.AmbientShrinkRate = Math.Max(0f, ambientShrinkRate);
+            configuration.Save();
+        }
+
+        if (settings.OnlyActiveInCombat)
+        {
+            float outOfCombatDecayMultiplier = settings.OutOfCombatDecayMultiplier;
+            if (ImGui.DragFloat(
+                    $"Out of Combat Decay Multiplier##{id}",
+                    ref outOfCombatDecayMultiplier,
+                    0.5f,
+                    1.00f,
+                    100.00f))
+            {
+                settings.OutOfCombatDecayMultiplier = Math.Max(1f, outOfCombatDecayMultiplier);
+                configuration.Save();
+            }
+        }
+
+        bool enableDeltaHeightOffset = settings.EnableDeltaHeightOffset;
+        if (ImGui.Checkbox($"Enable Growth Height Offset##{id}", ref enableDeltaHeightOffset))
+        {
+            settings.EnableDeltaHeightOffset = enableDeltaHeightOffset;
+            configuration.Save();
+        }
+
+        if (settings.EnableDeltaHeightOffset)
+        {
+            float deltaHeightOffsetPerScale = settings.DeltaHeightOffsetPerScale;
+            if (ImGui.DragFloat(
+                    $"Height Offset Per Extra 1x##{id}",
+                    ref deltaHeightOffsetPerScale,
+                    0.01f,
+                    0.00f,
+                    5.00f))
+            {
+                settings.DeltaHeightOffsetPerScale = Math.Max(0f, deltaHeightOffsetPerScale);
+                configuration.Save();
+            }
+        }
     }
 }
