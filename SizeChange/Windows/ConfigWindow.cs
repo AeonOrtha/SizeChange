@@ -147,11 +147,11 @@ public class ConfigWindow : Window, IDisposable
     {
         ImGui.Text("Specific Monsters");
         ImGui.TextWrapped(
-            "Add the exact displayed monster name, such as Behemoth. Matching is " +
-            "case-insensitive.");
+            "Add any part of a monster's displayed name. Matching is case-insensitive, " +
+            "so Behemoth also matches King Behemoth.");
 
         bool submitted = ImGui.InputText(
-            "Exact Monster Name",
+            "Monster Name Filter",
             ref trackedMonsterNameInput,
             128,
             ImGuiInputTextFlags.EnterReturnsTrue);
@@ -224,13 +224,18 @@ public class ConfigWindow : Window, IDisposable
         string monsterName = trackedMonsterNameInput.Trim();
         if (monsterName.Length == 0)
         {
-            trackedMonsterInputError = "Enter an exact monster name.";
+            trackedMonsterInputError = "Enter a monster name filter.";
             return;
         }
 
-        if (configuration.IsMonsterTracked(monsterName))
+        bool alreadyTracked = configuration.TrackedMonsterNames.Exists(
+            trackedMonsterName => string.Equals(
+                trackedMonsterName,
+                monsterName,
+                StringComparison.OrdinalIgnoreCase));
+        if (alreadyTracked)
         {
-            trackedMonsterInputError = "That monster is already in the list.";
+            trackedMonsterInputError = "That monster filter is already in the list.";
             return;
         }
 
