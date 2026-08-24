@@ -116,7 +116,7 @@ public class Configuration : IPluginConfiguration
 
     // Players keep the existing Character Name@Home World identity format.
     public List<string> TrackedPlayerNames { get; set; } = new();
-    // Monsters use their exact displayed battle-NPC name, case-insensitively.
+    // Monsters use case-insensitive portions of their displayed battle-NPC name.
     public List<string> TrackedMonsterNames { get; set; } = new();
 
     // Version-0 fields are retained so released 1.3.4.2 configurations can be
@@ -180,9 +180,8 @@ public class Configuration : IPluginConfiguration
         foreach (string trackedName in TrackedMonsterNames)
         {
             if (!string.IsNullOrWhiteSpace(trackedName) &&
-                string.Equals(
+                candidate.Contains(
                     trackedName.Trim(),
-                    candidate,
                     StringComparison.OrdinalIgnoreCase))
             {
                 return true;

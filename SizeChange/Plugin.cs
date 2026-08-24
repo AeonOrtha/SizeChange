@@ -782,9 +782,6 @@ public sealed class Plugin : IDalamudPlugin
         var desiredPlayerIdentities = new HashSet<string>(
             Configuration.TrackedPlayerNames,
             StringComparer.OrdinalIgnoreCase);
-        var desiredMonsterNames = new HashSet<string>(
-            Configuration.TrackedMonsterNames,
-            StringComparer.OrdinalIgnoreCase);
         uint localPlayerEntityId = ObjectTable.LocalPlayer?.EntityId ?? 0;
 
         // This is the only full object-table scan. It runs on demand and at most
@@ -808,7 +805,7 @@ public sealed class Plugin : IDalamudPlugin
             }
 
             if (gameObject is IBattleNpc &&
-                desiredMonsterNames.Contains(gameObject.Name.TextValue))
+                Configuration.IsMonsterTracked(gameObject.Name.TextValue))
             {
                 // Multiple monsters may share a name, so retain every matching ID.
                 TrackedMonsterEntityIds.Add(gameObject.EntityId);
