@@ -15,6 +15,8 @@ public class ConfigWindow : Window, IDisposable
     private string trackedMonsterInputError = string.Empty;
     private string growthSoundTestResult = string.Empty;
     private bool growthSoundTestSucceeded;
+    private string growthVfxTestResult = string.Empty;
+    private bool growthVfxTestSucceeded;
 
     public ConfigWindow(Plugin plugin) : base("SizeChange Config")
     {
@@ -488,6 +490,110 @@ public class ConfigWindow : Window, IDisposable
                         ? new Vector4(0.35f, 1f, 0.45f, 1f)
                         : new Vector4(1f, 0.35f, 0.35f, 1f),
                     growthSoundTestResult);
+            }
+        }
+
+        bool enableDeltaGrowthVfx = settings.EnableDeltaGrowthVfx;
+        if (ImGui.Checkbox(
+                $"Play Actor VFX When Delta Growth Triggers##{id}",
+                ref enableDeltaGrowthVfx))
+        {
+            settings.EnableDeltaGrowthVfx = enableDeltaGrowthVfx;
+            configuration.Save();
+        }
+
+        if (settings.EnableDeltaGrowthVfx)
+        {
+            ImGui.TextWrapped(
+                "The AVFX is bound to the growing actor's root and follows that actor. " +
+                "Only one growth VFX is retained per actor at a time.");
+
+            string deltaGrowthVfxPath = settings.DeltaGrowthVfxPath;
+            if (ImGui.InputText(
+                    $"Growth AVFX Path##{id}",
+                    ref deltaGrowthVfxPath,
+                    256))
+            {
+                settings.DeltaGrowthVfxPath = deltaGrowthVfxPath;
+                growthVfxTestResult = string.Empty;
+                configuration.Save();
+            }
+
+            float deltaGrowthVfxDuration =
+                settings.DeltaGrowthVfxDurationSeconds;
+            if (ImGui.DragFloat(
+                    $"VFX Removal Time (Seconds)##{id}",
+                    ref deltaGrowthVfxDuration,
+                    0.05f,
+                    0.05f,
+                    300.00f,
+                    "%.2f"))
+            {
+                settings.DeltaGrowthVfxDurationSeconds =
+                    Math.Clamp(deltaGrowthVfxDuration, 0.05f, 300f);
+                configuration.Save();
+            }
+
+            float deltaGrowthVfxCooldown =
+                settings.DeltaGrowthVfxCooldownSeconds;
+            if (ImGui.DragFloat(
+                    $"Minimum Seconds Between VFX##{id}",
+                    ref deltaGrowthVfxCooldown,
+                    0.05f,
+                    0.00f,
+                    60.00f,
+                    "%.2f"))
+            {
+                settings.DeltaGrowthVfxCooldownSeconds =
+                    Math.Clamp(deltaGrowthVfxCooldown, 0f, 60f);
+                configuration.Save();
+            }
+
+            float deltaGrowthVfxScale = settings.DeltaGrowthVfxScale;
+            if (ImGui.DragFloat(
+                    $"VFX Scale##{id}",
+                    ref deltaGrowthVfxScale,
+                    0.05f,
+                    0.01f,
+                    100.00f,
+                    "%.2f"))
+            {
+                settings.DeltaGrowthVfxScale =
+                    Math.Clamp(deltaGrowthVfxScale, 0.01f, 100f);
+                configuration.Save();
+            }
+
+            bool deltaGrowthVfxScaleWithActor =
+                settings.DeltaGrowthVfxScaleWithActor;
+            if (ImGui.Checkbox(
+                    $"Scale VFX With Actor Growth##{id}",
+                    ref deltaGrowthVfxScaleWithActor))
+            {
+                settings.DeltaGrowthVfxScaleWithActor =
+                    deltaGrowthVfxScaleWithActor;
+                configuration.Save();
+            }
+
+            ImGui.TextWrapped(
+                "When scaling with the actor is enabled, VFX Scale is multiplied by " +
+                "SizeChange's current visible growth multiplier and updated while active.");
+
+            if (ImGui.Button($"Test VFX at Yourself##{id}"))
+            {
+                growthVfxTestResult = plugin.TestDeltaGrowthVfx(settings);
+                growthVfxTestSucceeded =
+                    growthVfxTestResult.StartsWith(
+                        "Actor-root VFX created",
+                        StringComparison.Ordinal);
+            }
+
+            if (growthVfxTestResult.Length > 0)
+            {
+                ImGui.TextColored(
+                    growthVfxTestSucceeded
+                        ? new Vector4(0.35f, 1f, 0.45f, 1f)
+                        : new Vector4(1f, 0.35f, 0.35f, 1f),
+                    growthVfxTestResult);
             }
         }
     }

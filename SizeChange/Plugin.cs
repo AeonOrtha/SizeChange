@@ -36,6 +36,7 @@ struct SCCharacterState
     public float LastAppliedDrawOffsetY;
     public bool HasDrawOffset;
     public long LastDeltaGrowthSoundTick;
+    public long LastDeltaGrowthVfxTick;
 }
 
 public sealed class Plugin : IDalamudPlugin
@@ -48,6 +49,7 @@ public sealed class Plugin : IDalamudPlugin
     [PluginService] internal static ICondition Condition { get; private set; } = null!;
     [PluginService] internal static IDataManager DataManager { get; private set; } = null!;
     [PluginService] internal static IGameInteropProvider GameInteropProvider { get; private set; } = null!;
+    [PluginService] internal static ISigScanner SigScanner { get; private set; } = null!;
 
     private const string CommandName_SizeChange = "/sizechange";
     private const string CommandName_Scale = "/scale";
@@ -64,6 +66,7 @@ public sealed class Plugin : IDalamudPlugin
         new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<uint> TrackedMonsterEntityIds = new();
     private readonly GrowthSoundPlayer GrowthSoundPlayer;
+    private readonly GrowthVfxPlayer GrowthVfxPlayer;
     private float TrackedActorRefreshElapsed = TrackedActorRefreshIntervalSeconds;
     private bool TrackedActorRefreshRequested = true;
 
@@ -76,6 +79,7 @@ public sealed class Plugin : IDalamudPlugin
         }
 
         GrowthSoundPlayer = new GrowthSoundPlayer();
+        GrowthVfxPlayer = new GrowthVfxPlayer();
 
         ConfigWindow = new ConfigWindow(this);
         WindowSystem.AddWindow(ConfigWindow);
@@ -100,6 +104,7 @@ public sealed class Plugin : IDalamudPlugin
     {
         Framework.Update -= OnFrameworkUpdate;
         RestoreCharacterTransforms();
+        GrowthVfxPlayer.Dispose();
         GrowthSoundPlayer.Dispose();
 
         PluginInterface.UiBuilder.Draw -= WindowSystem.Draw;
@@ -201,6 +206,8 @@ public sealed class Plugin : IDalamudPlugin
 
     private unsafe void OnFrameworkUpdate(IFramework framework)
     {
+        GrowthVfxPlayer.Update();
+
         bool globallyDisabled = ClientState.IsPvP || !Configuration.Enable;
         bool inCombat = Condition[ConditionFlag.InCombat];
         var localPlayer = ObjectTable.LocalPlayer;
@@ -411,24 +418,45 @@ public sealed class Plugin : IDalamudPlugin
                 settings.DeltaMaxScaleMultiplier);
         }
 
-        // Play only if this damage sample actually increased growth. The
-        // per-actor cooldown prevents rapid attacks against one target from
-        // producing a sound on every framework update.
+        // Trigger feedback only if this damage sample actually increased growth.
+        // Sound and VFX have independent per-actor cooldowns so rapid attacks do
+        // not create an effect on every framework update.
         if (receivedGrowthDamage &&
             charState.GrowthMultiplier > growthMultiplierBeforeDamage)
         {
             long currentTick = Environment.TickCount64;
-            long cooldownMilliseconds =
+            long soundCooldownMilliseconds =
                 (long)(settings.DeltaGrowthSoundCooldownSeconds * 1000f);
-            bool cooldownElapsed =
-                cooldownMilliseconds <= 0 ||
+            bool soundCooldownElapsed =
+                soundCooldownMilliseconds <= 0 ||
                 charState.LastDeltaGrowthSoundTick == 0 ||
-                currentTick - charState.LastDeltaGrowthSoundTick >= cooldownMilliseconds;
+                currentTick - charState.LastDeltaGrowthSoundTick >= soundCooldownMilliseconds;
 
-            if (cooldownElapsed &&
+            if (soundCooldownElapsed &&
                 TryPlayDeltaGrowthSound(actor, settings, false) == null)
             {
                 charState.LastDeltaGrowthSoundTick = currentTick;
+            }
+
+            long vfxCooldownMilliseconds =
+                (long)(settings.DeltaGrowthVfxCooldownSeconds * 1000f);
+            bool vfxCooldownElapsed =
+                vfxCooldownMilliseconds <= 0 ||
+                charState.LastDeltaGrowthVfxTick == 0 ||
+                currentTick - charState.LastDeltaGrowthVfxTick >= vfxCooldownMilliseconds;
+
+            float currentVisibleGrowthMultiplier =
+                charState.PlayerScale > 0f
+                    ? scale / charState.PlayerScale
+                    : 1f;
+            if (vfxCooldownElapsed &&
+                TryPlayDeltaGrowthVfx(
+                    actor,
+                    settings,
+                    false,
+                    currentVisibleGrowthMultiplier) == null)
+            {
+                charState.LastDeltaGrowthVfxTick = currentTick;
             }
         }
 
@@ -481,6 +509,14 @@ public sealed class Plugin : IDalamudPlugin
         draw->Scale = new Vector3(scale, scale, scale);
         actor->Scale = scale;
 
+        float visibleScaleMultiplier =
+            charState.PlayerScale > 0f
+                ? scale / charState.PlayerScale
+                : 1f;
+        GrowthVfxPlayer.UpdateActorScale(
+            (nint)actor,
+            visibleScaleMultiplier);
+
         float desiredHeightOffset = 0f;
         if (settings.GrowthFromDelta &&
             settings.EnableDeltaHeightOffset &&
@@ -488,7 +524,6 @@ public sealed class Plugin : IDalamudPlugin
         {
             // Follow the visible, lerped scale so height returns with normal
             // ambient decay and the faster out-of-combat return.
-            float visibleScaleMultiplier = scale / charState.PlayerScale;
             desiredHeightOffset =
                 Math.Max(0f, visibleScaleMultiplier - 1f) *
                 settings.DeltaHeightOffsetPerScale;
@@ -588,6 +623,66 @@ public sealed class Plugin : IDalamudPlugin
         }
 
         return BitConverter.ToUInt16(data, 0x30);
+    }
+
+    internal unsafe string TestDeltaGrowthVfx(GrowthSettings settings)
+    {
+        var localPlayer = ObjectTable.LocalPlayer;
+        if (localPlayer == null)
+        {
+            return "Cannot test: the local player is unavailable.";
+        }
+
+        var actor = (Character*)localPlayer.Address;
+        float visibleGrowthMultiplier = 1f;
+        var draw = (CharacterBase*)actor->DrawObject;
+        if (draw != null &&
+            TryGetCharacterState(actor, out var charState) &&
+            charState.PlayerScale > 0f)
+        {
+            visibleGrowthMultiplier = draw->Scale.Y / charState.PlayerScale;
+        }
+
+        string? error = TryPlayDeltaGrowthVfx(
+            actor,
+            settings,
+            true,
+            visibleGrowthMultiplier);
+        return error ?? "Actor-root VFX created. It will be removed after the configured duration.";
+    }
+
+    private unsafe string? TryPlayDeltaGrowthVfx(
+        Character* actor,
+        GrowthSettings settings,
+        bool ignoreEnabled,
+        float actorGrowthMultiplier)
+    {
+        if (!ignoreEnabled && !settings.EnableDeltaGrowthVfx)
+        {
+            return "Growth VFX is disabled.";
+        }
+
+        string path = settings.DeltaGrowthVfxPath.Trim().Replace('\\', '/');
+        if (path.Length == 0 ||
+            path.StartsWith('/') ||
+            path.Contains("..", StringComparison.Ordinal) ||
+            !path.EndsWith(".avfx", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Invalid path: use a game resource path ending in .avfx.";
+        }
+
+        if (!DataManager.FileExists(path))
+        {
+            return $"AVFX was not found in the game data: {path}";
+        }
+
+        return GrowthVfxPlayer.TryPlay(
+            (nint)actor,
+            path,
+            settings.DeltaGrowthVfxDurationSeconds,
+            settings.DeltaGrowthVfxScale,
+            settings.DeltaGrowthVfxScaleWithActor,
+            actorGrowthMultiplier);
     }
 
     private unsafe void ApplyHeightOffset(

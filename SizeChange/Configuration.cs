@@ -25,6 +25,12 @@ public class GrowthSettings
     public int DeltaGrowthSoundIndex { get; set; }
     public float DeltaGrowthSoundVolume { get; set; } = 1.0f;
     public float DeltaGrowthSoundCooldownSeconds { get; set; } = 1.0f;
+    public bool EnableDeltaGrowthVfx { get; set; }
+    public string DeltaGrowthVfxPath { get; set; } = string.Empty;
+    public float DeltaGrowthVfxDurationSeconds { get; set; } = 2.0f;
+    public float DeltaGrowthVfxCooldownSeconds { get; set; } = 1.0f;
+    public float DeltaGrowthVfxScale { get; set; } = 1.0f;
+    public bool DeltaGrowthVfxScaleWithActor { get; set; } = true;
     public bool OnlyActiveInCombat { get; set; }
     public bool GrowFromDamage { get; set; }
     public bool GrowthFromDelta { get; set; }
@@ -46,6 +52,13 @@ public class GrowthSettings
         DeltaGrowthSoundVolume = Math.Clamp(DeltaGrowthSoundVolume, 0f, 1f);
         DeltaGrowthSoundCooldownSeconds =
             Math.Clamp(DeltaGrowthSoundCooldownSeconds, 0f, 60f);
+        DeltaGrowthVfxPath = DeltaGrowthVfxPath?.Trim().Replace('\\', '/')
+            ?? string.Empty;
+        DeltaGrowthVfxDurationSeconds =
+            Math.Clamp(DeltaGrowthVfxDurationSeconds, 0.05f, 300f);
+        DeltaGrowthVfxCooldownSeconds =
+            Math.Clamp(DeltaGrowthVfxCooldownSeconds, 0f, 60f);
+        DeltaGrowthVfxScale = Math.Clamp(DeltaGrowthVfxScale, 0.01f, 100f);
 
         if (GrowFromDamage && GrowthFromDelta)
         {
@@ -73,6 +86,12 @@ public class GrowthSettings
             DeltaGrowthSoundIndex = settings.DeltaGrowthSoundIndex,
             DeltaGrowthSoundVolume = settings.DeltaGrowthSoundVolume,
             DeltaGrowthSoundCooldownSeconds = settings.DeltaGrowthSoundCooldownSeconds,
+            EnableDeltaGrowthVfx = settings.EnableDeltaGrowthVfx,
+            DeltaGrowthVfxPath = settings.DeltaGrowthVfxPath,
+            DeltaGrowthVfxDurationSeconds = settings.DeltaGrowthVfxDurationSeconds,
+            DeltaGrowthVfxCooldownSeconds = settings.DeltaGrowthVfxCooldownSeconds,
+            DeltaGrowthVfxScale = settings.DeltaGrowthVfxScale,
+            DeltaGrowthVfxScaleWithActor = settings.DeltaGrowthVfxScaleWithActor,
             OnlyActiveInCombat = settings.OnlyActiveInCombat,
             GrowFromDamage = settings.GrowFromDamage,
             GrowthFromDelta = settings.GrowthFromDelta,
