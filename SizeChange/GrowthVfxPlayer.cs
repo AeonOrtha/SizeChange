@@ -51,6 +51,9 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable
         public required long RemoveAtTick { get; init; }
         public required float BaseScale { get; init; }
         public required bool ScaleWithActor { get; init; }
+        public float ActorGrowthMultiplier { get; set; } = 1f;
+        public float LastAppliedScale { get; set; } = float.NaN;
+        public bool CanApplyScale { get; set; }
     }
 
     public GrowthVfxPlayer()
@@ -136,11 +139,11 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable
             RemoveAtTick = Environment.TickCount64 + durationMilliseconds,
             BaseScale = baseScale,
             ScaleWithActor = scaleWithActor,
+            ActorGrowthMultiplier = actorGrowthMultiplier,
         };
 
         activeByVfx[vfxAddress] = activeVfx;
         activeVfxByActor[actorAddress] = vfxAddress;
-        ApplyScale(activeVfx, actorGrowthMultiplier);
         return null;
     }
 
@@ -153,6 +156,16 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable
             if (currentTick >= activeEntry.Value.RemoveAtTick)
             {
                 expiredAddresses.Add(activeEntry.Key);
+                continue;
+            }
+
+            // Actor VFX creation returns before every internal graphics object is
+            // guaranteed to be ready for transform changes. Defer the first scale
+            // write until the following framework update.
+            if (!activeEntry.Value.CanApplyScale)
+            {
+                activeEntry.Value.CanApplyScale = true;
+                ApplyScale(activeEntry.Value);
             }
         }
 
@@ -170,12 +183,14 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable
             return;
         }
 
-        ApplyScale(activeVfx, actorGrowthMultiplier);
+        activeVfx.ActorGrowthMultiplier = actorGrowthMultiplier;
+        if (activeVfx.CanApplyScale)
+        {
+            ApplyScale(activeVfx);
+        }
     }
 
-    private static void ApplyScale(
-        ActiveGrowthVfx activeVfx,
-        float actorGrowthMultiplier)
+    private static void ApplyScale(ActiveGrowthVfx activeVfx)
     {
         var vfx = (VfxObject*)activeVfx.VfxAddress;
         if (vfx == null)
@@ -186,12 +201,20 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable
         float effectiveScale = activeVfx.BaseScale;
         if (activeVfx.ScaleWithActor)
         {
-            effectiveScale *= Math.Max(0.01f, actorGrowthMultiplier);
+            effectiveScale *= Math.Max(
+                0.01f,
+                activeVfx.ActorGrowthMultiplier);
         }
 
         effectiveScale = Math.Clamp(effectiveScale, 0.01f, 100f);
+        if (float.IsFinite(activeVfx.LastAppliedScale) &&
+            MathF.Abs(activeVfx.LastAppliedScale - effectiveScale) < 0.0001f)
+        {
+            return;
+        }
+
         vfx->Scale = new Vector3(effectiveScale, effectiveScale, effectiveScale);
-        vfx->UpdateTransforms(true);
+        activeVfx.LastAppliedScale = effectiveScale;
     }
 
     private void RemoveForActor(nint actorAddress)
