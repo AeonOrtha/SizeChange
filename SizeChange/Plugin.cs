@@ -31,6 +31,8 @@ struct SCCharacterState
     public float PreviousScale;
     public float PreviousHealth;
     public float GrowthMultiplier;
+    public float PendingGrowth;
+    public float AccumulatorRemainingSeconds;
     public bool HasPreviousHealth;
     public float BaseDrawOffsetY;
     public float LastAppliedDrawOffsetY;
@@ -391,8 +393,9 @@ public sealed class Plugin : IDalamudPlugin
             charState.HasPreviousHealth = true;
         }
 
-        bool receivedGrowthDamage = false;
-        float growthMultiplierBeforeDamage = charState.GrowthMultiplier;
+        bool releasedGrowth = false;
+        float growthMultiplierBeforeRelease = charState.GrowthMultiplier;
+        float deltaSeconds = (float)Framework.UpdateDelta.TotalSeconds;
         if (settings.GrowthFromDelta && !disable && !outOfCombat)
         {
             // Only add growth while the effect is active. Health is sampled while
@@ -405,10 +408,62 @@ public sealed class Plugin : IDalamudPlugin
                     healthLostRatio * settings.DeltaGrowthMultiplier;
                 if (addedGrowth > 0f)
                 {
-                    charState.GrowthMultiplier += addedGrowth;
-                    receivedGrowthDamage = true;
+                    if (settings.AccumulatorDelaySeconds <= 0f)
+                    {
+                        charState.GrowthMultiplier += addedGrowth;
+                        releasedGrowth = true;
+                    }
+                    else
+                    {
+                        charState.PendingGrowth += addedGrowth;
+                        if (charState.AccumulatorRemainingSeconds <= 0f)
+                        {
+                            // The first qualifying hit starts a fixed window.
+                            // Later hits join it without restarting the timer.
+                            charState.AccumulatorRemainingSeconds =
+                                settings.AccumulatorDelaySeconds;
+                        }
+                    }
                 }
             }
+        }
+
+        if (!settings.GrowthFromDelta || disable)
+        {
+            // Pending growth must never survive disabling the mode, entering
+            // PvP, disabling the plugin, or removing the actor from its list.
+            charState.PendingGrowth = 0f;
+            charState.AccumulatorRemainingSeconds = 0f;
+        }
+        else if (charState.PendingGrowth > 0f)
+        {
+            bool releasePendingGrowth =
+                settings.AccumulatorDelaySeconds <= 0f || outOfCombat;
+            if (!releasePendingGrowth)
+            {
+                // If the configured delay is shortened while a window is open,
+                // do not retain a timer longer than the new setting.
+                charState.AccumulatorRemainingSeconds = Math.Min(
+                    charState.AccumulatorRemainingSeconds,
+                    settings.AccumulatorDelaySeconds);
+                charState.AccumulatorRemainingSeconds = Math.Max(
+                    0f,
+                    charState.AccumulatorRemainingSeconds - deltaSeconds);
+                releasePendingGrowth =
+                    charState.AccumulatorRemainingSeconds <= 0f;
+            }
+
+            if (releasePendingGrowth)
+            {
+                charState.GrowthMultiplier += charState.PendingGrowth;
+                charState.PendingGrowth = 0f;
+                charState.AccumulatorRemainingSeconds = 0f;
+                releasedGrowth = true;
+            }
+        }
+        else
+        {
+            charState.AccumulatorRemainingSeconds = 0f;
         }
 
         if (settings.GrowthFromDelta && settings.LimitDeltaGrowth)
@@ -418,11 +473,13 @@ public sealed class Plugin : IDalamudPlugin
                 settings.DeltaMaxScaleMultiplier);
         }
 
-        // Trigger feedback only if this damage sample actually increased growth.
+        // Trigger feedback only when immediate or accumulated damage actually
+        // increases growth. A delayed window therefore produces one combined
+        // sound/VFX event instead of one event for every hit inside the window.
         // Sound and VFX have independent per-actor cooldowns so rapid attacks do
         // not create an effect on every framework update.
-        if (receivedGrowthDamage &&
-            charState.GrowthMultiplier > growthMultiplierBeforeDamage)
+        if (releasedGrowth &&
+            charState.GrowthMultiplier > growthMultiplierBeforeRelease)
         {
             long currentTick = Environment.TickCount64;
             long soundCooldownMilliseconds =
@@ -461,9 +518,10 @@ public sealed class Plugin : IDalamudPlugin
         }
 
         // Ambient decay is exclusive to Growth From Delta.
-        if (settings.GrowthFromDelta && charState.GrowthMultiplier > 1.0f)
+        if (settings.GrowthFromDelta &&
+            charState.PendingGrowth <= 0f &&
+            charState.GrowthMultiplier > 1.0f)
         {
-            float deltaSeconds = (float)Framework.UpdateDelta.TotalSeconds;
             float decayMultiplier =
                 outOfCombat && !disable
                     ? settings.OutOfCombatDecayMultiplier

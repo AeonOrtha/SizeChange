@@ -357,6 +357,26 @@ public class ConfigWindow : Window, IDisposable
             }
         }
 
+        float accumulatorDelaySeconds = settings.AccumulatorDelaySeconds;
+        if (ImGui.DragFloat(
+                $"Accumulator Delay (Seconds)##{id}",
+                ref accumulatorDelaySeconds,
+                0.1f,
+                0.00f,
+                60.00f,
+                "%.1f"))
+        {
+            settings.AccumulatorDelaySeconds =
+                Math.Clamp(accumulatorDelaySeconds, 0f, 60f);
+            configuration.Save();
+        }
+
+        ImGui.TextWrapped(
+            "Set to 0 for immediate growth. Above 0, the first hit starts a fixed " +
+            "window; all damage during that window is released as one growth burst. " +
+            "Later hits do not restart the timer, and ambient shrink pauses while " +
+            "growth is waiting.");
+
         float ambientShrinkRate = settings.AmbientShrinkRate;
         if (ImGui.DragFloat(
                 $"Ambient Shrink Per Second##{id}",
