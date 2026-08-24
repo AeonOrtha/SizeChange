@@ -37,10 +37,6 @@ public class ConfigWindow : Window, IDisposable
             configuration.Save();
         }
 
-        ImGui.TextWrapped(
-            "Your character, specifically added players, and specifically added monsters " +
-            "each have independent growth settings.");
-
         if (ImGui.BeginTabBar("SizeChangeTargetProfiles"))
         {
             DrawSelfTab();
@@ -112,7 +108,7 @@ public class ConfigWindow : Window, IDisposable
     {
         ImGui.Text("Specific Players");
         ImGui.TextWrapped(
-            "Add players as Character Name@Home World. Only saved players use the player settings.");
+            "Add players as Character Name@Home World.");
 
         bool submitted = ImGui.InputText(
             "Character Name@Home World",
@@ -152,7 +148,7 @@ public class ConfigWindow : Window, IDisposable
         ImGui.Text("Specific Monsters");
         ImGui.TextWrapped(
             "Add the exact displayed monster name, such as Behemoth. Matching is " +
-            "case-insensitive and affects every currently loaded monster with that name.");
+            "case-insensitive.");
 
         bool submitted = ImGui.InputText(
             "Exact Monster Name",
@@ -371,11 +367,6 @@ public class ConfigWindow : Window, IDisposable
             configuration.Save();
         }
 
-        ImGui.TextWrapped(
-            "Set to 0 for immediate growth. Above 0, the first hit starts a fixed " +
-            "window; all damage during that window is released as one growth burst. " +
-            "Later hits do not restart the timer, and ambient shrink pauses while " +
-            "growth is waiting.");
 
         float ambientShrinkRate = settings.AmbientShrinkRate;
         if (ImGui.DragFloat(
@@ -435,9 +426,6 @@ public class ConfigWindow : Window, IDisposable
 
         if (settings.EnableDeltaGrowthSound)
         {
-            ImGui.TextWrapped(
-                "The SCD is played positionally at the actor that actually gained size. " +
-                "It uses FFXIV's native SCD preview route.");
 
             string deltaGrowthSoundPath = settings.DeltaGrowthSoundPath;
             if (ImGui.InputText(
@@ -492,9 +480,6 @@ public class ConfigWindow : Window, IDisposable
                 configuration.Save();
             }
 
-            ImGui.TextWrapped(
-                "The cooldown is tracked separately for each actor. Set it to 0 " +
-                "to allow every detected damage event to trigger sound.");
 
             if (ImGui.Button($"Test Sound at Yourself##{id}"))
             {
@@ -524,9 +509,6 @@ public class ConfigWindow : Window, IDisposable
 
         if (settings.EnableDeltaGrowthVfx)
         {
-            ImGui.TextWrapped(
-                "The AVFX is bound to the growing actor's root and follows that actor. " +
-                "Only one growth VFX is retained per actor at a time.");
 
             string deltaGrowthVfxPath = settings.DeltaGrowthVfxPath;
             if (ImGui.InputText(
@@ -594,9 +576,6 @@ public class ConfigWindow : Window, IDisposable
                 configuration.Save();
             }
 
-            ImGui.TextWrapped(
-                "When scaling with the actor is enabled, VFX Scale is multiplied by " +
-                "SizeChange's current visible growth multiplier and updated while active.");
 
             if (ImGui.Button($"Test VFX at Yourself##{id}"))
             {
