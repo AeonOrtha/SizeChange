@@ -14,6 +14,7 @@ public class GrowthSettings
     public float MinScaleMultiplier { get; set; } = 0.1f;
     public float MaxScaleMultiplier { get; set; } = 1.0f;
     public float DeltaGrowthMultiplier { get; set; } = 1.0f;
+    public float MaximumHealthLossRatioPerTrigger { get; set; } = 1.0f;
     public bool LimitDeltaGrowth { get; set; }
     public float DeltaMaxScaleMultiplier { get; set; } = 5.0f;
     public float AccumulatorDelaySeconds { get; set; }
@@ -45,6 +46,8 @@ public class GrowthSettings
         MinScaleMultiplier = Math.Clamp(MinScaleMultiplier, 0.01f, 1f);
         MaxScaleMultiplier = Math.Max(1f, MaxScaleMultiplier);
         DeltaGrowthMultiplier = Math.Max(0f, DeltaGrowthMultiplier);
+        MaximumHealthLossRatioPerTrigger =
+            Math.Clamp(MaximumHealthLossRatioPerTrigger, 0f, 1f);
         DeltaMaxScaleMultiplier = Math.Max(1f, DeltaMaxScaleMultiplier);
         AccumulatorDelaySeconds = Math.Clamp(AccumulatorDelaySeconds, 0f, 60f);
         AmbientShrinkRate = Math.Max(0f, AmbientShrinkRate);
@@ -84,6 +87,8 @@ public class GrowthSettings
             MinScaleMultiplier = settings.MinScaleMultiplier,
             MaxScaleMultiplier = settings.MaxScaleMultiplier,
             DeltaGrowthMultiplier = settings.DeltaGrowthMultiplier,
+            MaximumHealthLossRatioPerTrigger =
+                settings.MaximumHealthLossRatioPerTrigger,
             LimitDeltaGrowth = settings.LimitDeltaGrowth,
             DeltaMaxScaleMultiplier = settings.DeltaMaxScaleMultiplier,
             AccumulatorDelaySeconds = settings.AccumulatorDelaySeconds,
