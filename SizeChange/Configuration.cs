@@ -32,6 +32,9 @@ public class GrowthSettings
     public float DeltaGrowthVfxCooldownSeconds { get; set; } = 1.0f;
     public float DeltaGrowthVfxScale { get; set; } = 1.0f;
     public bool DeltaGrowthVfxScaleWithActor { get; set; } = true;
+    public bool EnableDeltaGrowthAnimation { get; set; }
+    public string DeltaGrowthAnimationTmbPath { get; set; } = string.Empty;
+    public float DeltaGrowthAnimationCooldownSeconds { get; set; } = 1.0f;
     public bool OnlyActiveInCombat { get; set; }
     public bool GrowFromDamage { get; set; }
     public bool GrowthFromDelta { get; set; }
@@ -61,6 +64,10 @@ public class GrowthSettings
         DeltaGrowthVfxCooldownSeconds =
             Math.Clamp(DeltaGrowthVfxCooldownSeconds, 0f, 60f);
         DeltaGrowthVfxScale = Math.Clamp(DeltaGrowthVfxScale, 0.01f, 100f);
+        DeltaGrowthAnimationTmbPath =
+            DeltaGrowthAnimationTmbPath?.Trim().Replace('\\', '/') ?? string.Empty;
+        DeltaGrowthAnimationCooldownSeconds =
+            Math.Clamp(DeltaGrowthAnimationCooldownSeconds, 0f, 60f);
 
         if (GrowFromDamage && GrowthFromDelta)
         {
@@ -95,6 +102,10 @@ public class GrowthSettings
             DeltaGrowthVfxCooldownSeconds = settings.DeltaGrowthVfxCooldownSeconds,
             DeltaGrowthVfxScale = settings.DeltaGrowthVfxScale,
             DeltaGrowthVfxScaleWithActor = settings.DeltaGrowthVfxScaleWithActor,
+            EnableDeltaGrowthAnimation = settings.EnableDeltaGrowthAnimation,
+            DeltaGrowthAnimationTmbPath = settings.DeltaGrowthAnimationTmbPath,
+            DeltaGrowthAnimationCooldownSeconds =
+                settings.DeltaGrowthAnimationCooldownSeconds,
             OnlyActiveInCombat = settings.OnlyActiveInCombat,
             GrowFromDamage = settings.GrowFromDamage,
             GrowthFromDelta = settings.GrowthFromDelta,

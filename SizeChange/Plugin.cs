@@ -11,6 +11,7 @@ using Dalamud.Plugin.Services;
 using FFXIVClientStructs.FFXIV.Client.Game.Character;
 using FFXIVClientStructs.FFXIV.Client.Graphics.Scene;
 using Lumina.Extensions;
+using Lumina.Excel.Sheets;
 using SizeChange.Windows;
 using Vector3 = FFXIVClientStructs.FFXIV.Common.Math.Vector3;
 
@@ -39,6 +40,7 @@ struct SCCharacterState
     public bool HasDrawOffset;
     public long LastDeltaGrowthSoundTick;
     public long LastDeltaGrowthVfxTick;
+    public long LastDeltaGrowthAnimationTick;
 }
 
 public sealed class Plugin : IDalamudPlugin
@@ -515,6 +517,23 @@ public sealed class Plugin : IDalamudPlugin
             {
                 charState.LastDeltaGrowthVfxTick = currentTick;
             }
+
+            if (actorGroup == SCActorGroup.Self)
+            {
+                long animationCooldownMilliseconds =
+                    (long)(settings.DeltaGrowthAnimationCooldownSeconds * 1000f);
+                bool animationCooldownElapsed =
+                    animationCooldownMilliseconds <= 0 ||
+                    charState.LastDeltaGrowthAnimationTick == 0 ||
+                    currentTick - charState.LastDeltaGrowthAnimationTick >=
+                    animationCooldownMilliseconds;
+
+                if (animationCooldownElapsed &&
+                    TryPlayDeltaGrowthAnimation(actor, settings, false) == null)
+                {
+                    charState.LastDeltaGrowthAnimationTick = currentTick;
+                }
+            }
         }
 
         // Ambient decay is exclusive to Growth From Delta.
@@ -741,6 +760,125 @@ public sealed class Plugin : IDalamudPlugin
             settings.DeltaGrowthVfxScale,
             settings.DeltaGrowthVfxScaleWithActor,
             actorGrowthMultiplier);
+    }
+
+    internal unsafe string TestDeltaGrowthAnimation(GrowthSettings settings)
+    {
+        var localPlayer = ObjectTable.LocalPlayer;
+        if (localPlayer == null)
+        {
+            return "Cannot test: the local player is unavailable.";
+        }
+
+        string? error = TryPlayDeltaGrowthAnimation(
+            (Character*)localPlayer.Address,
+            settings,
+            true);
+        if (error != null)
+        {
+            return error;
+        }
+
+        TryResolveActionTimeline(
+            settings.DeltaGrowthAnimationTmbPath,
+            out ushort actionTimelineId,
+            out _);
+        return $"Animation timeline {actionTimelineId} started locally. No chat command was sent.";
+    }
+
+    private unsafe string? TryPlayDeltaGrowthAnimation(
+        Character* actor,
+        GrowthSettings settings,
+        bool ignoreEnabled)
+    {
+        if (!ignoreEnabled && !settings.EnableDeltaGrowthAnimation)
+        {
+            return "Growth animation is disabled.";
+        }
+
+        var localPlayer = ObjectTable.LocalPlayer;
+        if (actor == null ||
+            localPlayer == null ||
+            localPlayer.Address != (nint)actor)
+        {
+            return "Growth animations can only be played on the local player.";
+        }
+
+        if (actor->Mode != CharacterModes.Normal)
+        {
+            return "The local player is not in a normal animation state. " +
+                   "The growth animation was not allowed to interrupt it.";
+        }
+
+        if (!TryResolveActionTimeline(
+                settings.DeltaGrowthAnimationTmbPath,
+                out ushort actionTimelineId,
+                out string error))
+        {
+            return error;
+        }
+
+        actor->Timeline.PlayActionTimeline(actionTimelineId);
+        return null;
+    }
+
+    private static bool TryResolveActionTimeline(
+        string configuredPath,
+        out ushort actionTimelineId,
+        out string error)
+    {
+        actionTimelineId = 0;
+        error = string.Empty;
+
+        string path = configuredPath?.Trim().Replace('\\', '/') ?? string.Empty;
+        if (path.Length == 0 ||
+            path.StartsWith('/') ||
+            path.Contains("..", StringComparison.Ordinal) ||
+            !path.EndsWith(".tmb", StringComparison.OrdinalIgnoreCase))
+        {
+            error = "Invalid path: paste a game ActionTimeline path ending in .tmb.";
+            return false;
+        }
+
+        string pathWithoutExtension = path[..^4].TrimEnd('/');
+        uint bestRowId = 0;
+        int bestKeyLength = -1;
+
+        foreach (var timeline in DataManager.GetExcelSheet<ActionTimeline>())
+        {
+            string key = timeline.Key.ExtractText().Trim().Replace('\\', '/');
+            if (key.Length == 0)
+            {
+                continue;
+            }
+
+            bool matches =
+                pathWithoutExtension.Equals(key, StringComparison.OrdinalIgnoreCase) ||
+                pathWithoutExtension.EndsWith(
+                    "/" + key,
+                    StringComparison.OrdinalIgnoreCase);
+            if (matches && key.Length > bestKeyLength)
+            {
+                bestRowId = timeline.RowId;
+                bestKeyLength = key.Length;
+            }
+        }
+
+        if (bestRowId == 0)
+        {
+            error = "No ActionTimeline row matches that TMB path. Use a path copied " +
+                    "from VFXEditor's TMB selector, not an arbitrary local file path.";
+            return false;
+        }
+
+        if (bestRowId > ushort.MaxValue)
+        {
+            error = $"ActionTimeline row {bestRowId} is outside the playable range.";
+            return false;
+        }
+
+        actionTimelineId = (ushort)bestRowId;
+        return true;
     }
 
     private unsafe void ApplyHeightOffset(

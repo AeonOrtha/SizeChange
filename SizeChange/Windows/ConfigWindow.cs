@@ -17,6 +17,8 @@ public class ConfigWindow : Window, IDisposable
     private bool growthSoundTestSucceeded;
     private string growthVfxTestResult = string.Empty;
     private bool growthVfxTestSucceeded;
+    private string growthAnimationTestResult = string.Empty;
+    private bool growthAnimationTestSucceeded;
 
     public ConfigWindow(Plugin plugin) : base("SizeChange Config")
     {
@@ -598,6 +600,70 @@ public class ConfigWindow : Window, IDisposable
                         ? new Vector4(0.35f, 1f, 0.45f, 1f)
                         : new Vector4(1f, 0.35f, 0.35f, 1f),
                     growthVfxTestResult);
+            }
+        }
+
+        if (!string.Equals(id, "self", StringComparison.Ordinal)) return;
+
+        bool enableDeltaGrowthAnimation = settings.EnableDeltaGrowthAnimation;
+        if (ImGui.Checkbox(
+                "Play Local Animation When Delta Growth Triggers##self",
+                ref enableDeltaGrowthAnimation))
+        {
+            settings.EnableDeltaGrowthAnimation = enableDeltaGrowthAnimation;
+            configuration.Save();
+        }
+
+        if (settings.EnableDeltaGrowthAnimation)
+        {
+            ImGui.TextWrapped(
+                "Self only. This plays an ActionTimeline directly and never sends an " +
+                "emote or chat command. Use a one-shot TMB path copied from VFXEditor; " +
+                "looping timelines are not recommended.");
+
+            string deltaGrowthAnimationPath = settings.DeltaGrowthAnimationTmbPath;
+            if (ImGui.InputText(
+                    "Growth Animation TMB Path##self",
+                    ref deltaGrowthAnimationPath,
+                    256))
+            {
+                settings.DeltaGrowthAnimationTmbPath = deltaGrowthAnimationPath;
+                growthAnimationTestResult = string.Empty;
+                configuration.Save();
+            }
+
+            float deltaGrowthAnimationCooldown =
+                settings.DeltaGrowthAnimationCooldownSeconds;
+            if (ImGui.DragFloat(
+                    "Minimum Seconds Between Animations##self",
+                    ref deltaGrowthAnimationCooldown,
+                    0.05f,
+                    0.00f,
+                    60.00f,
+                    "%.2f"))
+            {
+                settings.DeltaGrowthAnimationCooldownSeconds =
+                    Math.Clamp(deltaGrowthAnimationCooldown, 0f, 60f);
+                configuration.Save();
+            }
+
+            if (ImGui.Button("Test Animation on Yourself##self"))
+            {
+                growthAnimationTestResult =
+                    plugin.TestDeltaGrowthAnimation(settings);
+                growthAnimationTestSucceeded =
+                    growthAnimationTestResult.StartsWith(
+                        "Animation timeline",
+                        StringComparison.Ordinal);
+            }
+
+            if (growthAnimationTestResult.Length > 0)
+            {
+                ImGui.TextColored(
+                    growthAnimationTestSucceeded
+                        ? new Vector4(0.35f, 1f, 0.45f, 1f)
+                        : new Vector4(1f, 0.35f, 0.35f, 1f),
+                    growthAnimationTestResult);
             }
         }
     }
