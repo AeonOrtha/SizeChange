@@ -338,6 +338,24 @@ public class ConfigWindow : Window, IDisposable
             configuration.Save();
         }
 
+        float maximumHealthLossPercent =
+            settings.MaximumHealthLossRatioPerTrigger * 100f;
+        if (ImGui.DragFloat(
+                $"Maximum HP Loss Counted Per Trigger (%)##{id}",
+                ref maximumHealthLossPercent,
+                1.0f,
+                0.00f,
+                100.00f,
+                "%.1f"))
+        {
+            settings.MaximumHealthLossRatioPerTrigger =
+                Math.Clamp(maximumHealthLossPercent / 100f, 0f, 1f);
+            configuration.Save();
+        }
+        ImGui.TextWrapped(
+            "Caps growth from one detected health loss. At 25%, losing 60% of " +
+            "maximum HP contributes 25% worth of growth. Actual damage is unchanged.");
+
         bool limitDeltaGrowth = settings.LimitDeltaGrowth;
         if (ImGui.Checkbox($"Limit Delta Growth##{id}", ref limitDeltaGrowth))
         {

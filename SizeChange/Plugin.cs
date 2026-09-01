@@ -405,7 +405,9 @@ public sealed class Plugin : IDalamudPlugin
             float healthLost = charState.PreviousHealth - health;
             if (healthLost > 0f)
             {
-                float healthLostRatio = healthLost / maxhp;
+                float healthLostRatio = Math.Min(
+                    healthLost / maxhp,
+                    settings.MaximumHealthLossRatioPerTrigger);
                 float addedGrowth =
                     healthLostRatio * settings.DeltaGrowthMultiplier;
                 if (addedGrowth > 0f)
