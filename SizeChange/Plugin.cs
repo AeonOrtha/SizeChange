@@ -36,6 +36,7 @@ struct SCCharacterState
     public float AccumulatorRemainingSeconds;
     public float GrowthOvershootMultiplier;
     public float GrowthOvershootRemainingSeconds;
+    public bool IsGrowthOvershootRising;
     public bool IsGrowthOvershootSettling;
     public bool HasPreviousHealth;
     public float BaseDrawOffsetY;
@@ -489,7 +490,8 @@ public sealed class Plugin : IDalamudPlugin
                 releasedGrowthAmount * settings.GrowthOvershootPercent / 100f;
             charState.GrowthOvershootRemainingSeconds =
                 settings.GrowthOvershootSettleSeconds;
-            charState.IsGrowthOvershootSettling = true;
+            charState.IsGrowthOvershootRising = true;
+            charState.IsGrowthOvershootSettling = false;
         }
 
         // Trigger feedback only when immediate or accumulated damage actually
@@ -559,9 +561,11 @@ public sealed class Plugin : IDalamudPlugin
         {
             charState.GrowthOvershootMultiplier = 0f;
             charState.GrowthOvershootRemainingSeconds = 0f;
+            charState.IsGrowthOvershootRising = false;
             charState.IsGrowthOvershootSettling = false;
         }
         else if (releasedGrowthAmount <= 0f &&
+                 charState.IsGrowthOvershootSettling &&
                  charState.GrowthOvershootMultiplier > 0f)
         {
             float remainingSeconds = Math.Min(
@@ -584,6 +588,7 @@ public sealed class Plugin : IDalamudPlugin
         // Ambient decay is exclusive to Growth From Delta.
         if (settings.GrowthFromDelta &&
             charState.PendingGrowth <= 0f &&
+            !charState.IsGrowthOvershootRising &&
             !charState.IsGrowthOvershootSettling &&
             charState.GrowthMultiplier > 1.0f)
         {
@@ -635,7 +640,25 @@ public sealed class Plugin : IDalamudPlugin
             targetScale = Math.Min(targetScale, maximumAllowedScale);
         }
 
-        if (charState.IsGrowthOvershootSettling)
+        if (charState.IsGrowthOvershootRising)
+        {
+            // Preserve the normal growth lerp. Hold the overshoot until the
+            // visible scale reaches its peak, then begin the timed return.
+            scale = float.Lerp(previousScale, targetScale, settings.Speed / 100f);
+            float peakTolerance = Math.Max(0.00001f, MathF.Abs(targetScale) * 0.0001f);
+            if (MathF.Abs(targetScale - scale) <= peakTolerance)
+            {
+                scale = targetScale;
+                charState.IsGrowthOvershootRising = false;
+                charState.IsGrowthOvershootSettling = true;
+                // Only settle overshoot that was actually visible after the cap.
+                charState.GrowthOvershootMultiplier = charState.PlayerScale > 0f
+                    ? Math.Max(0f, (targetScale - intendedTargetScale) / charState.PlayerScale)
+                    : 0f;
+                charState.GrowthOvershootRemainingSeconds = settings.GrowthOvershootSettleSeconds;
+            }
+        }
+        else if (charState.IsGrowthOvershootSettling)
         {
             scale = targetScale;
             if (charState.GrowthOvershootMultiplier <= 0f)
