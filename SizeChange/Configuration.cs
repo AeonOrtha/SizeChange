@@ -20,6 +20,8 @@ public class GrowthSettings
     public float AccumulatorDelaySeconds { get; set; }
     public float GrowthOvershootPercent { get; set; }
     public float GrowthOvershootRiseSeconds { get; set; } = 0.35f;
+    public float GrowthOvershootRiseCurve { get; set; }
+    public float GrowthOvershootReturnCurve { get; set; }
     public float GrowthOvershootSettleSeconds { get; set; } = 0.35f;
     public float AmbientShrinkRate { get; set; } = 0.05f;
     public float OutOfCombatDecayMultiplier { get; set; } = 10.0f;
@@ -55,6 +57,8 @@ public class GrowthSettings
         AccumulatorDelaySeconds = Math.Clamp(AccumulatorDelaySeconds, 0f, 60f);
         GrowthOvershootPercent = Math.Clamp(GrowthOvershootPercent, 0f, 500f);
         GrowthOvershootRiseSeconds = Math.Clamp(GrowthOvershootRiseSeconds, 0.05f, 10f);
+        GrowthOvershootRiseCurve = Math.Clamp(GrowthOvershootRiseCurve, -2f, 2f);
+        GrowthOvershootReturnCurve = Math.Clamp(GrowthOvershootReturnCurve, -2f, 2f);
         GrowthOvershootSettleSeconds =
             Math.Clamp(GrowthOvershootSettleSeconds, 0.05f, 10f);
         AmbientShrinkRate = Math.Max(0f, AmbientShrinkRate);
@@ -101,6 +105,8 @@ public class GrowthSettings
             AccumulatorDelaySeconds = settings.AccumulatorDelaySeconds,
             GrowthOvershootPercent = settings.GrowthOvershootPercent,
             GrowthOvershootRiseSeconds = settings.GrowthOvershootRiseSeconds,
+            GrowthOvershootRiseCurve = settings.GrowthOvershootRiseCurve,
+            GrowthOvershootReturnCurve = settings.GrowthOvershootReturnCurve,
             GrowthOvershootSettleSeconds = settings.GrowthOvershootSettleSeconds,
             AmbientShrinkRate = settings.AmbientShrinkRate,
             OutOfCombatDecayMultiplier = settings.OutOfCombatDecayMultiplier,

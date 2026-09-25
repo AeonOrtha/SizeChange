@@ -408,6 +408,14 @@ public class ConfigWindow : Window, IDisposable
 
         if (settings.GrowthOvershootPercent > 0f)
         {
+            float riseSeconds = settings.GrowthOvershootRiseSeconds;
+            if (ImGui.DragFloat($"Overshoot Rise Time (Seconds)##{id}",
+                    ref riseSeconds, 0.05f, 0.05f, 10f, "%.2f"))
+            {
+                settings.GrowthOvershootRiseSeconds = Math.Clamp(riseSeconds, 0.05f, 10f);
+                configuration.Save();
+            }
+
             float growthOvershootSettleSeconds =
                 settings.GrowthOvershootSettleSeconds;
             if (ImGui.DragFloat(
@@ -423,10 +431,30 @@ public class ConfigWindow : Window, IDisposable
                 configuration.Save();
             }
 
+            float riseCurve = settings.GrowthOvershootRiseCurve;
+            if (ImGui.SliderFloat($"Rise Curve##{id}", ref riseCurve, -2f, 2f, "%.2f"))
+            {
+                settings.GrowthOvershootRiseCurve = riseCurve;
+                configuration.Save();
+            }
+            float returnCurve = settings.GrowthOvershootReturnCurve;
+            if (ImGui.SliderFloat($"Return Curve##{id}", ref returnCurve, -2f, 2f, "%.2f"))
+            {
+                settings.GrowthOvershootReturnCurve = returnCurve;
+                configuration.Save();
+            }
+            ImGui.TextWrapped(
+                "Curve: negative moves earlier, positive moves later, zero is balanced. " +
+                "Both directions ease smoothly into and out of the peak. " +
+                "For a quicker swell and a gentle return, try Rise Curve -1 and Return Curve 0, " +
+                "with Rise Time 0.25s and Settle Time 0.45s.");
+
             ImGui.TextWrapped(
                 "The overshoot is temporary and does not increase earned growth. " +
-                "At 50%, a burst earning +0.20x briefly adds another +0.10x before " +
-                "settling back. The maximum size cap is still respected.");
+                "At 50%, a damage burst worth +0.20x adds a temporary +0.10x above the intended size. " +
+                "The settled size obeys the cap; the peak may exceed it, including when already at the cap. " +
+                "Rise and Settle Time shorten proportionally if needed to fit the accumulator interval. " +
+                "The accumulator timing is unchanged.");
         }
 
 

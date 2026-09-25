@@ -604,6 +604,8 @@ public sealed class Plugin : IDalamudPlugin
                 charState.PlayerScale * pulseGrowthAmount * settings.GrowthOvershootPercent / 100f,
                 settings.GrowthOvershootRiseSeconds,
                 settings.GrowthOvershootSettleSeconds,
+                settings.GrowthOvershootRiseCurve,
+                settings.GrowthOvershootReturnCurve,
                 settings.AccumulatorDelaySeconds,
                 deltaSeconds);
         }

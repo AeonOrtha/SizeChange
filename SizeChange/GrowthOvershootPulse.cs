@@ -13,14 +13,19 @@ internal struct GrowthOvershootPulse
     private float elapsed;
     private float riseSeconds;
     private float settleSeconds;
+    private float riseCurve;
+    private float returnCurve;
 
     public void Start(float visibleScale, float extraScale, float riseTime,
-        float settleTime, float accumulatorDelay, float frameSeconds)
+        float settleTime, float riseCurveBias, float returnCurveBias,
+        float accumulatorDelay, float frameSeconds)
     {
         startScale = visibleScale;
         overshootScale = extraScale;
         riseSeconds = riseTime;
         settleSeconds = settleTime;
+        riseCurve = Math.Clamp(riseCurveBias, -2f, 2f);
+        returnCurve = Math.Clamp(returnCurveBias, -2f, 2f);
         if (accumulatorDelay > 0f)
         {
             // Fit the animation to the clock, never the clock to the animation.
@@ -42,7 +47,7 @@ internal struct GrowthOvershootPulse
         {
             peakScale = intendedScale + overshootScale;
             float t = riseSeconds <= 0f ? 1f : Math.Clamp(elapsed / riseSeconds, 0f, 1f);
-            float visibleScale = float.Lerp(startScale, peakScale, t);
+            float visibleScale = float.Lerp(startScale, peakScale, EasePulse(t, riseCurve));
             if (t >= 1f)
             {
                 // Render the actual peak for this update before returning.
@@ -53,9 +58,22 @@ internal struct GrowthOvershootPulse
         }
 
         float settleT = settleSeconds <= 0f ? 1f : Math.Clamp(elapsed / settleSeconds, 0f, 1f);
-        float result = float.Lerp(peakScale, intendedScale, settleT);
+        float result = float.Lerp(peakScale, intendedScale, EasePulse(settleT, returnCurve));
         if (settleT >= 1f)
             IsActive = false;
         return result;
+    }
+
+    // Quintic easing gives zero velocity and acceleration at both ends.
+    // The rise rounds into the peak and the return rounds into the settled
+    // size, instead of reversing a constant-speed lerp abruptly.
+    private static float EasePulse(float t, float curveBias)
+    {
+        // Negative bias puts more movement early in the phase; positive bias
+        // delays it. Warping before easing preserves the rounded endpoints for
+        // every setting, including the shared rise/return peak.
+        float bias = MathF.Pow(2f, curveBias);
+        t /= bias + (1f - bias) * t;
+        return Math.Clamp(t * t * t * (t * (6f * t - 15f) + 10f), 0f, 1f);
     }
 }
