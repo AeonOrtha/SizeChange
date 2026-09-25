@@ -392,6 +392,43 @@ public class ConfigWindow : Window, IDisposable
             configuration.Save();
         }
 
+        float growthOvershootPercent = settings.GrowthOvershootPercent;
+        if (ImGui.DragFloat(
+                $"Growth Overshoot (% of New Growth)##{id}",
+                ref growthOvershootPercent,
+                1.0f,
+                0.00f,
+                500.00f,
+                "%.1f"))
+        {
+            settings.GrowthOvershootPercent =
+                Math.Clamp(growthOvershootPercent, 0f, 500f);
+            configuration.Save();
+        }
+
+        if (settings.GrowthOvershootPercent > 0f)
+        {
+            float growthOvershootSettleSeconds =
+                settings.GrowthOvershootSettleSeconds;
+            if (ImGui.DragFloat(
+                    $"Overshoot Settle Time (Seconds)##{id}",
+                    ref growthOvershootSettleSeconds,
+                    0.05f,
+                    0.05f,
+                    10.00f,
+                    "%.2f"))
+            {
+                settings.GrowthOvershootSettleSeconds =
+                    Math.Clamp(growthOvershootSettleSeconds, 0.05f, 10f);
+                configuration.Save();
+            }
+
+            ImGui.TextWrapped(
+                "The overshoot is temporary and does not increase earned growth. " +
+                "At 50%, a burst earning +0.20x briefly adds another +0.10x before " +
+                "settling back. The maximum size cap is still respected.");
+        }
+
 
         float ambientShrinkRate = settings.AmbientShrinkRate;
         if (ImGui.DragFloat(
