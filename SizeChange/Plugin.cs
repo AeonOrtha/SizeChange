@@ -34,6 +34,9 @@ struct SCCharacterState
     public float GrowthMultiplier;
     public float PendingGrowth;
     public float AccumulatorRemainingSeconds;
+    public float GrowthOvershootMultiplier;
+    public float GrowthOvershootRemainingSeconds;
+    public bool IsGrowthOvershootSettling;
     public bool HasPreviousHealth;
     public float BaseDrawOffsetY;
     public float LastAppliedDrawOffsetY;
@@ -477,6 +480,18 @@ public sealed class Plugin : IDalamudPlugin
                 settings.DeltaMaxScaleMultiplier);
         }
 
+        float releasedGrowthAmount = Math.Max(
+            0f,
+            charState.GrowthMultiplier - growthMultiplierBeforeRelease);
+        if (releasedGrowthAmount > 0f && settings.GrowthOvershootPercent > 0f)
+        {
+            charState.GrowthOvershootMultiplier +=
+                releasedGrowthAmount * settings.GrowthOvershootPercent / 100f;
+            charState.GrowthOvershootRemainingSeconds =
+                settings.GrowthOvershootSettleSeconds;
+            charState.IsGrowthOvershootSettling = true;
+        }
+
         // Trigger feedback only when immediate or accumulated damage actually
         // increases growth. A delayed window therefore produces one combined
         // sound/VFX event instead of one event for every hit inside the window.
@@ -538,9 +553,38 @@ public sealed class Plugin : IDalamudPlugin
             }
         }
 
+        if (!settings.GrowthFromDelta ||
+            disable ||
+            settings.GrowthOvershootPercent <= 0f)
+        {
+            charState.GrowthOvershootMultiplier = 0f;
+            charState.GrowthOvershootRemainingSeconds = 0f;
+            charState.IsGrowthOvershootSettling = false;
+        }
+        else if (releasedGrowthAmount <= 0f &&
+                 charState.GrowthOvershootMultiplier > 0f)
+        {
+            float remainingSeconds = Math.Min(
+                charState.GrowthOvershootRemainingSeconds,
+                settings.GrowthOvershootSettleSeconds);
+            if (remainingSeconds <= deltaSeconds)
+            {
+                charState.GrowthOvershootMultiplier = 0f;
+                charState.GrowthOvershootRemainingSeconds = 0f;
+            }
+            else
+            {
+                float nextRemainingSeconds = remainingSeconds - deltaSeconds;
+                charState.GrowthOvershootMultiplier *=
+                    nextRemainingSeconds / remainingSeconds;
+                charState.GrowthOvershootRemainingSeconds = nextRemainingSeconds;
+            }
+        }
+
         // Ambient decay is exclusive to Growth From Delta.
         if (settings.GrowthFromDelta &&
             charState.PendingGrowth <= 0f &&
+            !charState.IsGrowthOvershootSettling &&
             charState.GrowthMultiplier > 1.0f)
         {
             float decayMultiplier =
@@ -556,7 +600,7 @@ public sealed class Plugin : IDalamudPlugin
                 charState.GrowthMultiplier - shrinkAmount);
         }
 
-        float targetScale = disable
+        float intendedTargetScale = disable
             ? charState.PlayerScale
             : settings.GrowthFromDelta
                 ? charState.PlayerScale * charState.GrowthMultiplier
@@ -578,10 +622,34 @@ public sealed class Plugin : IDalamudPlugin
         {
             maximumAllowedScale =
                 charState.PlayerScale * settings.DeltaMaxScaleMultiplier;
+            intendedTargetScale = Math.Min(
+                intendedTargetScale,
+                maximumAllowedScale);
+        }
+
+        float targetScale = intendedTargetScale;
+        if (settings.GrowthFromDelta && !disable)
+        {
+            targetScale +=
+                charState.PlayerScale * charState.GrowthOvershootMultiplier;
             targetScale = Math.Min(targetScale, maximumAllowedScale);
         }
 
-        scale = float.Lerp(previousScale, targetScale, settings.Speed / 100f);
+        if (charState.IsGrowthOvershootSettling)
+        {
+            scale = targetScale;
+            if (charState.GrowthOvershootMultiplier <= 0f)
+            {
+                charState.IsGrowthOvershootSettling = false;
+            }
+        }
+        else
+        {
+            scale = float.Lerp(
+                previousScale,
+                targetScale,
+                settings.Speed / 100f);
+        }
         // Enforce the cap on the final visible scale as well as the target. This
         // immediately brings an actor back inside a newly enabled or lowered cap.
         scale = Math.Min(scale, maximumAllowedScale);
@@ -601,8 +669,8 @@ public sealed class Plugin : IDalamudPlugin
             settings.EnableDeltaHeightOffset &&
             charState.PlayerScale > 0f)
         {
-            // Follow the visible, lerped scale so height returns with normal
-            // ambient decay and the faster out-of-combat return.
+            // Follow the visible scale so height also follows overshoot, normal
+            // ambient decay, and the faster out-of-combat return.
             desiredHeightOffset =
                 Math.Max(0f, visibleScaleMultiplier - 1f) *
                 settings.DeltaHeightOffsetPerScale;
