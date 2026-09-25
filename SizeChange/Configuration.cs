@@ -19,6 +19,7 @@ public class GrowthSettings
     public float DeltaMaxScaleMultiplier { get; set; } = 5.0f;
     public float AccumulatorDelaySeconds { get; set; }
     public float GrowthOvershootPercent { get; set; }
+    public float GrowthOvershootRiseSeconds { get; set; } = 0.35f;
     public float GrowthOvershootSettleSeconds { get; set; } = 0.35f;
     public float AmbientShrinkRate { get; set; } = 0.05f;
     public float OutOfCombatDecayMultiplier { get; set; } = 10.0f;
@@ -53,6 +54,7 @@ public class GrowthSettings
         DeltaMaxScaleMultiplier = Math.Max(1f, DeltaMaxScaleMultiplier);
         AccumulatorDelaySeconds = Math.Clamp(AccumulatorDelaySeconds, 0f, 60f);
         GrowthOvershootPercent = Math.Clamp(GrowthOvershootPercent, 0f, 500f);
+        GrowthOvershootRiseSeconds = Math.Clamp(GrowthOvershootRiseSeconds, 0.05f, 10f);
         GrowthOvershootSettleSeconds =
             Math.Clamp(GrowthOvershootSettleSeconds, 0.05f, 10f);
         AmbientShrinkRate = Math.Max(0f, AmbientShrinkRate);
@@ -98,6 +100,7 @@ public class GrowthSettings
             DeltaMaxScaleMultiplier = settings.DeltaMaxScaleMultiplier,
             AccumulatorDelaySeconds = settings.AccumulatorDelaySeconds,
             GrowthOvershootPercent = settings.GrowthOvershootPercent,
+            GrowthOvershootRiseSeconds = settings.GrowthOvershootRiseSeconds,
             GrowthOvershootSettleSeconds = settings.GrowthOvershootSettleSeconds,
             AmbientShrinkRate = settings.AmbientShrinkRate,
             OutOfCombatDecayMultiplier = settings.OutOfCombatDecayMultiplier,

@@ -34,10 +34,7 @@ struct SCCharacterState
     public float GrowthMultiplier;
     public float PendingGrowth;
     public float AccumulatorRemainingSeconds;
-    public float GrowthOvershootMultiplier;
-    public float GrowthOvershootRemainingSeconds;
-    public bool IsGrowthOvershootRising;
-    public bool IsGrowthOvershootSettling;
+    public GrowthOvershootPulse OvershootPulse;
     public bool HasPreviousHealth;
     public float BaseDrawOffsetY;
     public float LastAppliedDrawOffsetY;
@@ -474,6 +471,11 @@ public sealed class Plugin : IDalamudPlugin
             charState.AccumulatorRemainingSeconds = 0f;
         }
 
+        // Measure the damage-driven release before capping earned growth so a
+        // character already at the cap can still display a temporary pulse.
+        float pulseGrowthAmount = Math.Max(
+            0f, charState.GrowthMultiplier - growthMultiplierBeforeRelease);
+
         if (settings.GrowthFromDelta && settings.LimitDeltaGrowth)
         {
             charState.GrowthMultiplier = Math.Min(
@@ -481,18 +483,8 @@ public sealed class Plugin : IDalamudPlugin
                 settings.DeltaMaxScaleMultiplier);
         }
 
-        float releasedGrowthAmount = Math.Max(
-            0f,
-            charState.GrowthMultiplier - growthMultiplierBeforeRelease);
-        if (releasedGrowthAmount > 0f && settings.GrowthOvershootPercent > 0f)
-        {
-            charState.GrowthOvershootMultiplier +=
-                releasedGrowthAmount * settings.GrowthOvershootPercent / 100f;
-            charState.GrowthOvershootRemainingSeconds =
-                settings.GrowthOvershootSettleSeconds;
-            charState.IsGrowthOvershootRising = true;
-            charState.IsGrowthOvershootSettling = false;
-        }
+        bool triggerOvershoot = settings.GrowthFromDelta && !disable &&
+            releasedGrowth && pulseGrowthAmount > 0f && settings.GrowthOvershootPercent > 0f;
 
         // Trigger feedback only when immediate or accumulated damage actually
         // increases growth. A delayed window therefore produces one combined
@@ -555,41 +547,14 @@ public sealed class Plugin : IDalamudPlugin
             }
         }
 
-        if (!settings.GrowthFromDelta ||
-            disable ||
-            settings.GrowthOvershootPercent <= 0f)
-        {
-            charState.GrowthOvershootMultiplier = 0f;
-            charState.GrowthOvershootRemainingSeconds = 0f;
-            charState.IsGrowthOvershootRising = false;
-            charState.IsGrowthOvershootSettling = false;
-        }
-        else if (releasedGrowthAmount <= 0f &&
-                 charState.IsGrowthOvershootSettling &&
-                 charState.GrowthOvershootMultiplier > 0f)
-        {
-            float remainingSeconds = Math.Min(
-                charState.GrowthOvershootRemainingSeconds,
-                settings.GrowthOvershootSettleSeconds);
-            if (remainingSeconds <= deltaSeconds)
-            {
-                charState.GrowthOvershootMultiplier = 0f;
-                charState.GrowthOvershootRemainingSeconds = 0f;
-            }
-            else
-            {
-                float nextRemainingSeconds = remainingSeconds - deltaSeconds;
-                charState.GrowthOvershootMultiplier *=
-                    nextRemainingSeconds / remainingSeconds;
-                charState.GrowthOvershootRemainingSeconds = nextRemainingSeconds;
-            }
-        }
+        if (!settings.GrowthFromDelta || disable || settings.GrowthOvershootPercent <= 0f)
+            charState.OvershootPulse = default;
 
         // Ambient decay is exclusive to Growth From Delta.
         if (settings.GrowthFromDelta &&
             charState.PendingGrowth <= 0f &&
-            !charState.IsGrowthOvershootRising &&
-            !charState.IsGrowthOvershootSettling &&
+            !charState.OvershootPulse.IsActive &&
+            !triggerOvershoot &&
             charState.GrowthMultiplier > 1.0f)
         {
             float decayMultiplier =
@@ -632,50 +597,27 @@ public sealed class Plugin : IDalamudPlugin
                 maximumAllowedScale);
         }
 
-        float targetScale = intendedTargetScale;
-        if (settings.GrowthFromDelta && !disable)
+        if (triggerOvershoot)
         {
-            targetScale +=
-                charState.PlayerScale * charState.GrowthOvershootMultiplier;
-            targetScale = Math.Min(targetScale, maximumAllowedScale);
+            charState.OvershootPulse.Start(
+                previousScale,
+                charState.PlayerScale * pulseGrowthAmount * settings.GrowthOvershootPercent / 100f,
+                settings.GrowthOvershootRiseSeconds,
+                settings.GrowthOvershootSettleSeconds,
+                settings.AccumulatorDelaySeconds,
+                deltaSeconds);
         }
 
-        if (charState.IsGrowthOvershootRising)
+        if (charState.OvershootPulse.IsActive)
         {
-            // Preserve the normal growth lerp. Hold the overshoot until the
-            // visible scale reaches its peak, then begin the timed return.
-            scale = float.Lerp(previousScale, targetScale, settings.Speed / 100f);
-            float peakTolerance = Math.Max(0.00001f, MathF.Abs(targetScale) * 0.0001f);
-            if (MathF.Abs(targetScale - scale) <= peakTolerance)
-            {
-                scale = targetScale;
-                charState.IsGrowthOvershootRising = false;
-                charState.IsGrowthOvershootSettling = true;
-                // Only settle overshoot that was actually visible after the cap.
-                charState.GrowthOvershootMultiplier = charState.PlayerScale > 0f
-                    ? Math.Max(0f, (targetScale - intendedTargetScale) / charState.PlayerScale)
-                    : 0f;
-                charState.GrowthOvershootRemainingSeconds = settings.GrowthOvershootSettleSeconds;
-            }
-        }
-        else if (charState.IsGrowthOvershootSettling)
-        {
-            scale = targetScale;
-            if (charState.GrowthOvershootMultiplier <= 0f)
-            {
-                charState.IsGrowthOvershootSettling = false;
-            }
+            // The peak may exceed the cap; only its settled target is capped.
+            scale = charState.OvershootPulse.Update(deltaSeconds, intendedTargetScale);
         }
         else
         {
-            scale = float.Lerp(
-                previousScale,
-                targetScale,
-                settings.Speed / 100f);
+            scale = float.Lerp(previousScale, intendedTargetScale, settings.Speed / 100f);
+            scale = Math.Min(scale, maximumAllowedScale);
         }
-        // Enforce the cap on the final visible scale as well as the target. This
-        // immediately brings an actor back inside a newly enabled or lowered cap.
-        scale = Math.Min(scale, maximumAllowedScale);
         draw->Scale = new Vector3(scale, scale, scale);
         actor->Scale = scale;
 
