@@ -135,43 +135,49 @@ public class ConfigWindow : Window, IDisposable
             configuration.Save();
         }
 
-        bool add = ImGui.InputText("Bone Name", ref heartbeatBoneInput, 128, ImGuiInputTextFlags.EnterReturnsTrue);
-        ImGui.SameLine();
-        add |= ImGui.Button("Add Bone");
-        if (add)
+        DrawHeartbeatChains(settings);
+        if (ImGui.TreeNode("Custom Bones (optional overrides)"))
         {
-            string name = heartbeatBoneInput.Trim();
-            if (name.Length == 0) heartbeatInputError = "Enter an exact bone name from Customize+.";
-            else if (name.Equals("n_root", StringComparison.OrdinalIgnoreCase))
-                heartbeatInputError = "n_root is reserved for overall size; choose an individual body bone.";
-            else if (settings.Bones.Exists(bone => bone.Name == name)) heartbeatInputError = "That bone is already listed.";
-            else
-            {
-                settings.Bones.Add(new HeartbeatBone { Name = name });
-                heartbeatBoneInput = string.Empty;
-                heartbeatInputError = string.Empty;
-                configuration.Save();
-            }
-        }
-        if (heartbeatInputError.Length > 0) ImGui.TextWrapped(heartbeatInputError);
-        for (int i = 0; i < settings.Bones.Count; i++)
-        {
-            var bone = settings.Bones[i];
-            ImGui.PushID($"heartbeat-{i}");
-            float amount = bone.Strength;
-            if (ImGui.DragFloat($"{bone.Name} — Additive Scale", ref amount, 0.005f, 0f, 5f, "%.3f"))
-            {
-                bone.Strength = Math.Clamp(amount, 0f, 5f);
-                configuration.Save();
-            }
+            ImGui.TextWrapped("Use exact Customize+ internal names. An existing preset bone keeps its chain timing; this list overrides its strength.");
+            bool add = ImGui.InputText("Bone Name", ref heartbeatBoneInput, 128, ImGuiInputTextFlags.EnterReturnsTrue);
             ImGui.SameLine();
-            bool remove = ImGui.Button("Remove");
-            ImGui.PopID();
-            if (remove)
+            add |= ImGui.Button("Add Bone");
+            if (add)
             {
-                settings.Bones.RemoveAt(i--);
-                configuration.Save();
+                string name = heartbeatBoneInput.Trim();
+                if (name.Length == 0) heartbeatInputError = "Enter an exact bone name from Customize+.";
+                else if (name.Equals("n_root", StringComparison.OrdinalIgnoreCase))
+                    heartbeatInputError = "n_root is reserved for overall size; choose an individual body bone.";
+                else if (settings.Bones.Exists(bone => bone.Name == name)) heartbeatInputError = "That bone is already listed.";
+                else
+                {
+                    settings.Bones.Add(new HeartbeatBone { Name = name });
+                    heartbeatBoneInput = string.Empty;
+                    heartbeatInputError = string.Empty;
+                    configuration.Save();
+                }
             }
+            if (heartbeatInputError.Length > 0) ImGui.TextWrapped(heartbeatInputError);
+            for (int i = 0; i < settings.Bones.Count; i++)
+            {
+                var bone = settings.Bones[i];
+                ImGui.PushID($"heartbeat-{i}");
+                float amount = bone.Strength;
+                if (ImGui.DragFloat($"{bone.Name} — Additive Scale", ref amount, 0.005f, 0f, 5f, "%.3f"))
+                {
+                    bone.Strength = Math.Clamp(amount, 0f, 5f);
+                    configuration.Save();
+                }
+                ImGui.SameLine();
+                bool remove = ImGui.Button("Remove");
+                ImGui.PopID();
+                if (remove)
+                {
+                    settings.Bones.RemoveAt(i--);
+                    configuration.Save();
+                }
+            }
+            ImGui.TreePop();
         }
         ImGui.TextWrapped("An additive value of 0.05 pulses a base scale of 1.50 up to 1.55 at strength 1. " +
             "The same addition applies to X/Y/Z. Unknown bone names have no visible effect; " +
@@ -180,6 +186,73 @@ public class ConfigWindow : Window, IDisposable
             "Your saved profile is never edited; disabling removes SizeChange's temporary profile.");
         ImGui.TextWrapped(plugin.BoneHeartbeat.Status);
         ImGui.Separator();
+    }
+
+    private void DrawHeartbeatChains(BoneHeartbeatSettings settings)
+    {
+        int selected = settings.Chains.FindAll(chain => chain.Enabled).Count;
+        if (ImGui.BeginCombo("Bone Chains", selected == 0 ? "Select chains..." : $"{selected} selected"))
+        {
+            foreach (var definition in HeartbeatChains.All)
+            {
+                var chain = settings.Chains.Find(x => x.Id == definition.Id);
+                bool active = chain?.Enabled ?? false;
+                if (ImGui.Checkbox(definition.Label, ref active))
+                {
+                    if (chain == null)
+                    {
+                        chain = new HeartbeatChainSettings { Id = definition.Id };
+                        settings.Chains.Add(chain);
+                    }
+                    chain.Enabled = active;
+                    configuration.Save();
+                }
+            }
+            ImGui.EndCombo();
+        }
+        foreach (var definition in HeartbeatChains.All)
+        {
+            var chain = settings.Chains.Find(x => x.Id == definition.Id);
+            if (chain == null || !chain.Enabled) continue;
+            ImGui.PushID("heartbeat-chain-" + definition.Id);
+            ImGui.Separator();
+            ImGui.TextUnformatted(definition.Label);
+            float amount = chain.Strength;
+            if (ImGui.DragFloat("Additive Scale", ref amount, 0.005f, 0f, 5f, "%.3f"))
+            {
+                chain.Strength = Math.Clamp(amount, 0f, 5f);
+                configuration.Save();
+            }
+            if (definition.Bones.Length > 1)
+            {
+                bool stagger = chain.Stagger;
+                if (ImGui.Checkbox("Stagger down hierarchy", ref stagger))
+                {
+                    chain.Stagger = stagger;
+                    configuration.Save();
+                }
+                if (chain.Stagger)
+                {
+                    float delay = chain.DelayPercent;
+                    if (ImGui.SliderFloat("Delay per bone (% cycle)", ref delay, 0f, 10f, "%.1f%%"))
+                    {
+                        chain.DelayPercent = Math.Clamp(delay, 0f, 10f);
+                        configuration.Save();
+                    }
+                    ImGui.TextWrapped($"{600f * chain.DelayPercent / settings.BeatsPerMinute:0.0} ms per parent-to-child step. Paired left/right bones pulse together.");
+                }
+            }
+            else ImGui.TextDisabled("Single bone: no child steps to stagger.");
+            if (ImGui.TreeNode("Customize+ bone names / order"))
+            {
+                foreach (var bone in definition.Bones)
+                    ImGui.TextUnformatted($"Step {bone.Depth}: {bone.Name}");
+                ImGui.TreePop();
+            }
+            ImGui.PopID();
+        }
+        ImGui.TextWrapped("Each chain starts at its nearest-to-root bone. Stagger delays each child by one step; " +
+            "BPM speeds up or slows down the entire rhythm, including these delays. With Stagger off, all bones in that chain pulse together.");
     }
 
     private void DrawPlayerTab()
