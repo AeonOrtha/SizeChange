@@ -33,6 +33,8 @@ internal sealed class BoneHeartbeatPlayer : IDisposable
     private bool wasEnabled;
     private string? lastSent;
 
+    public bool IsPulsing => ownedProfile.HasValue && !faulted && envelope > 0f;
+
     public string Status { get; private set; } = "Disabled.";
     public IReadOnlyList<(Guid Id, string Name)> Profiles { get; private set; } = Array.Empty<(Guid, string)>();
 
@@ -82,7 +84,7 @@ internal sealed class BoneHeartbeatPlayer : IDisposable
         }
 
         settings.ResolveBones(resolvedBones);
-        if (!settings.Enabled || !allowed || address == 0 || settings.Strength <= 0f || resolvedBones.Count == 0)
+        if (!settings.Enabled || !allowed || address == 0 || settings.Strength <= 0f || !resolvedBones.Exists(bone => bone.Strength > 0f))
         {
             if (ownedProfile.HasValue && cleanupElapsed < 1f) return;
             if (Release()) Status = settings.Enabled ? "Inactive (self unavailable, disabled, or no bones/strength)." : "Disabled.";

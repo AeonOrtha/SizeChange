@@ -80,7 +80,7 @@ public class ConfigWindow : Window, IDisposable
 
     private void DrawBoneHeartbeat()
     {
-        if (!ImGui.CollapsingHeader("Bone Heartbeat (Self only)")) return;
+        if (!ImGui.CollapsingHeader("Bone Heartbeat (Self)")) return;
         var settings = configuration.SelfBoneHeartbeat;
         bool enabled = settings.Enabled;
         if (ImGui.Checkbox("Enable Bone Heartbeat", ref enabled))
@@ -94,19 +94,17 @@ public class ConfigWindow : Window, IDisposable
             settings.Mode = (BoneHeartbeatMode)mode;
             configuration.Save();
         }
-        ImGui.TextWrapped("A strong beat, a smaller second beat, then rest. BPM controls the complete rhythm. " +
-            "Always runs independently of combat; While growth accumulates requires Growth From Delta and a positive accumulator delay.");
 
-        if (ImGui.Button("Refresh Customize+ Profiles")) plugin.BoneHeartbeat.RefreshProfiles();
+        if (ImGui.Button("Refresh Profiles")) plugin.BoneHeartbeat.RefreshProfiles();
         ImGui.SameLine();
-        if (ImGui.Button("Reload Baseline / Retry")) plugin.BoneHeartbeat.Retry();
+        if (ImGui.Button("Reload / Retry")) plugin.BoneHeartbeat.Retry();
         string profileLabel = settings.BaseProfileId == Guid.Empty
-            ? "Active Customize+ profile (automatic)" : settings.BaseProfileId.ToString();
+            ? "Active profile (Auto)" : settings.BaseProfileId.ToString();
         foreach (var profile in plugin.BoneHeartbeat.Profiles)
             if (profile.Id == settings.BaseProfileId) profileLabel = profile.Name;
         if (ImGui.BeginCombo("Base Profile", profileLabel))
         {
-            if (ImGui.Selectable("Active Customize+ profile (automatic)", settings.BaseProfileId == Guid.Empty))
+            if (ImGui.Selectable("Active profile (Auto)", settings.BaseProfileId == Guid.Empty))
             {
                 settings.BaseProfileId = Guid.Empty;
                 configuration.Save();
@@ -129,26 +127,27 @@ public class ConfigWindow : Window, IDisposable
             configuration.Save();
         }
         float strength = settings.Strength;
-        if (ImGui.SliderFloat("Overall Bone Pulse Strength", ref strength, 0f, 5f, "%.2fx"))
+        if (ImGui.SliderFloat("Pulse Strength", ref strength, 0f, 5f, "%.2fx"))
         {
             settings.Strength = strength;
             configuration.Save();
         }
 
+        DrawHeartbeatSound(settings.Sound);
         DrawHeartbeatChains(settings);
-        if (ImGui.TreeNode("Custom Bones (optional overrides)"))
+        if (ImGui.TreeNode("Custom Bones (Overrides)"))
         {
-            ImGui.TextWrapped("Use exact Customize+ internal names. An existing preset bone keeps its chain timing; this list overrides its strength.");
+            ImGui.TextDisabled("JP bone names. Overrides presets.");
             bool add = ImGui.InputText("Bone Name", ref heartbeatBoneInput, 128, ImGuiInputTextFlags.EnterReturnsTrue);
             ImGui.SameLine();
             add |= ImGui.Button("Add Bone");
             if (add)
             {
                 string name = heartbeatBoneInput.Trim();
-                if (name.Length == 0) heartbeatInputError = "Enter an exact bone name from Customize+.";
+                if (name.Length == 0) heartbeatInputError = "Enter a JP bone name.";
                 else if (name.Equals("n_root", StringComparison.OrdinalIgnoreCase))
-                    heartbeatInputError = "n_root is reserved for overall size; choose an individual body bone.";
-                else if (settings.Bones.Exists(bone => bone.Name == name)) heartbeatInputError = "That bone is already listed.";
+                    heartbeatInputError = "n_root is reserved.";
+                else if (settings.Bones.Exists(bone => bone.Name == name)) heartbeatInputError = "Bone already listed.";
                 else
                 {
                     settings.Bones.Add(new HeartbeatBone { Name = name });
@@ -179,13 +178,55 @@ public class ConfigWindow : Window, IDisposable
             }
             ImGui.TreePop();
         }
-        ImGui.TextWrapped("An additive value of 0.05 pulses a base scale of 1.50 up to 1.55 at strength 1. " +
-            "The same addition applies to X/Y/Z. Unknown bone names have no visible effect; " +
-            "bone hierarchy can carry the change to children according to your base profile.");
-        ImGui.TextWrapped("Requires Customize+. Local/self only. Do not run another temporary-profile morph on self at the same time. " +
-            "Your saved profile is never edited; disabling removes SizeChange's temporary profile.");
+        ImGui.TextDisabled("Customize+ required. Self only.");
         ImGui.TextWrapped(plugin.BoneHeartbeat.Status);
         ImGui.Separator();
+    }
+
+    private void DrawHeartbeatSound(HeartbeatSoundSettings settings)
+    {
+        if (!ImGui.TreeNode("Pulse Sound")) return;
+        bool enabled = settings.Enabled;
+        if (ImGui.Checkbox("Enabled##pulse-sound", ref enabled))
+        {
+            settings.Enabled = enabled;
+            configuration.Save();
+        }
+        string path = settings.Path;
+        if (ImGui.InputText("SCD Path##pulse-sound", ref path, 256))
+        {
+            settings.Path = path;
+            configuration.Save();
+        }
+        int index = settings.Index;
+        if (ImGui.InputInt("SCD Index##pulse-sound", ref index))
+        {
+            settings.Index = Math.Max(0, index);
+            configuration.Save();
+        }
+        float volume = settings.Volume;
+        if (ImGui.SliderFloat("Volume##pulse-sound", ref volume, 0f, 1f, "%.2f"))
+        {
+            settings.Volume = volume;
+            configuration.Save();
+        }
+        float fadeIn = settings.FadeInSeconds;
+        if (ImGui.SliderFloat("Fade In (s)##pulse-sound", ref fadeIn, 0f, 10f, "%.2f"))
+        {
+            settings.FadeInSeconds = fadeIn;
+            configuration.Save();
+        }
+        float fadeOut = settings.FadeOutSeconds;
+        if (ImGui.SliderFloat("Fade Out (s)##pulse-sound", ref fadeOut, 0f, 10f, "%.2f"))
+        {
+            settings.FadeOutSeconds = fadeOut;
+            configuration.Save();
+        }
+        ImGui.TextDisabled("Loops while pulsing.");
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Looped SCDs are seamless. One-shots repeat.");
+        if (ImGui.Button("Retry##pulse-sound")) plugin.HeartbeatSound.Retry();
+        if (plugin.HeartbeatSound.Status.Length > 0) ImGui.TextWrapped(plugin.HeartbeatSound.Status);
+        ImGui.TreePop();
     }
 
     private void DrawHeartbeatChains(BoneHeartbeatSettings settings)
@@ -226,7 +267,7 @@ public class ConfigWindow : Window, IDisposable
             if (definition.Bones.Length > 1)
             {
                 bool stagger = chain.Stagger;
-                if (ImGui.Checkbox("Stagger down hierarchy", ref stagger))
+                if (ImGui.Checkbox("Stagger", ref stagger))
                 {
                     chain.Stagger = stagger;
                     configuration.Save();
@@ -239,20 +280,22 @@ public class ConfigWindow : Window, IDisposable
                         chain.DelayPercent = Math.Clamp(delay, 0f, 10f);
                         configuration.Save();
                     }
-                    ImGui.TextWrapped($"{600f * chain.DelayPercent / settings.BeatsPerMinute:0.0} ms per parent-to-child step. Paired left/right bones pulse together.");
+                    ImGui.TextWrapped($"{600f * chain.DelayPercent / settings.BeatsPerMinute:0.0} ms per step.");
                 }
             }
-            else ImGui.TextDisabled("Single bone: no child steps to stagger.");
-            if (ImGui.TreeNode("Customize+ bone names / order"))
+            else ImGui.TextDisabled("Single bone.");
+            if (ImGui.TreeNode("Bone Order"))
             {
                 foreach (var bone in definition.Bones)
-                    ImGui.TextUnformatted($"Step {bone.Depth}: {bone.Name}");
+                {
+                    var custom = settings.Bones.Find(x => x.Name == bone.Name);
+                    string suffix = custom == null ? string.Empty : $" [Override: {custom.Strength:0.###}]";
+                    ImGui.TextUnformatted($"Step {bone.Depth}: {bone.Name}{suffix}");
+                }
                 ImGui.TreePop();
             }
             ImGui.PopID();
         }
-        ImGui.TextWrapped("Each chain starts at its nearest-to-root bone. Stagger delays each child by one step; " +
-            "BPM speeds up or slows down the entire rhythm, including these delays. With Stagger off, all bones in that chain pulse together.");
     }
 
     private void DrawPlayerTab()
@@ -290,8 +333,6 @@ public class ConfigWindow : Window, IDisposable
     private void DrawTrackedPlayers()
     {
         ImGui.Text("Specific Players");
-        ImGui.TextWrapped(
-            "Add players as Character Name@Home World.");
 
         bool submitted = ImGui.InputText(
             "Character Name@Home World",
@@ -308,7 +349,7 @@ public class ConfigWindow : Window, IDisposable
 
         if (configuration.TrackedPlayerNames.Count == 0)
         {
-            ImGui.TextDisabled("No additional players are enabled.");
+            ImGui.TextDisabled("No players added.");
             return;
         }
 
@@ -329,9 +370,7 @@ public class ConfigWindow : Window, IDisposable
     private void DrawTrackedMonsters()
     {
         ImGui.Text("Specific Monsters");
-        ImGui.TextWrapped(
-            "Add any part of a monster's displayed name. Matching is case-insensitive, " +
-            "so Behemoth also matches King Behemoth.");
+        ImGui.TextDisabled("Partial names; case-insensitive.");
 
         bool submitted = ImGui.InputText(
             "Monster Name Filter",
@@ -348,7 +387,7 @@ public class ConfigWindow : Window, IDisposable
 
         if (configuration.TrackedMonsterNames.Count == 0)
         {
-            ImGui.TextDisabled("No monsters are enabled.");
+            ImGui.TextDisabled("No monsters added.");
             return;
         }
 
@@ -533,9 +572,7 @@ public class ConfigWindow : Window, IDisposable
                 Math.Clamp(maximumHealthLossPercent / 100f, 0f, 1f);
             configuration.Save();
         }
-        ImGui.TextWrapped(
-            "Caps growth from one detected health loss. At 25%, losing 60% of " +
-            "maximum HP contributes 25% worth of growth. Actual damage is unchanged.");
+        ImGui.TextDisabled("Caps counted HP loss only.");
 
         bool limitDeltaGrowth = settings.LimitDeltaGrowth;
         if (ImGui.Checkbox($"Limit Delta Growth##{id}", ref limitDeltaGrowth))
@@ -624,18 +661,9 @@ public class ConfigWindow : Window, IDisposable
                 settings.GrowthOvershootReturnCurve = returnCurve;
                 configuration.Save();
             }
-            ImGui.TextWrapped(
-                "Curve: negative moves earlier, positive moves later, zero is balanced. " +
-                "Both directions ease smoothly into and out of the peak. " +
-                "For a quicker swell and a gentle return, try Rise Curve -1 and Return Curve 0, " +
-                "with Rise Time 0.25s and Settle Time 0.45s.");
+            ImGui.TextDisabled("Curve: negative earlier; positive later.");
 
-            ImGui.TextWrapped(
-                "The overshoot is temporary and does not increase earned growth. " +
-                "At 50%, a damage burst worth +0.20x adds a temporary +0.10x above the intended size. " +
-                "The settled size obeys the cap; the peak may exceed it, including when already at the cap. " +
-                "Rise and Settle Time shorten proportionally if needed to fit the accumulator interval. " +
-                "The accumulator timing is unchanged.");
+            ImGui.TextDisabled("Peak can exceed cap.");
         }
 
 
@@ -880,10 +908,7 @@ public class ConfigWindow : Window, IDisposable
 
         if (settings.EnableDeltaGrowthAnimation)
         {
-            ImGui.TextWrapped(
-                "Self only. This plays an ActionTimeline directly and never sends an " +
-                "emote or chat command. Use a one-shot TMB path copied from VFXEditor; " +
-                "looping timelines are not recommended.");
+            ImGui.TextDisabled("Local animation. One-shot TMB only.");
 
             string deltaGrowthAnimationPath = settings.DeltaGrowthAnimationTmbPath;
             if (ImGui.InputText(
