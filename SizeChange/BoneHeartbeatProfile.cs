@@ -22,7 +22,7 @@ internal sealed class BoneHeartbeatProfile
             throw new InvalidOperationException("Customize+ profile has no Bones object.");
     }
 
-    public string Build(IReadOnlyList<HeartbeatBone> selectedBones, float pulse, float strength)
+    public string Build(IReadOnlyList<HeartbeatBone> selectedBones, float pulse, float strength, double? phase = null)
     {
         bool changed = working == null || names.Count != selectedBones.Count;
         for (int i = 0; !changed && i < names.Count; i++)
@@ -30,7 +30,13 @@ internal sealed class BoneHeartbeatProfile
         if (changed) Rebuild(selectedBones);
         foreach (var target in targets)
         {
-            float offset = selectedBones[target.Index].Strength * strength * pulse;
+            var bone = selectedBones[target.Index];
+            // With phase supplied, pulse is the global fade envelope. Keep an
+            // unwrapped timeline so delayed children do not pulse before their
+            // parent on startup by wrapping a negative phase into the last beat.
+            double delayed = (phase ?? 0) - bone.DelayCycles;
+            float wave = phase.HasValue ? (delayed < 0 ? 0 : BoneHeartbeatMath.Sample(delayed)) : 1f;
+            float offset = bone.Strength * strength * pulse * wave;
             if (!float.IsFinite(offset) || offset < 0f) offset = 0f;
             target.Scale["X"] = Math.Clamp(target.X + offset, -512f, 512f);
             target.Scale["Y"] = Math.Clamp(target.Y + offset, -512f, 512f);

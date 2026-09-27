@@ -24,6 +24,7 @@ internal sealed class BoneHeartbeatPlayer : IDisposable
     private nint actorAddress;
     private uint entityId;
     private double phase;
+    private readonly List<HeartbeatBone> resolvedBones = new();
     private float envelope;
     private float sendElapsed;
     private float baselineElapsed = 1f;
@@ -80,7 +81,8 @@ internal sealed class BoneHeartbeatPlayer : IDisposable
             faulted = false;
         }
 
-        if (!settings.Enabled || !allowed || address == 0 || settings.Strength <= 0f || settings.Bones.Count == 0)
+        settings.ResolveBones(resolvedBones);
+        if (!settings.Enabled || !allowed || address == 0 || settings.Strength <= 0f || resolvedBones.Count == 0)
         {
             if (ownedProfile.HasValue && cleanupElapsed < 1f) return;
             if (Release()) Status = settings.Enabled ? "Inactive (self unavailable, disabled, or no bones/strength)." : "Disabled.";
@@ -120,12 +122,11 @@ internal sealed class BoneHeartbeatPlayer : IDisposable
                 baselineElapsed = 0f;
             }
 
-            phase = (phase + seconds * settings.BeatsPerMinute / 60.0) % 1.0;
+            phase += seconds * settings.BeatsPerMinute / 60.0;
             sendElapsed += seconds;
             if (sendElapsed < 1f / 60f) return;
             sendElapsed %= 1f / 60f;
-            float pulse = BoneHeartbeatMath.Sample(phase) * envelope;
-            string frame = baseline!.Build(settings.Bones, pulse, settings.Strength);
+            string frame = baseline!.Build(resolvedBones, envelope, settings.Strength, phase);
             if (frame != lastSent)
             {
                 if (!ownedProfile.HasValue && api.HasTemporaryProfile(objectIndex))
