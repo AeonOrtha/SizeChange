@@ -71,6 +71,7 @@ public sealed class Plugin : IDalamudPlugin
         new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<uint> TrackedMonsterEntityIds = new();
     private readonly GrowthSoundPlayer GrowthSoundPlayer;
+    internal readonly HeartbeatSoundPlayer HeartbeatSound = new(new HeartbeatScdVoice());
     private readonly GrowthVfxPlayer GrowthVfxPlayer;
     internal BoneHeartbeatPlayer BoneHeartbeat { get; }
     private float TrackedActorRefreshElapsed = TrackedActorRefreshIntervalSeconds;
@@ -110,6 +111,7 @@ public sealed class Plugin : IDalamudPlugin
     public unsafe void Dispose()
     {
         Framework.Update -= OnFrameworkUpdate;
+        HeartbeatSound.Dispose();
         BoneHeartbeat.Dispose();
         RestoreCharacterTransforms();
         GrowthVfxPlayer.Dispose();
@@ -223,6 +225,7 @@ public sealed class Plugin : IDalamudPlugin
         {
             BoneHeartbeat.Tick(Configuration.SelfBoneHeartbeat, 0, 0, 0,
                 false, false, (float)Framework.UpdateDelta.TotalSeconds);
+            HeartbeatSound.Tick(Configuration.SelfBoneHeartbeat.Sound, false, false, 0);
             return;
         }
 
@@ -260,6 +263,12 @@ public sealed class Plugin : IDalamudPlugin
                 !Condition[ConditionFlag.BetweenAreas51],
             accumulating,
             deltaSeconds);
+
+        bool soundAvailable = !ClientState.IsPvP && localActor->Health > 0 &&
+            !Condition[ConditionFlag.BetweenAreas] && !Condition[ConditionFlag.BetweenAreas51];
+        HeartbeatSound.Tick(Configuration.SelfBoneHeartbeat.Sound,
+            !globallyDisabled && Configuration.AffectSelf && Configuration.SelfBoneHeartbeat.Enabled &&
+            BoneHeartbeat.IsPulsing, soundAvailable, deltaSeconds);
 
         foreach (var trackedPlayer in TrackedPlayerEntityIds)
         {
