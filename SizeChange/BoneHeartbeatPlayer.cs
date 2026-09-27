@@ -33,6 +33,9 @@ internal sealed class BoneHeartbeatPlayer : IDisposable
     private bool wasEnabled;
     private string? lastSent;
 
+    public double Phase => phase;
+    public long PhaseGeneration { get; private set; }
+
     public bool IsPulsing => ownedProfile.HasValue && !faulted && envelope > 0f;
 
     public string Status { get; private set; } = "Disabled.";
@@ -168,6 +171,7 @@ internal sealed class BoneHeartbeatPlayer : IDisposable
                 return false;
             }
         }
+        if (phase != 0) PhaseGeneration++;
         phase = 0;
         envelope = 0;
         sendElapsed = 0;

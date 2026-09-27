@@ -192,41 +192,60 @@ public class ConfigWindow : Window, IDisposable
             settings.Enabled = enabled;
             configuration.Save();
         }
-        string path = settings.Path;
-        if (ImGui.InputText("SCD Path##pulse-sound", ref path, 256))
+        bool loop = settings.Loop;
+        if (ImGui.Checkbox("Loop##pulse-sound", ref loop))
         {
-            settings.Path = path;
+            settings.Loop = loop;
             configuration.Save();
         }
-        int index = settings.Index;
-        if (ImGui.InputInt("SCD Index##pulse-sound", ref index))
+        if (!settings.Loop)
         {
-            settings.Index = Math.Max(0, index);
-            configuration.Save();
+            DrawHeartbeatSoundSlot("First Beat", settings.FirstBeat);
+            DrawHeartbeatSoundSlot("Second Beat", settings.SecondBeat);
         }
-        float volume = settings.Volume;
-        if (ImGui.SliderFloat("Volume##pulse-sound", ref volume, 0f, 1f, "%.2f"))
+        else
         {
-            settings.Volume = volume;
-            configuration.Save();
+            // Keep the loop's persisted fields independent from both hit slots.
+            var loopSlot = new HeartbeatSoundSlot { Path = settings.Path, Index = settings.Index, Volume = settings.Volume };
+            if (DrawHeartbeatSoundSlot("Loop SCD", loopSlot, false))
+            {
+                settings.Path = loopSlot.Path;
+                settings.Index = loopSlot.Index;
+                settings.Volume = loopSlot.Volume;
+                configuration.Save();
+            }
+            float fadeIn = settings.FadeInSeconds;
+            if (ImGui.SliderFloat("Fade In (s)##pulse-sound", ref fadeIn, 0f, 10f, "%.2f"))
+            {
+                settings.FadeInSeconds = fadeIn;
+                configuration.Save();
+            }
+            float fadeOut = settings.FadeOutSeconds;
+            if (ImGui.SliderFloat("Fade Out (s)##pulse-sound", ref fadeOut, 0f, 10f, "%.2f"))
+            {
+                settings.FadeOutSeconds = fadeOut;
+                configuration.Save();
+            }
         }
-        float fadeIn = settings.FadeInSeconds;
-        if (ImGui.SliderFloat("Fade In (s)##pulse-sound", ref fadeIn, 0f, 10f, "%.2f"))
-        {
-            settings.FadeInSeconds = fadeIn;
-            configuration.Save();
-        }
-        float fadeOut = settings.FadeOutSeconds;
-        if (ImGui.SliderFloat("Fade Out (s)##pulse-sound", ref fadeOut, 0f, 10f, "%.2f"))
-        {
-            settings.FadeOutSeconds = fadeOut;
-            configuration.Save();
-        }
-        ImGui.TextDisabled("Loops while pulsing.");
-        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Looped SCDs are seamless. One-shots repeat.");
         if (ImGui.Button("Retry##pulse-sound")) plugin.HeartbeatSound.Retry();
         if (plugin.HeartbeatSound.Status.Length > 0) ImGui.TextWrapped(plugin.HeartbeatSound.Status);
         ImGui.TreePop();
+    }
+
+    private bool DrawHeartbeatSoundSlot(string label, HeartbeatSoundSlot slot, bool save = true)
+    {
+        ImGui.PushID(label);
+        ImGui.TextUnformatted(label);
+        bool changed = false;
+        string path = slot.Path;
+        if (ImGui.InputText("SCD Path", ref path, 256)) { slot.Path = path; changed = true; }
+        int index = slot.Index;
+        if (ImGui.InputInt("Index", ref index)) { slot.Index = Math.Max(0, index); changed = true; }
+        float volume = slot.Volume;
+        if (ImGui.SliderFloat("Volume", ref volume, 0f, 1f, "%.2f")) { slot.Volume = volume; changed = true; }
+        if (changed && save) configuration.Save();
+        ImGui.PopID();
+        return changed;
     }
 
     private void DrawHeartbeatChains(BoneHeartbeatSettings settings)

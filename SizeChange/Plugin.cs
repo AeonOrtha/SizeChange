@@ -71,7 +71,7 @@ public sealed class Plugin : IDalamudPlugin
         new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<uint> TrackedMonsterEntityIds = new();
     private readonly GrowthSoundPlayer GrowthSoundPlayer;
-    internal readonly HeartbeatSoundPlayer HeartbeatSound = new(new HeartbeatScdVoice());
+    internal readonly HeartbeatSoundPlayer HeartbeatSound = new(new HeartbeatScdVoice(), new HeartbeatScdVoice(), new HeartbeatScdVoice());
     private readonly GrowthVfxPlayer GrowthVfxPlayer;
     internal BoneHeartbeatPlayer BoneHeartbeat { get; }
     private float TrackedActorRefreshElapsed = TrackedActorRefreshIntervalSeconds;
@@ -268,7 +268,7 @@ public sealed class Plugin : IDalamudPlugin
             !Condition[ConditionFlag.BetweenAreas] && !Condition[ConditionFlag.BetweenAreas51];
         HeartbeatSound.Tick(Configuration.SelfBoneHeartbeat.Sound,
             !globallyDisabled && Configuration.AffectSelf && Configuration.SelfBoneHeartbeat.Enabled &&
-            BoneHeartbeat.IsPulsing, soundAvailable, deltaSeconds);
+            BoneHeartbeat.IsPulsing, soundAvailable, deltaSeconds, BoneHeartbeat.Phase, BoneHeartbeat.PhaseGeneration);
 
         foreach (var trackedPlayer in TrackedPlayerEntityIds)
         {

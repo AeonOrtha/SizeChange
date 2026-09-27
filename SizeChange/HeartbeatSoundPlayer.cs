@@ -3,9 +3,27 @@ using System;
 namespace SizeChange;
 
 [Serializable]
+public sealed class HeartbeatSoundSlot
+{
+    public string Path { get; set; } = string.Empty;
+    public int Index { get; set; }
+    public float Volume { get; set; } = 0.5f;
+    public void Validate()
+    {
+        Path = (Path ?? string.Empty).Trim().Replace('\\', '/');
+        Index = Math.Max(0, Index);
+        Volume = float.IsFinite(Volume) ? Math.Clamp(Volume, 0f, 1f) : 0.5f;
+    }
+}
+
+[Serializable]
 public sealed class HeartbeatSoundSettings
 {
     public bool Enabled { get; set; }
+    public bool Loop { get; set; }
+    public HeartbeatSoundSlot FirstBeat { get; set; } = new();
+    public HeartbeatSoundSlot SecondBeat { get; set; } = new() { Volume = 0.325f };
+    // Existing path/index/volume are retained as the independent loop slot.
     public string Path { get; set; } = string.Empty;
     public int Index { get; set; }
     public float Volume { get; set; } = 0.5f;
@@ -14,6 +32,10 @@ public sealed class HeartbeatSoundSettings
 
     public void Validate()
     {
+        FirstBeat ??= new();
+        SecondBeat ??= new() { Volume = 0.325f };
+        FirstBeat.Validate();
+        SecondBeat.Validate();
         Path = (Path ?? string.Empty).Trim().Replace('\\', '/');
         Index = Math.Max(0, Index);
         Volume = float.IsFinite(Volume) ? Math.Clamp(Volume, 0f, 1f) : 0.5f;
@@ -33,7 +55,7 @@ internal interface IHeartbeatSoundVoice
 
 // One owned voice, independent of the number of selected bones. An interrupted
 // fade reverses smoothly; repeated framework ticks never layer extra voices.
-internal sealed class HeartbeatSoundPlayer(IHeartbeatSoundVoice voice) : IDisposable
+internal sealed class HeartbeatLoopPlayer(IHeartbeatSoundVoice voice) : IDisposable
 {
     private string path = string.Empty;
     private int index = -1;
