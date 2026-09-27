@@ -141,6 +141,7 @@ public class Configuration : IPluginConfiguration
     public int Version { get; set; }
     public bool Enable { get; set; } = true;
     public bool AffectSelf { get; set; } = true;
+    public BoneHeartbeatSettings SelfBoneHeartbeat { get; set; } = new();
 
     public GrowthSettings SelfSettings { get; set; } = GrowthSettings.Defaults();
     public GrowthSettings PlayerSettings { get; set; } = GrowthSettings.Defaults();
@@ -225,6 +226,8 @@ public class Configuration : IPluginConfiguration
 
     public void EnsureValid()
     {
+        SelfBoneHeartbeat ??= new();
+        SelfBoneHeartbeat.Validate();
         SelfSettings ??= GrowthSettings.Defaults();
         PlayerSettings ??= GrowthSettings.Defaults();
         MonsterSettings ??= GrowthSettings.Defaults();
