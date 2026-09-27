@@ -19,6 +19,8 @@ public class ConfigWindow : Window, IDisposable
     private bool growthVfxTestSucceeded;
     private string growthAnimationTestResult = string.Empty;
     private bool growthAnimationTestSucceeded;
+    private string heartbeatBoneInput = string.Empty;
+    private string heartbeatInputError = string.Empty;
 
     public ConfigWindow(Plugin plugin) : base("SizeChange Config")
     {
@@ -64,14 +66,120 @@ public class ConfigWindow : Window, IDisposable
             configuration.Save();
         }
 
+        DrawBoneHeartbeat();
         DrawGrowthSettings(configuration.SelfSettings, "self");
         if (ImGui.Button("Reset Self Settings"))
         {
             configuration.SelfSettings = GrowthSettings.Defaults();
+            configuration.SelfBoneHeartbeat = new BoneHeartbeatSettings();
             configuration.Save();
         }
 
         ImGui.EndTabItem();
+    }
+
+    private void DrawBoneHeartbeat()
+    {
+        if (!ImGui.CollapsingHeader("Bone Heartbeat (Self only)")) return;
+        var settings = configuration.SelfBoneHeartbeat;
+        bool enabled = settings.Enabled;
+        if (ImGui.Checkbox("Enable Bone Heartbeat", ref enabled))
+        {
+            settings.Enabled = enabled;
+            configuration.Save();
+        }
+        int mode = (int)settings.Mode;
+        if (ImGui.Combo("Pulse When", ref mode, "While growth accumulates\0Always\0"))
+        {
+            settings.Mode = (BoneHeartbeatMode)mode;
+            configuration.Save();
+        }
+        ImGui.TextWrapped("A strong beat, a smaller second beat, then rest. BPM controls the complete rhythm. " +
+            "Always runs independently of combat; While growth accumulates requires Growth From Delta and a positive accumulator delay.");
+
+        if (ImGui.Button("Refresh Customize+ Profiles")) plugin.BoneHeartbeat.RefreshProfiles();
+        ImGui.SameLine();
+        if (ImGui.Button("Reload Baseline / Retry")) plugin.BoneHeartbeat.Retry();
+        string profileLabel = settings.BaseProfileId == Guid.Empty
+            ? "Active Customize+ profile (automatic)" : settings.BaseProfileId.ToString();
+        foreach (var profile in plugin.BoneHeartbeat.Profiles)
+            if (profile.Id == settings.BaseProfileId) profileLabel = profile.Name;
+        if (ImGui.BeginCombo("Base Profile", profileLabel))
+        {
+            if (ImGui.Selectable("Active Customize+ profile (automatic)", settings.BaseProfileId == Guid.Empty))
+            {
+                settings.BaseProfileId = Guid.Empty;
+                configuration.Save();
+            }
+            foreach (var profile in plugin.BoneHeartbeat.Profiles)
+            {
+                if (ImGui.Selectable($"{profile.Name}##{profile.Id}", settings.BaseProfileId == profile.Id))
+                {
+                    settings.BaseProfileId = profile.Id;
+                    configuration.Save();
+                }
+            }
+            ImGui.EndCombo();
+        }
+
+        float bpm = settings.BeatsPerMinute;
+        if (ImGui.SliderFloat("Heartbeat BPM", ref bpm, 30f, 180f, "%.0f"))
+        {
+            settings.BeatsPerMinute = bpm;
+            configuration.Save();
+        }
+        float strength = settings.Strength;
+        if (ImGui.SliderFloat("Overall Bone Pulse Strength", ref strength, 0f, 5f, "%.2fx"))
+        {
+            settings.Strength = strength;
+            configuration.Save();
+        }
+
+        bool add = ImGui.InputText("Bone Name", ref heartbeatBoneInput, 128, ImGuiInputTextFlags.EnterReturnsTrue);
+        ImGui.SameLine();
+        add |= ImGui.Button("Add Bone");
+        if (add)
+        {
+            string name = heartbeatBoneInput.Trim();
+            if (name.Length == 0) heartbeatInputError = "Enter an exact bone name from Customize+.";
+            else if (name.Equals("n_root", StringComparison.OrdinalIgnoreCase))
+                heartbeatInputError = "n_root is reserved for overall size; choose an individual body bone.";
+            else if (settings.Bones.Exists(bone => bone.Name == name)) heartbeatInputError = "That bone is already listed.";
+            else
+            {
+                settings.Bones.Add(new HeartbeatBone { Name = name });
+                heartbeatBoneInput = string.Empty;
+                heartbeatInputError = string.Empty;
+                configuration.Save();
+            }
+        }
+        if (heartbeatInputError.Length > 0) ImGui.TextWrapped(heartbeatInputError);
+        for (int i = 0; i < settings.Bones.Count; i++)
+        {
+            var bone = settings.Bones[i];
+            ImGui.PushID($"heartbeat-{i}");
+            float amount = bone.Strength;
+            if (ImGui.DragFloat($"{bone.Name} — Additive Scale", ref amount, 0.005f, 0f, 5f, "%.3f"))
+            {
+                bone.Strength = Math.Clamp(amount, 0f, 5f);
+                configuration.Save();
+            }
+            ImGui.SameLine();
+            bool remove = ImGui.Button("Remove");
+            ImGui.PopID();
+            if (remove)
+            {
+                settings.Bones.RemoveAt(i--);
+                configuration.Save();
+            }
+        }
+        ImGui.TextWrapped("An additive value of 0.05 pulses a base scale of 1.50 up to 1.55 at strength 1. " +
+            "The same addition applies to X/Y/Z. Unknown bone names have no visible effect; " +
+            "bone hierarchy can carry the change to children according to your base profile.");
+        ImGui.TextWrapped("Requires Customize+. Local/self only. Do not run another temporary-profile morph on self at the same time. " +
+            "Your saved profile is never edited; disabling removes SizeChange's temporary profile.");
+        ImGui.TextWrapped(plugin.BoneHeartbeat.Status);
+        ImGui.Separator();
     }
 
     private void DrawPlayerTab()

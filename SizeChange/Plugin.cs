@@ -72,6 +72,7 @@ public sealed class Plugin : IDalamudPlugin
     private readonly HashSet<uint> TrackedMonsterEntityIds = new();
     private readonly GrowthSoundPlayer GrowthSoundPlayer;
     private readonly GrowthVfxPlayer GrowthVfxPlayer;
+    internal BoneHeartbeatPlayer BoneHeartbeat { get; }
     private float TrackedActorRefreshElapsed = TrackedActorRefreshIntervalSeconds;
     private bool TrackedActorRefreshRequested = true;
 
@@ -85,6 +86,7 @@ public sealed class Plugin : IDalamudPlugin
 
         GrowthSoundPlayer = new GrowthSoundPlayer();
         GrowthVfxPlayer = new GrowthVfxPlayer();
+        BoneHeartbeat = new BoneHeartbeatPlayer(new CustomizeHeartbeatApi(PluginInterface));
 
         ConfigWindow = new ConfigWindow(this);
         WindowSystem.AddWindow(ConfigWindow);
@@ -108,6 +110,7 @@ public sealed class Plugin : IDalamudPlugin
     public unsafe void Dispose()
     {
         Framework.Update -= OnFrameworkUpdate;
+        BoneHeartbeat.Dispose();
         RestoreCharacterTransforms();
         GrowthVfxPlayer.Dispose();
         GrowthSoundPlayer.Dispose();
@@ -216,7 +219,12 @@ public sealed class Plugin : IDalamudPlugin
         bool globallyDisabled = ClientState.IsPvP || !Configuration.Enable;
         bool inCombat = Condition[ConditionFlag.InCombat];
         var localPlayer = ObjectTable.LocalPlayer;
-        if (localPlayer == null) return;
+        if (localPlayer == null)
+        {
+            BoneHeartbeat.Tick(Configuration.SelfBoneHeartbeat, 0, 0, 0,
+                false, false, (float)Framework.UpdateDelta.TotalSeconds);
+            return;
+        }
 
         float deltaSeconds = (float)Framework.UpdateDelta.TotalSeconds;
         TrackedActorRefreshElapsed += deltaSeconds;
@@ -236,6 +244,22 @@ public sealed class Plugin : IDalamudPlugin
             globallyDisabled,
             inCombat);
         processedEntityIds.Add(localActor->EntityId);
+
+        bool accumulating = Configuration.SelfSettings.GrowthFromDelta &&
+            Configuration.SelfSettings.AccumulatorDelaySeconds > 0f &&
+            (!Configuration.SelfSettings.OnlyActiveInCombat || inCombat) &&
+            TryGetCharacterState(localActor, out var heartbeatState) &&
+            heartbeatState.PendingGrowth > 0f;
+        BoneHeartbeat.Tick(
+            Configuration.SelfBoneHeartbeat,
+            localPlayer.ObjectIndex,
+            localPlayer.Address,
+            localActor->EntityId,
+            !globallyDisabled && Configuration.AffectSelf && localActor->Health > 0 &&
+                localActor->DrawObject != null && !Condition[ConditionFlag.BetweenAreas] &&
+                !Condition[ConditionFlag.BetweenAreas51],
+            accumulating,
+            deltaSeconds);
 
         foreach (var trackedPlayer in TrackedPlayerEntityIds)
         {
