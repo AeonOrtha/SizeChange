@@ -66,10 +66,19 @@ public class ConfigWindow : Window, IDisposable
             configuration.Save();
         }
 
+        float flatHeightOffset = configuration.SelfFlatHeightOffset;
+        if (ImGui.DragFloat("Flat Height Offset##self", ref flatHeightOffset, 0.01f, 0f, 100f, "%.3f"))
+        {
+            configuration.SelfFlatHeightOffset = flatHeightOffset;
+            configuration.Save();
+        }
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Persistent lift. 0 = off.");
+
         DrawBoneHeartbeat();
         DrawGrowthSettings(configuration.SelfSettings, "self");
         if (ImGui.Button("Reset Self Settings"))
         {
+            configuration.SelfFlatHeightOffset = 0f;
             configuration.SelfSettings = GrowthSettings.Defaults();
             configuration.SelfBoneHeartbeat = new BoneHeartbeatSettings();
             configuration.Save();
