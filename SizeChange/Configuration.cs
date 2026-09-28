@@ -141,6 +141,7 @@ public class Configuration : IPluginConfiguration
     public int Version { get; set; }
     public bool Enable { get; set; } = true;
     public bool AffectSelf { get; set; } = true;
+    public float SelfFlatHeightOffset { get; set; }
     public BoneHeartbeatSettings SelfBoneHeartbeat { get; set; } = new();
 
     public GrowthSettings SelfSettings { get; set; } = GrowthSettings.Defaults();
@@ -226,6 +227,8 @@ public class Configuration : IPluginConfiguration
 
     public void EnsureValid()
     {
+        SelfFlatHeightOffset = float.IsFinite(SelfFlatHeightOffset)
+            ? Math.Clamp(SelfFlatHeightOffset, 0f, 100f) : 0f;
         SelfBoneHeartbeat ??= new();
         SelfBoneHeartbeat.Validate();
         SelfSettings ??= GrowthSettings.Defaults();

@@ -664,14 +664,17 @@ public sealed class Plugin : IDalamudPlugin
             (nint)actor,
             visibleScaleMultiplier);
 
-        float desiredHeightOffset = 0f;
+        // Persistent self-only lift. Combat/accumulator state does not gate it.
+        // ApplyHeightOffset adds this and growth lift to the captured original.
+        float desiredHeightOffset = actorGroup == SCActorGroup.Self && !disable
+            ? Configuration.SelfFlatHeightOffset : 0f;
         if (settings.GrowthFromDelta &&
             settings.EnableDeltaHeightOffset &&
             charState.PlayerScale > 0f)
         {
             // Follow the visible scale so height also follows overshoot, normal
             // ambient decay, and the faster out-of-combat return.
-            desiredHeightOffset =
+            desiredHeightOffset +=
                 Math.Max(0f, visibleScaleMultiplier - 1f) *
                 settings.DeltaHeightOffsetPerScale;
         }
