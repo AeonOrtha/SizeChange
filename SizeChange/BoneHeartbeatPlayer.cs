@@ -32,6 +32,7 @@ internal sealed class BoneHeartbeatPlayer : IDisposable
     private bool faulted;
     private bool wasEnabled;
     private bool wasJawEnabled;
+    private bool wasGrowthEnabled;
     private double jawPhase;
     private float jawEnvelope;
     private string? lastSent;
@@ -68,11 +69,13 @@ internal sealed class BoneHeartbeatPlayer : IDisposable
 
     public void Tick(BoneHeartbeatSettings settings, ushort objectIndex, nint address,
         uint actorEntityId, bool allowed, bool accumulating, float seconds, bool growing = false,
-        float pendingDamageRatio = 0f, float maximumDamageRatio = 1f)
+        float pendingDamageRatio = 0f, float maximumDamageRatio = 1f, float settledScale = 1f)
     {
         seconds = float.IsFinite(seconds) ? Math.Clamp(seconds, 0f, 1f) : 0f;
         cleanupElapsed += seconds;
-        if ((settings.Enabled && !wasEnabled || settings.Jaw.Enabled && !wasJawEnabled) && faulted) Retry();
+        bool growthEnabled = settings.Chains.Exists(chain => chain.GrowthEnabled && chain.GrowthPerScale > 0f && chain.GrowthLimit > 0f);
+        if ((growthEnabled && !wasGrowthEnabled || settings.Enabled && !wasEnabled || settings.Jaw.Enabled && !wasJawEnabled) && faulted) Retry();
+        wasGrowthEnabled = growthEnabled;
         wasEnabled = settings.Enabled;
         wasJawEnabled = settings.Jaw.Enabled;
         if (faulted && ownedProfile.HasValue && cleanupElapsed < 1f) return;
@@ -88,12 +91,13 @@ internal sealed class BoneHeartbeatPlayer : IDisposable
             faulted = false;
         }
 
-        settings.ResolveBones(resolvedBones);
+        settings.ResolveBones(resolvedBones, settledScale);
+        bool growthRun = resolvedBones.Exists(bone => bone.GrowthOffset > 0f);
         bool bonesEnabled = settings.Enabled && settings.Strength > 0f && resolvedBones.Exists(bone => bone.Strength > 0f);
         bool jawEnabled = settings.Jaw.Enabled && settings.Jaw.OpeningDegrees > 0f;
-        if (!allowed || address == 0 || (!bonesEnabled && !jawEnabled))
+        if (!allowed || address == 0 || (!bonesEnabled && !jawEnabled && !growthRun))
         {
-            if (ownedProfile.HasValue && cleanupElapsed < 1f) return;
+            if (faulted && ownedProfile.HasValue && cleanupElapsed < 1f) return;
             if (Release()) Status = settings.Enabled ? "Inactive (self unavailable, disabled, or no bones/strength)." : "Disabled.";
             return;
         }
@@ -113,7 +117,7 @@ internal sealed class BoneHeartbeatPlayer : IDisposable
         jawEnvelope = Math.Clamp(jawEnvelope + (jawRun ? seconds : -seconds) / 0.25f, 0f, 1f);
         if (envelope <= 0f && phase != 0) { PhaseGeneration++; phase = 0; }
         if (jawEnvelope <= 0f) jawPhase = 0;
-        if (!run && !jawRun && envelope <= 0f && jawEnvelope <= 0f)
+        if (!run && !jawRun && !growthRun && envelope <= 0f && jawEnvelope <= 0f)
         {
             if (Release()) Status = "Waiting for accumulated damage.";
             return;
@@ -155,7 +159,7 @@ internal sealed class BoneHeartbeatPlayer : IDisposable
                 ownedProfile = api.SetTemporary(objectIndex, frame);
                 lastSent = frame;
             }
-            Status = run ? $"Heartbeat active — {bpm:0} BPM." : jawRun ? "Jaw breathing active." : "Returning to baseline.";
+            Status = run ? $"Heartbeat active — {bpm:0} BPM." : jawRun ? "Jaw breathing active." : growthRun ? "Bone growth active." : "Returning to baseline.";
         }
         catch (Exception ex)
         {

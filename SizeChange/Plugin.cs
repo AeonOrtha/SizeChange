@@ -290,7 +290,11 @@ public sealed class Plugin : IDalamudPlugin
             deltaSeconds,
             accumulating || (TryGetCharacterState(localActor, out var jawState) &&
                 (jawState.OvershootPulse.IsActive || jawState.PreviousScale > scaleBeforeUpdate + 0.00001f)),
-            pendingDamage, Configuration.SelfSettings.MaximumHealthLossRatioPerTrigger);
+            pendingDamage, Configuration.SelfSettings.MaximumHealthLossRatioPerTrigger,
+            TryGetCharacterState(localActor, out var boneGrowthState)
+                ? Configuration.SelfSettings.GrowthFromDelta ? boneGrowthState.GrowthMultiplier
+                    : boneGrowthState.PlayerScale > 0f ? boneGrowthState.PreviousScale / boneGrowthState.PlayerScale : 1f
+                : 1f);
 
         bool soundAvailable = !ClientState.IsPvP && localActor->Health > 0 &&
             !Condition[ConditionFlag.BetweenAreas] && !Condition[ConditionFlag.BetweenAreas51];

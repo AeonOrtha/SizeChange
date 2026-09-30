@@ -7,6 +7,9 @@ public sealed class HeartbeatChainSettings
 {
     public string Id { get; set; } = string.Empty;
     public bool Enabled { get; set; }
+    public bool GrowthEnabled { get; set; }
+    public float GrowthPerScale { get; set; } = 0.1f;
+    public float GrowthLimit { get; set; } = 0.4f;
     public float Strength { get; set; } = 0.05f;
     public bool Stagger { get; set; }
     // A fraction of the heartbeat period: changing BPM also changes ripple speed.

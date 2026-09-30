@@ -4,6 +4,12 @@ namespace SizeChange;
 
 internal static class BoneHeartbeatMath
 {
+    public static float GrowthOffset(float settledScale, float perScale, float limit)
+    {
+        if (!float.IsFinite(settledScale) || !float.IsFinite(perScale) || !float.IsFinite(limit)) return 0f;
+        return Math.Min(Math.Max(0f, settledScale - 1f) * Math.Clamp(perScale, 0f, 5f), Math.Clamp(limit, 0f, 5f));
+    }
+
     public static float DamageBpm(float baseBpm, float maximumBpm,
         float pendingDamageRatio, float maximumDamageRatio)
     {

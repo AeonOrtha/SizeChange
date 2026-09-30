@@ -39,6 +39,7 @@ internal sealed class BoneHeartbeatProfile
             float wave = phase.HasValue ? (delayed < 0 ? 0 : BoneHeartbeatMath.Sample(delayed)) : 1f;
             float offset = bone.Strength * strength * pulse * wave;
             if (!float.IsFinite(offset) || offset < 0f) offset = 0f;
+            offset += float.IsFinite(bone.GrowthOffset) ? Math.Max(0f, bone.GrowthOffset) : 0f;
             target.Scale["X"] = Math.Clamp(target.X + offset, -512f, 512f);
             target.Scale["Y"] = Math.Clamp(target.Y + offset, -512f, 512f);
             target.Scale["Z"] = Math.Clamp(target.Z + offset, -512f, 512f);

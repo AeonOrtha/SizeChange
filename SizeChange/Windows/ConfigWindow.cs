@@ -191,6 +191,7 @@ public class ConfigWindow : Window, IDisposable
         DrawJawBreathing(settings.Jaw);
         DrawHeartbeatSound(settings.Sound);
         DrawHeartbeatChains(settings);
+        DrawBoneGrowthChains(settings);
         if (ImGui.TreeNode("Custom Bones (Overrides)"))
         {
             ImGui.TextDisabled("JP bone names. Overrides presets.");
@@ -320,6 +321,46 @@ public class ConfigWindow : Window, IDisposable
         if (changed && save) configuration.Save();
         ImGui.PopID();
         return changed;
+    }
+
+    private void DrawBoneGrowthChains(BoneHeartbeatSettings settings)
+    {
+        if (!ImGui.TreeNode("Size-Driven Bone Growth")) return;
+        foreach (var definition in HeartbeatChains.All)
+        {
+            ImGui.PushID("growth-chain-" + definition.Id);
+            var chain = settings.Chains.Find(x => x.Id == definition.Id);
+            bool enabled = chain?.GrowthEnabled ?? false;
+            if (ImGui.Checkbox(definition.Label, ref enabled))
+            {
+                if (chain == null)
+                {
+                    chain = new HeartbeatChainSettings { Id = definition.Id };
+                    settings.Chains.Add(chain);
+                }
+                chain.GrowthEnabled = enabled;
+                configuration.Save();
+            }
+            if (chain != null && chain.GrowthEnabled)
+            {
+                float rate = chain.GrowthPerScale;
+                if (ImGui.DragFloat("Growth per 1x", ref rate, 0.005f, 0f, 5f, "%.3f"))
+                {
+                    chain.GrowthPerScale = Math.Clamp(rate, 0f, 5f);
+                    configuration.Save();
+                }
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Added bone scale per extra 1x settled size. Excludes overshoot.");
+                float limit = chain.GrowthLimit;
+                if (ImGui.DragFloat("Growth Limit", ref limit, 0.005f, 0f, 5f, "%.3f"))
+                {
+                    chain.GrowthLimit = Math.Clamp(limit, 0f, 5f);
+                    configuration.Save();
+                }
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Maximum added scale per bone. Heartbeat pulses are added on top.");
+            }
+            ImGui.PopID();
+        }
+        ImGui.TreePop();
     }
 
     private void DrawHeartbeatChains(BoneHeartbeatSettings settings)

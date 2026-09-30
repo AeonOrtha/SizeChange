@@ -16,6 +16,7 @@ public sealed class HeartbeatBone
     public float Strength { get; set; } = 0.05f;
     // Runtime-only offset resolved from the selected chain, measured in cycles.
     internal double DelayCycles { get; set; }
+    internal float GrowthOffset { get; set; }
 }
 
 [Serializable]
@@ -39,10 +40,10 @@ public sealed class BoneHeartbeatSettings
 
     // Reuse targets across frames. Custom entries override a preset's amount,
     // retaining its timing; selecting a bone twice never doubles the addition.
-    public void ResolveBones(List<HeartbeatBone> targets)
+    public void ResolveBones(List<HeartbeatBone> targets, float settledScale = 1f)
     {
         int count = 0;
-        void Add(string name, float amount, double delay)
+        void Add(string name, float amount, double delay, float growth = 0f)
         {
             for (int i = 0; i < count; i++)
                 if (targets[i].Name == name) { targets[i].Strength = amount; return; }
@@ -51,14 +52,17 @@ public sealed class BoneHeartbeatSettings
             target.Name = name;
             target.Strength = amount;
             target.DelayCycles = delay;
+            target.GrowthOffset = growth;
         }
         foreach (var definition in HeartbeatChains.All)
         {
             var chain = Chains.Find(x => x.Id == definition.Id);
-            if (chain == null || !chain.Enabled) continue;
+            if (chain == null || (!chain.Enabled && !chain.GrowthEnabled)) continue;
             double step = chain.Stagger ? Math.Clamp(chain.DelayPercent, 0f, 10f) / 100.0 : 0;
+            float growth = chain.GrowthEnabled
+                ? BoneHeartbeatMath.GrowthOffset(settledScale, chain.GrowthPerScale, chain.GrowthLimit) : 0f;
             foreach (var bone in definition.Bones)
-                Add(bone.Name, chain.Strength, bone.Depth * step);
+                Add(bone.Name, chain.Enabled ? chain.Strength : 0f, bone.Depth * step, growth);
         }
         foreach (var bone in Bones) Add(bone.Name, bone.Strength, 0);
         if (count < targets.Count) targets.RemoveRange(count, targets.Count - count);
@@ -81,6 +85,8 @@ public sealed class BoneHeartbeatSettings
             !Array.Exists(HeartbeatChains.All, definition => definition.Id == chain.Id));
         foreach (var chain in Chains)
         {
+            chain.GrowthPerScale = float.IsFinite(chain.GrowthPerScale) ? Math.Clamp(chain.GrowthPerScale, 0f, 5f) : 0.1f;
+            chain.GrowthLimit = float.IsFinite(chain.GrowthLimit) ? Math.Clamp(chain.GrowthLimit, 0f, 5f) : 0.4f;
             chain.Strength = float.IsFinite(chain.Strength) ? Math.Clamp(chain.Strength, 0f, 5f) : 0.05f;
             chain.DelayPercent = float.IsFinite(chain.DelayPercent) ? Math.Clamp(chain.DelayPercent, 0f, 10f) : 6f;
         }
