@@ -16,6 +16,7 @@ public class GrowthSettings
     public float MinScaleMultiplier { get; set; } = 0.1f;
     public float MaxScaleMultiplier { get; set; } = 1.0f;
     public float DeltaGrowthMultiplier { get; set; } = 1.0f;
+    public bool ScaleGrowthWithSize { get; set; }
     public float MaximumHealthLossRatioPerTrigger { get; set; } = 1.0f;
     public bool LimitDeltaGrowth { get; set; }
     public float DeltaMaxScaleMultiplier { get; set; } = 5.0f;
@@ -109,6 +110,7 @@ public class GrowthSettings
             MinScaleMultiplier = settings.MinScaleMultiplier,
             MaxScaleMultiplier = settings.MaxScaleMultiplier,
             DeltaGrowthMultiplier = settings.DeltaGrowthMultiplier,
+            ScaleGrowthWithSize = settings.ScaleGrowthWithSize,
             MaximumHealthLossRatioPerTrigger =
                 settings.MaximumHealthLossRatioPerTrigger,
             LimitDeltaGrowth = settings.LimitDeltaGrowth,

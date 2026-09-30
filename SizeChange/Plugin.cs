@@ -36,6 +36,7 @@ struct SCCharacterState
     public float AccumulatorRemainingSeconds;
     public GrowthOvershootPulse OvershootPulse;
     public bool HasPreviousHealth;
+    public bool WasPreviewing;
     public float BaseDrawOffsetY;
     public float LastAppliedDrawOffsetY;
     public bool HasDrawOffset;
@@ -383,7 +384,7 @@ public sealed class Plugin : IDalamudPlugin
 
         var preview = GetPreview(actorGroup);
         bool previewing = isSelected && !globallyDisabled && preview.Enabled && actor->Health > 0;
-        bool outOfCombat = settings.OnlyActiveInCombat && !inCombat && !previewing;
+        bool outOfCombat = GrowthScalingMath.IsOutOfCombat(inCombat, previewing);
         AdjustScale(
             actor,
             actorGroup,
@@ -443,6 +444,15 @@ public sealed class Plugin : IDalamudPlugin
 
         charState.ActorGroup = actorGroup;
 
+        if (charState.WasPreviewing && preview == null)
+        {
+            // Stop queued fake hits when preview ends. A visible pulse finishes
+            // smoothly before normal decay resumes.
+            charState.PendingGrowth = 0f;
+            charState.AccumulatorRemainingSeconds = 0f;
+        }
+        charState.WasPreviewing = preview != null;
+
         if (!settings.GrowthFromDelta &&
             MathF.Abs(previousScale - scale) > 0.0001f)
         {
@@ -457,9 +467,10 @@ public sealed class Plugin : IDalamudPlugin
         }
 
         bool releasedGrowth = false;
+        bool inactiveForCombat = settings.OnlyActiveInCombat && outOfCombat;
         float growthMultiplierBeforeRelease = charState.GrowthMultiplier;
         float deltaSeconds = (float)Framework.UpdateDelta.TotalSeconds;
-        if (settings.GrowthFromDelta && !disable && !outOfCombat)
+        if (settings.GrowthFromDelta && !disable && !inactiveForCombat)
         {
             // Only add growth while the effect is active. Health is sampled while
             // inactive so damage cannot be applied retroactively later.
@@ -474,7 +485,8 @@ public sealed class Plugin : IDalamudPlugin
                     healthLost / maxhp,
                     settings.MaximumHealthLossRatioPerTrigger);
                 float addedGrowth =
-                    healthLostRatio * settings.DeltaGrowthMultiplier;
+                    GrowthScalingMath.CalculateGain(healthLostRatio, settings.DeltaGrowthMultiplier,
+                        charState.GrowthMultiplier, settings.ScaleGrowthWithSize);
                 if (addedGrowth > 0f)
                 {
                     if (settings.AccumulatorDelaySeconds <= 0f)
@@ -507,7 +519,7 @@ public sealed class Plugin : IDalamudPlugin
         else if (charState.PendingGrowth > 0f)
         {
             bool releasePendingGrowth =
-                settings.AccumulatorDelaySeconds <= 0f || outOfCombat;
+                settings.AccumulatorDelaySeconds <= 0f || inactiveForCombat;
             if (!releasePendingGrowth)
             {
                 // If the configured delay is shortened while a window is open,
@@ -637,7 +649,7 @@ public sealed class Plugin : IDalamudPlugin
             ? charState.PlayerScale
             : settings.GrowthFromDelta
                 ? charState.PlayerScale * charState.GrowthMultiplier
-                : outOfCombat
+                : inactiveForCombat
                     ? charState.PlayerScale
                     : settings.GrowFromDamage
                         ? Math.Clamp(
@@ -662,10 +674,12 @@ public sealed class Plugin : IDalamudPlugin
 
         if (triggerOvershoot)
         {
+            float pulseReference = settings.ScaleGrowthWithSize
+                ? Math.Max(1f, growthMultiplierBeforeRelease) : 1f;
             charState.OvershootPulse.Start(
                 previousScale,
-                charState.PlayerScale * GrowthOvershootPulse.BoostSmallRelease(
-                    pulseGrowthAmount, settings.GrowthOvershootSmallBoost,
+                charState.PlayerScale * pulseReference * GrowthOvershootPulse.BoostSmallRelease(
+                    pulseGrowthAmount / pulseReference, settings.GrowthOvershootSmallBoost,
                     settings.GrowthOvershootBoostRangePercent) * settings.GrowthOvershootPercent / 100f,
                 settings.GrowthOvershootRiseSeconds,
                 settings.GrowthOvershootSettleSeconds,

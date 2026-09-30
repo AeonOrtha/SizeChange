@@ -637,6 +637,15 @@ public class ConfigWindow : Window, IDisposable
             configuration.Save();
         }
 
+        bool scaleGrowthWithSize = settings.ScaleGrowthWithSize;
+        if (ImGui.Checkbox($"Scale Growth With Size##{id}", ref scaleGrowthWithSize))
+        {
+            settings.ScaleGrowthWithSize = scaleGrowthWithSize;
+            configuration.Save();
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Compound growth from settled size. Overshoot is excluded.");
+
         float maximumHealthLossPercent =
             settings.MaximumHealthLossRatioPerTrigger * 100f;
         if (ImGui.DragFloat(
@@ -720,7 +729,7 @@ public class ConfigWindow : Window, IDisposable
                 configuration.Save();
             }
             if (ImGui.IsItemHovered())
-                ImGui.SetTooltip("New growth as % of base size where the extra boost is halved. Higher extends the boost to larger releases.");
+                ImGui.SetTooltip("New growth as % of the growth reference size where the extra boost is halved. Higher extends the boost to larger releases.");
 
             float riseSeconds = settings.GrowthOvershootRiseSeconds;
             if (ImGui.DragFloat($"Overshoot Rise Time (Seconds)##{id}",
@@ -775,19 +784,16 @@ public class ConfigWindow : Window, IDisposable
             configuration.Save();
         }
 
-        if (settings.OnlyActiveInCombat)
+        float outOfCombatDecayMultiplier = settings.OutOfCombatDecayMultiplier;
+        if (ImGui.DragFloat(
+                $"Out of Combat Decay Multiplier##{id}",
+                ref outOfCombatDecayMultiplier,
+                0.5f,
+                1.00f,
+                100.00f))
         {
-            float outOfCombatDecayMultiplier = settings.OutOfCombatDecayMultiplier;
-            if (ImGui.DragFloat(
-                    $"Out of Combat Decay Multiplier##{id}",
-                    ref outOfCombatDecayMultiplier,
-                    0.5f,
-                    1.00f,
-                    100.00f))
-            {
-                settings.OutOfCombatDecayMultiplier = Math.Max(1f, outOfCombatDecayMultiplier);
-                configuration.Save();
-            }
+            settings.OutOfCombatDecayMultiplier = Math.Max(1f, outOfCombatDecayMultiplier);
+            configuration.Save();
         }
 
         bool enableDeltaHeightOffset = settings.EnableDeltaHeightOffset;
