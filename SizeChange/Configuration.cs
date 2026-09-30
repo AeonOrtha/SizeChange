@@ -10,6 +10,8 @@ public class GrowthSettings
     public const string DefaultDeltaGrowthSoundPath =
         "sound/vfx/monster5/se_vfx_monster_inferno_lpowerrise_c.scd";
 
+    public float PreviewHitPercent { get; set; } = 10f;
+    public float PreviewHitIntervalSeconds { get; set; } = 1f;
     public float Speed { get; set; } = 2.0f;
     public float MinScaleMultiplier { get; set; } = 0.1f;
     public float MaxScaleMultiplier { get; set; } = 1.0f;
@@ -47,6 +49,9 @@ public class GrowthSettings
 
     public void Validate()
     {
+        PreviewHitPercent = float.IsFinite(PreviewHitPercent) ? Math.Clamp(PreviewHitPercent, 0f, 100f) : 10f;
+        PreviewHitIntervalSeconds = float.IsFinite(PreviewHitIntervalSeconds)
+            ? Math.Clamp(PreviewHitIntervalSeconds, 0.1f, 10f) : 1f;
         Speed = Math.Clamp(Speed, 0.1f, 100f);
         MinScaleMultiplier = Math.Clamp(MinScaleMultiplier, 0.01f, 1f);
         MaxScaleMultiplier = Math.Max(1f, MaxScaleMultiplier);
@@ -94,6 +99,8 @@ public class GrowthSettings
     public static GrowthSettings CopyOf(GrowthSettings settings)
         => new()
         {
+            PreviewHitPercent = settings.PreviewHitPercent,
+            PreviewHitIntervalSeconds = settings.PreviewHitIntervalSeconds,
             Speed = settings.Speed,
             MinScaleMultiplier = settings.MinScaleMultiplier,
             MaxScaleMultiplier = settings.MaxScaleMultiplier,

@@ -66,6 +66,8 @@ public class ConfigWindow : Window, IDisposable
             configuration.Save();
         }
 
+        DrawGrowthPreview(configuration.SelfSettings, SCActorGroup.Self);
+
         float flatHeightOffset = configuration.SelfFlatHeightOffset;
         if (ImGui.DragFloat("Flat Height Offset##self", ref flatHeightOffset, 0.01f, 0f, 100f, "%.3f"))
         {
@@ -79,12 +81,38 @@ public class ConfigWindow : Window, IDisposable
         if (ImGui.Button("Reset Self Settings"))
         {
             configuration.SelfFlatHeightOffset = 0f;
+            plugin.GetPreview(SCActorGroup.Self).Enabled = false;
             configuration.SelfSettings = GrowthSettings.Defaults();
             configuration.SelfBoneHeartbeat = new BoneHeartbeatSettings();
             configuration.Save();
         }
 
         ImGui.EndTabItem();
+    }
+
+    private void DrawGrowthPreview(GrowthSettings settings, SCActorGroup group)
+    {
+        ImGui.PushID("growth-preview-" + group);
+        var preview = plugin.GetPreview(group);
+        bool enabled = preview.Enabled;
+        if (ImGui.Checkbox("Preview Growth", ref enabled)) preview.Enabled = enabled;
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Fake hits. Out of combat. Actual HP unchanged.");
+        if (preview.Enabled)
+        {
+            float percent = settings.PreviewHitPercent;
+            if (ImGui.SliderFloat("Fake Hit (% HP)", ref percent, 0f, 100f, "%.1f%%"))
+            {
+                settings.PreviewHitPercent = percent;
+                configuration.Save();
+            }
+            float interval = settings.PreviewHitIntervalSeconds;
+            if (ImGui.SliderFloat("Hit Interval (s)", ref interval, 0.1f, 10f, "%.2f"))
+            {
+                settings.PreviewHitIntervalSeconds = interval;
+                configuration.Save();
+            }
+        }
+        ImGui.PopID();
     }
 
     private void DrawBoneHeartbeat()
@@ -142,6 +170,7 @@ public class ConfigWindow : Window, IDisposable
             configuration.Save();
         }
 
+        DrawJawBreathing(settings.Jaw);
         DrawHeartbeatSound(settings.Sound);
         DrawHeartbeatChains(settings);
         if (ImGui.TreeNode("Custom Bones (Overrides)"))
@@ -190,6 +219,24 @@ public class ConfigWindow : Window, IDisposable
         ImGui.TextDisabled("Customize+ required. Self only.");
         ImGui.TextWrapped(plugin.BoneHeartbeat.Status);
         ImGui.Separator();
+    }
+
+    private void DrawJawBreathing(JawBreathingSettings settings)
+    {
+        if (!ImGui.TreeNode("Jaw Breathing")) return;
+        bool enabled = settings.Enabled;
+        if (ImGui.Checkbox("Enabled##jaw", ref enabled)) { settings.Enabled = enabled; configuration.Save(); }
+        int mode = (int)settings.Mode;
+        if (ImGui.Combo("When##jaw", ref mode, "Always\0During Growth\0"))
+        { settings.Mode = (JawBreathingMode)mode; configuration.Save(); }
+        float speed = settings.BreathsPerMinute;
+        if (ImGui.SliderFloat("Breaths / Min", ref speed, 2f, 60f, "%.1f"))
+        { settings.BreathsPerMinute = speed; configuration.Save(); }
+        float angle = settings.OpeningDegrees;
+        if (ImGui.SliderFloat("Jaw Opening", ref angle, 0f, 45f, "%.1f deg"))
+        { settings.OpeningDegrees = angle; configuration.Save(); }
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Opens along negative Z; returns to baseline.");
+        ImGui.TreePop();
     }
 
     private void DrawHeartbeatSound(HeartbeatSoundSettings settings)
@@ -330,11 +377,13 @@ public class ConfigWindow : Window, IDisposable
     {
         if (!ImGui.BeginTabItem("Added Players")) return;
 
+        DrawGrowthPreview(configuration.PlayerSettings, SCActorGroup.Player);
         DrawTrackedPlayers();
         ImGui.Separator();
         DrawGrowthSettings(configuration.PlayerSettings, "players");
         if (ImGui.Button("Reset Player Settings"))
         {
+            plugin.GetPreview(SCActorGroup.Player).Enabled = false;
             configuration.PlayerSettings = GrowthSettings.Defaults();
             configuration.Save();
         }
@@ -346,11 +395,13 @@ public class ConfigWindow : Window, IDisposable
     {
         if (!ImGui.BeginTabItem("Added Monsters")) return;
 
+        DrawGrowthPreview(configuration.MonsterSettings, SCActorGroup.Monster);
         DrawTrackedMonsters();
         ImGui.Separator();
         DrawGrowthSettings(configuration.MonsterSettings, "monsters");
         if (ImGui.Button("Reset Monster Settings"))
         {
+            plugin.GetPreview(SCActorGroup.Monster).Enabled = false;
             configuration.MonsterSettings = GrowthSettings.Defaults();
             configuration.Save();
         }

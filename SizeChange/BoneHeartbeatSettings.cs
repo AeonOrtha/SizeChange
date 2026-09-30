@@ -29,6 +29,8 @@ public sealed class BoneHeartbeatSettings
     public float Strength { get; set; } = 1f;
     public List<HeartbeatBone> Bones { get; set; } = new();
 
+    public JawBreathingSettings Jaw { get; set; } = new();
+
     public HeartbeatSoundSettings Sound { get; set; } = new();
 
     public List<HeartbeatChainSettings> Chains { get; set; } = new();
@@ -65,6 +67,8 @@ public sealed class BoneHeartbeatSettings
         if (!Enum.IsDefined(Mode)) Mode = BoneHeartbeatMode.WhileAccumulating;
         BeatsPerMinute = float.IsFinite(BeatsPerMinute) ? Math.Clamp(BeatsPerMinute, 30f, 180f) : 72f;
         Strength = float.IsFinite(Strength) ? Math.Clamp(Strength, 0f, 5f) : 1f;
+        Jaw ??= new();
+        Jaw.Validate();
         Sound ??= new();
         Sound.Validate();
         Chains ??= new();
