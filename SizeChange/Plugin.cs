@@ -550,13 +550,12 @@ public sealed class Plugin : IDalamudPlugin
         bool triggerOvershoot = settings.GrowthFromDelta && !disable &&
             releasedGrowth && pulseGrowthAmount > 0f && settings.GrowthOvershootPercent > 0f;
 
-        // Trigger feedback only when immediate or accumulated damage actually
-        // increases growth. A delayed window therefore produces one combined
-        // sound/VFX event instead of one event for every hit inside the window.
+        // Trigger feedback for earned growth even when the settled size is capped.
+        // A delayed window produces one combined sound/VFX event instead of
+        // one event for every hit inside the window.
         // Sound and VFX have independent per-actor cooldowns so rapid attacks do
         // not create an effect on every framework update.
-        if (releasedGrowth &&
-            charState.GrowthMultiplier > growthMultiplierBeforeRelease)
+        if (releasedGrowth && pulseGrowthAmount > 0f)
         {
             long currentTick = Environment.TickCount64;
             long soundCooldownMilliseconds =
@@ -665,7 +664,9 @@ public sealed class Plugin : IDalamudPlugin
         {
             charState.OvershootPulse.Start(
                 previousScale,
-                charState.PlayerScale * pulseGrowthAmount * settings.GrowthOvershootPercent / 100f,
+                charState.PlayerScale * GrowthOvershootPulse.BoostSmallRelease(
+                    pulseGrowthAmount, settings.GrowthOvershootSmallBoost,
+                    settings.GrowthOvershootBoostRangePercent) * settings.GrowthOvershootPercent / 100f,
                 settings.GrowthOvershootRiseSeconds,
                 settings.GrowthOvershootSettleSeconds,
                 settings.GrowthOvershootRiseCurve,

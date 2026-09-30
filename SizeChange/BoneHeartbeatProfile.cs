@@ -51,7 +51,7 @@ internal sealed class BoneHeartbeatProfile
     {
         if (!float.IsFinite(angle)) angle = 0;
         if (angle == 0 && !jawTouched) return;
-        const string name = "j_ago";
+        const string name = "j_f_ago";
         var bones = (JsonObject)working!["Bones"]!;
         var original = baseline["Bones"]![name] as JsonObject;
         if (angle == 0)
