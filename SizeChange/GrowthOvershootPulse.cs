@@ -5,6 +5,16 @@ namespace SizeChange;
 // Visual-only pulse. It never changes earned growth or the accumulator clock.
 internal struct GrowthOvershootPulse
 {
+    // Multiplier approaches 1 as releases grow. The resulting amplitude stays
+    // monotonic: a larger release must never produce a smaller overshoot.
+    public static float BoostSmallRelease(float growth, float maximumBoost, float rangePercent)
+    {
+        if (growth <= 0f) return 0f;
+        float range = Math.Clamp(rangePercent, 0.01f, 100f) / 100f;
+        float boost = Math.Clamp(maximumBoost, 1f, 100f);
+        return growth * (1f + (boost - 1f) * range / (range + growth));
+    }
+
     public bool IsActive { get; private set; }
     private bool rising;
     private float startScale;
