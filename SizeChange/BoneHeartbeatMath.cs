@@ -4,6 +4,15 @@ namespace SizeChange;
 
 internal static class BoneHeartbeatMath
 {
+    public static float DamageBpm(float baseBpm, float maximumBpm,
+        float pendingDamageRatio, float maximumDamageRatio)
+    {
+        if (!float.IsFinite(pendingDamageRatio) || !float.IsFinite(maximumDamageRatio) ||
+            maximumDamageRatio <= 0f) return baseBpm;
+        float fill = Math.Clamp(pendingDamageRatio / maximumDamageRatio, 0f, 1f);
+        return baseBpm + (Math.Max(baseBpm, maximumBpm) - baseBpm) * fill;
+    }
+
     internal const double SecondBeatStart = 0.26;
 
     // One BPM cycle contains both beats: a strong "lub", a smaller "dub",

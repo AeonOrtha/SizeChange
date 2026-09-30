@@ -33,6 +33,7 @@ struct SCCharacterState
     public float PreviousHealth;
     public float GrowthMultiplier;
     public float PendingGrowth;
+    public float PendingDamageRatio;
     public float AccumulatorRemainingSeconds;
     public GrowthOvershootPulse OvershootPulse;
     public bool HasPreviousHealth;
@@ -275,6 +276,8 @@ public sealed class Plugin : IDalamudPlugin
             (!Configuration.SelfSettings.OnlyActiveInCombat || inCombat || selfPreview.Enabled) &&
             TryGetCharacterState(localActor, out var heartbeatState) &&
             heartbeatState.PendingGrowth > 0f;
+        float pendingDamage = TryGetCharacterState(localActor, out var bpmState)
+            ? bpmState.PendingDamageRatio : 0f;
         BoneHeartbeat.Tick(
             Configuration.SelfBoneHeartbeat,
             localPlayer.ObjectIndex,
@@ -286,7 +289,8 @@ public sealed class Plugin : IDalamudPlugin
             accumulating,
             deltaSeconds,
             accumulating || (TryGetCharacterState(localActor, out var jawState) &&
-                (jawState.OvershootPulse.IsActive || jawState.PreviousScale > scaleBeforeUpdate + 0.00001f)));
+                (jawState.OvershootPulse.IsActive || jawState.PreviousScale > scaleBeforeUpdate + 0.00001f)),
+            pendingDamage, Configuration.SelfSettings.MaximumHealthLossRatioPerTrigger);
 
         bool soundAvailable = !ClientState.IsPvP && localActor->Health > 0 &&
             !Condition[ConditionFlag.BetweenAreas] && !Condition[ConditionFlag.BetweenAreas51];
@@ -449,6 +453,7 @@ public sealed class Plugin : IDalamudPlugin
             // Stop queued fake hits when preview ends. A visible pulse finishes
             // smoothly before normal decay resumes.
             charState.PendingGrowth = 0f;
+            charState.PendingDamageRatio = 0f;
             charState.AccumulatorRemainingSeconds = 0f;
         }
         charState.WasPreviewing = preview != null;
@@ -497,6 +502,8 @@ public sealed class Plugin : IDalamudPlugin
                     else
                     {
                         charState.PendingGrowth += addedGrowth;
+                        charState.PendingDamageRatio = Math.Min(1f,
+                            charState.PendingDamageRatio + healthLostRatio);
                         if (charState.AccumulatorRemainingSeconds <= 0f)
                         {
                             // The first qualifying hit starts a fixed window.
@@ -514,6 +521,7 @@ public sealed class Plugin : IDalamudPlugin
             // Pending growth must never survive disabling the mode, entering
             // PvP, disabling the plugin, or removing the actor from its list.
             charState.PendingGrowth = 0f;
+            charState.PendingDamageRatio = 0f;
             charState.AccumulatorRemainingSeconds = 0f;
         }
         else if (charState.PendingGrowth > 0f)
@@ -538,6 +546,7 @@ public sealed class Plugin : IDalamudPlugin
             {
                 charState.GrowthMultiplier += charState.PendingGrowth;
                 charState.PendingGrowth = 0f;
+                charState.PendingDamageRatio = 0f;
                 charState.AccumulatorRemainingSeconds = 0f;
                 releasedGrowth = true;
             }

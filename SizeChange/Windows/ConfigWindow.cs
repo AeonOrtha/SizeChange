@@ -161,7 +161,25 @@ public class ConfigWindow : Window, IDisposable
         if (ImGui.SliderFloat("Heartbeat BPM", ref bpm, 30f, 180f, "%.0f"))
         {
             settings.BeatsPerMinute = bpm;
+            settings.MaximumBeatsPerMinute = Math.Max(bpm, settings.MaximumBeatsPerMinute);
             configuration.Save();
+        }
+        bool damageBpm = settings.DamageDrivenBpm;
+        if (ImGui.Checkbox("Damage BPM", ref damageBpm))
+        {
+            settings.DamageDrivenBpm = damageBpm;
+            configuration.Save();
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Pending damage raises BPM. Maximum HP Loss Counted Per Trigger sets the full-speed threshold.");
+        if (settings.DamageDrivenBpm)
+        {
+            float maximumBpm = settings.MaximumBeatsPerMinute;
+            if (ImGui.SliderFloat("Maximum BPM", ref maximumBpm, settings.BeatsPerMinute, 180f, "%.0f"))
+            {
+                settings.MaximumBeatsPerMinute = maximumBpm;
+                configuration.Save();
+            }
         }
         float strength = settings.Strength;
         if (ImGui.SliderFloat("Pulse Strength", ref strength, 0f, 5f, "%.2fx"))
@@ -355,7 +373,7 @@ public class ConfigWindow : Window, IDisposable
                         chain.DelayPercent = Math.Clamp(delay, 0f, 10f);
                         configuration.Save();
                     }
-                    ImGui.TextWrapped($"{600f * chain.DelayPercent / settings.BeatsPerMinute:0.0} ms per step.");
+                    ImGui.TextWrapped($"{600f * chain.DelayPercent / settings.BeatsPerMinute:0.0} ms per step at base BPM.");
                 }
             }
             else ImGui.TextDisabled("Single bone.");

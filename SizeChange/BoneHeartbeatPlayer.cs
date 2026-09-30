@@ -67,7 +67,8 @@ internal sealed class BoneHeartbeatPlayer : IDisposable
     }
 
     public void Tick(BoneHeartbeatSettings settings, ushort objectIndex, nint address,
-        uint actorEntityId, bool allowed, bool accumulating, float seconds, bool growing = false)
+        uint actorEntityId, bool allowed, bool accumulating, float seconds, bool growing = false,
+        float pendingDamageRatio = 0f, float maximumDamageRatio = 1f)
     {
         seconds = float.IsFinite(seconds) ? Math.Clamp(seconds, 0f, 1f) : 0f;
         cleanupElapsed += seconds;
@@ -136,7 +137,11 @@ internal sealed class BoneHeartbeatPlayer : IDisposable
                 baselineElapsed = 0f;
             }
 
-            if (envelope > 0f) phase += seconds * settings.BeatsPerMinute / 60.0;
+            float bpm = settings.DamageDrivenBpm
+                ? BoneHeartbeatMath.DamageBpm(settings.BeatsPerMinute, settings.MaximumBeatsPerMinute,
+                    pendingDamageRatio, maximumDamageRatio)
+                : settings.BeatsPerMinute;
+            if (envelope > 0f) phase += seconds * bpm / 60.0;
             if (jawEnvelope > 0f) jawPhase = (jawPhase + seconds * settings.Jaw.BreathsPerMinute / 60.0) % 1.0;
             sendElapsed += seconds;
             if (sendElapsed < 1f / 60f) return;
@@ -150,7 +155,7 @@ internal sealed class BoneHeartbeatPlayer : IDisposable
                 ownedProfile = api.SetTemporary(objectIndex, frame);
                 lastSent = frame;
             }
-            Status = run ? $"Heartbeat active — {settings.BeatsPerMinute:0} BPM." : jawRun ? "Jaw breathing active." : "Returning to baseline.";
+            Status = run ? $"Heartbeat active — {bpm:0} BPM." : jawRun ? "Jaw breathing active." : "Returning to baseline.";
         }
         catch (Exception ex)
         {
