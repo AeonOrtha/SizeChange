@@ -298,7 +298,7 @@ public class ConfigWindow : Window, IDisposable
         int index = slot.Index;
         if (ImGui.InputInt("Index", ref index)) { slot.Index = Math.Max(0, index); changed = true; }
         float volume = slot.Volume;
-        if (ImGui.SliderFloat("Volume", ref volume, 0f, 1f, "%.2f")) { slot.Volume = volume; changed = true; }
+        if (ImGui.SliderFloat("Volume", ref volume, 0f, HeartbeatSoundSlot.MaximumVolume, "%.2fx")) { slot.Volume = volume; changed = true; }
         if (changed && save) configuration.Save();
         ImGui.PopID();
         return changed;

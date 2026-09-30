@@ -5,6 +5,7 @@ namespace SizeChange;
 [Serializable]
 public sealed class HeartbeatSoundSlot
 {
+    public const float MaximumVolume = 4f;
     public string Path { get; set; } = string.Empty;
     public int Index { get; set; }
     public float Volume { get; set; } = 0.5f;
@@ -12,7 +13,7 @@ public sealed class HeartbeatSoundSlot
     {
         Path = (Path ?? string.Empty).Trim().Replace('\\', '/');
         Index = Math.Max(0, Index);
-        Volume = float.IsFinite(Volume) ? Math.Clamp(Volume, 0f, 1f) : 0.5f;
+        Volume = float.IsFinite(Volume) ? Math.Clamp(Volume, 0f, HeartbeatSoundSlot.MaximumVolume) : 0.5f;
     }
 }
 
@@ -38,7 +39,7 @@ public sealed class HeartbeatSoundSettings
         SecondBeat.Validate();
         Path = (Path ?? string.Empty).Trim().Replace('\\', '/');
         Index = Math.Max(0, Index);
-        Volume = float.IsFinite(Volume) ? Math.Clamp(Volume, 0f, 1f) : 0.5f;
+        Volume = float.IsFinite(Volume) ? Math.Clamp(Volume, 0f, HeartbeatSoundSlot.MaximumVolume) : 0.5f;
         FadeInSeconds = float.IsFinite(FadeInSeconds) ? Math.Clamp(FadeInSeconds, 0f, 10f) : 0.5f;
         FadeOutSeconds = float.IsFinite(FadeOutSeconds) ? Math.Clamp(FadeOutSeconds, 0f, 10f) : 0.5f;
     }
