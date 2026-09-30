@@ -70,6 +70,17 @@ public sealed class Plugin : IDalamudPlugin
     private readonly Dictionary<string, uint> TrackedPlayerEntityIds =
         new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<uint> TrackedMonsterEntityIds = new();
+    private readonly GrowthPreview selfPreview = new();
+    private readonly GrowthPreview playerPreview = new();
+    private readonly GrowthPreview monsterPreview = new();
+    internal GrowthPreview GetPreview(SCActorGroup group) => group switch
+    {
+        SCActorGroup.Self => selfPreview,
+        SCActorGroup.Player => playerPreview,
+        SCActorGroup.Monster => monsterPreview,
+        _ => throw new ArgumentOutOfRangeException(nameof(group)),
+    };
+
     private readonly GrowthSoundPlayer GrowthSoundPlayer;
     internal readonly HeartbeatSoundPlayer HeartbeatSound = new(new HeartbeatScdVoice(), new HeartbeatScdVoice(), new HeartbeatScdVoice());
     private readonly GrowthVfxPlayer GrowthVfxPlayer;
@@ -223,6 +234,7 @@ public sealed class Plugin : IDalamudPlugin
         var localPlayer = ObjectTable.LocalPlayer;
         if (localPlayer == null)
         {
+            selfPreview.Enabled = playerPreview.Enabled = monsterPreview.Enabled = false;
             BoneHeartbeat.Tick(Configuration.SelfBoneHeartbeat, 0, 0, 0,
                 false, false, (float)Framework.UpdateDelta.TotalSeconds);
             HeartbeatSound.Tick(Configuration.SelfBoneHeartbeat.Sound, false, false, 0);
@@ -230,6 +242,14 @@ public sealed class Plugin : IDalamudPlugin
         }
 
         float deltaSeconds = (float)Framework.UpdateDelta.TotalSeconds;
+        bool previewAllowed = !globallyDisabled && !inCombat && localPlayer.CurrentHp > 0 &&
+            !Condition[ConditionFlag.BetweenAreas] && !Condition[ConditionFlag.BetweenAreas51];
+        selfPreview.Advance(deltaSeconds, previewAllowed && Configuration.AffectSelf,
+            Configuration.SelfSettings.PreviewHitPercent, Configuration.SelfSettings.PreviewHitIntervalSeconds);
+        playerPreview.Advance(deltaSeconds, previewAllowed,
+            Configuration.PlayerSettings.PreviewHitPercent, Configuration.PlayerSettings.PreviewHitIntervalSeconds);
+        monsterPreview.Advance(deltaSeconds, previewAllowed,
+            Configuration.MonsterSettings.PreviewHitPercent, Configuration.MonsterSettings.PreviewHitIntervalSeconds);
         TrackedActorRefreshElapsed += deltaSeconds;
         if (TrackedActorRefreshRequested ||
             TrackedActorRefreshElapsed >= TrackedActorRefreshIntervalSeconds)
@@ -239,6 +259,7 @@ public sealed class Plugin : IDalamudPlugin
 
         var processedEntityIds = new HashSet<uint>();
         var localActor = (Character*)localPlayer.Address;
+        float scaleBeforeUpdate = localActor->DrawObject != null ? localActor->DrawObject->Scale.Y : 0f;
         ProcessSelectedActor(
             localActor,
             Configuration.AffectSelf,
@@ -250,7 +271,7 @@ public sealed class Plugin : IDalamudPlugin
 
         bool accumulating = Configuration.SelfSettings.GrowthFromDelta &&
             Configuration.SelfSettings.AccumulatorDelaySeconds > 0f &&
-            (!Configuration.SelfSettings.OnlyActiveInCombat || inCombat) &&
+            (!Configuration.SelfSettings.OnlyActiveInCombat || inCombat || selfPreview.Enabled) &&
             TryGetCharacterState(localActor, out var heartbeatState) &&
             heartbeatState.PendingGrowth > 0f;
         BoneHeartbeat.Tick(
@@ -262,7 +283,9 @@ public sealed class Plugin : IDalamudPlugin
                 localActor->DrawObject != null && !Condition[ConditionFlag.BetweenAreas] &&
                 !Condition[ConditionFlag.BetweenAreas51],
             accumulating,
-            deltaSeconds);
+            deltaSeconds,
+            accumulating || (TryGetCharacterState(localActor, out var jawState) &&
+                (jawState.OvershootPulse.IsActive || jawState.PreviousScale > scaleBeforeUpdate + 0.00001f)));
 
         bool soundAvailable = !ClientState.IsPvP && localActor->Health > 0 &&
             !Condition[ConditionFlag.BetweenAreas] && !Condition[ConditionFlag.BetweenAreas51];
@@ -358,13 +381,16 @@ public sealed class Plugin : IDalamudPlugin
             return;
         }
 
-        bool outOfCombat = settings.OnlyActiveInCombat && !inCombat;
+        var preview = GetPreview(actorGroup);
+        bool previewing = isSelected && !globallyDisabled && preview.Enabled && actor->Health > 0;
+        bool outOfCombat = settings.OnlyActiveInCombat && !inCombat && !previewing;
         AdjustScale(
             actor,
             actorGroup,
             settings,
             globallyDisabled || !isSelected,
-            outOfCombat);
+            outOfCombat,
+            previewing ? preview : null);
 
         if (!isSelected)
         {
@@ -378,7 +404,8 @@ public sealed class Plugin : IDalamudPlugin
         SCActorGroup actorGroup,
         GrowthSettings settings,
         bool disable,
-        bool outOfCombat)
+        bool outOfCombat,
+        GrowthPreview? preview)
     {
         if (actor == null) return;
 
@@ -387,7 +414,7 @@ public sealed class Plugin : IDalamudPlugin
 
         float shield = (actor->ShieldValue / 100f) * maxhp;
         float health = actor->Health + shield;
-        float hpRatio = health / maxhp;
+        float hpRatio = preview?.HealthRatio ?? health / maxhp;
 
         var draw = (CharacterBase*)actor->DrawObject;
         if (draw == null) return;
@@ -436,7 +463,11 @@ public sealed class Plugin : IDalamudPlugin
         {
             // Only add growth while the effect is active. Health is sampled while
             // inactive so damage cannot be applied retroactively later.
-            float healthLost = charState.PreviousHealth - health;
+            // Fake loss enters the same cap/accumulator/overshoot path. Real
+            // health is still sampled below, avoiding a false delta on exit.
+            float healthLost = preview != null
+                ? preview.HitRatio * maxhp
+                : charState.PreviousHealth - health;
             if (healthLost > 0f)
             {
                 float healthLostRatio = Math.Min(

@@ -10,6 +10,7 @@ internal sealed class BoneHeartbeatProfile
 {
     private readonly JsonObject baseline;
     private JsonObject? working;
+    private bool jawTouched;
     private readonly List<string> names = new();
     private readonly List<Target> targets = new();
     private readonly record struct Target(int Index, JsonObject Scale, float X, float Y, float Z);
@@ -22,7 +23,7 @@ internal sealed class BoneHeartbeatProfile
             throw new InvalidOperationException("Customize+ profile has no Bones object.");
     }
 
-    public string Build(IReadOnlyList<HeartbeatBone> selectedBones, float pulse, float strength, double? phase = null)
+    public string Build(IReadOnlyList<HeartbeatBone> selectedBones, float pulse, float strength, double? phase = null, float jawAngle = 0f, int jawAxis = 0)
     {
         bool changed = working == null || names.Count != selectedBones.Count;
         for (int i = 0; !changed && i < names.Count; i++)
@@ -42,12 +43,53 @@ internal sealed class BoneHeartbeatProfile
             target.Scale["Y"] = Math.Clamp(target.Y + offset, -512f, 512f);
             target.Scale["Z"] = Math.Clamp(target.Z + offset, -512f, 512f);
         }
+        ApplyJaw(jawAngle, jawAxis);
         return working!.ToJsonString();
+    }
+
+    private void ApplyJaw(float angle, int axis)
+    {
+        if (!float.IsFinite(angle)) angle = 0;
+        if (angle == 0 && !jawTouched) return;
+        const string name = "j_ago";
+        var bones = (JsonObject)working!["Bones"]!;
+        var original = baseline["Bones"]![name] as JsonObject;
+        if (angle == 0)
+        {
+            // Restore just rotation: the jaw may also be a custom scale target.
+            if (original == null && !names.Contains(name)) bones.Remove(name);
+            else if (bones[name] is JsonObject resting)
+            {
+                if (original?["Rotation"] != null) resting["Rotation"] = original["Rotation"]!.DeepClone();
+                else if (original != null) resting.Remove("Rotation");
+                else resting["Rotation"] = Vector(0f);
+            }
+            jawTouched = false;
+            return;
+        }
+        var bone = bones[name] as JsonObject;
+        if (bone == null)
+        {
+            bone = new JsonObject
+            {
+                ["Translation"] = Vector(0f), ["Rotation"] = Vector(0f),
+                ["Scaling"] = Vector(1f), ["ChildScaling"] = Vector(1f),
+                ["ChildScaleIndependent"] = false,
+                ["PropagateTranslation"] = false, ["PropagateRotation"] = false, ["PropagateScale"] = false,
+            };
+            bones[name] = bone;
+        }
+        var rotation = original?["Rotation"]?.DeepClone() as JsonObject ?? Vector(0f);
+        string component = axis == 1 ? "Y" : axis == 2 ? "Z" : "X";
+        rotation[component] = (rotation[component]?.GetValue<float>() ?? 0f) + angle;
+        bone["Rotation"] = rotation;
+        jawTouched = true;
     }
 
     private void Rebuild(IReadOnlyList<HeartbeatBone> selectedBones)
     {
         working = (JsonObject)baseline.DeepClone();
+        jawTouched = false;
         var bones = (JsonObject)working["Bones"]!;
         names.Clear();
         targets.Clear();
