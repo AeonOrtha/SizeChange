@@ -705,6 +705,23 @@ public class ConfigWindow : Window, IDisposable
 
         if (settings.GrowthOvershootPercent > 0f)
         {
+            float smallBoost = settings.GrowthOvershootSmallBoost;
+            if (ImGui.DragFloat($"Small Growth Boost##{id}", ref smallBoost, 0.1f, 1f, 100f, "%.1fx"))
+            {
+                settings.GrowthOvershootSmallBoost = Math.Clamp(smallBoost, 1f, 100f);
+                configuration.Save();
+            }
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Extra overshoot for small releases. 1x disables the boost.");
+            float boostRange = settings.GrowthOvershootBoostRangePercent;
+            if (ImGui.DragFloat($"Boost Range (%)##{id}", ref boostRange, 0.1f, 0.01f, 100f, "%.2f"))
+            {
+                settings.GrowthOvershootBoostRangePercent = Math.Clamp(boostRange, 0.01f, 100f);
+                configuration.Save();
+            }
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("New growth as % of base size where the extra boost is halved. Higher extends the boost to larger releases.");
+
             float riseSeconds = settings.GrowthOvershootRiseSeconds;
             if (ImGui.DragFloat($"Overshoot Rise Time (Seconds)##{id}",
                     ref riseSeconds, 0.05f, 0.05f, 10f, "%.2f"))
