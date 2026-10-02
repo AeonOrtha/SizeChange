@@ -34,6 +34,7 @@ struct SCCharacterState
     public float GrowthMultiplier;
     public float PendingGrowth;
     public float PendingDamageRatio;
+    public AetherGrowthState Aether;
     public float AccumulatorRemainingSeconds;
     public GrowthOvershootPulse OvershootPulse;
     public bool HasPreviousHealth;
@@ -72,6 +73,7 @@ public sealed class Plugin : IDalamudPlugin
     private readonly Dictionary<string, uint> TrackedPlayerEntityIds =
         new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<uint> TrackedMonsterEntityIds = new();
+    private readonly AetherSources aetherSources = new();
     private readonly GrowthPreview selfPreview = new();
     private readonly GrowthPreview playerPreview = new();
     private readonly GrowthPreview monsterPreview = new();
@@ -244,6 +246,9 @@ public sealed class Plugin : IDalamudPlugin
         }
 
         float deltaSeconds = (float)Framework.UpdateDelta.TotalSeconds;
+        aetherSources.Refresh(ObjectTable, !globallyDisabled && localPlayer.CurrentHp > 0 &&
+            !Condition[ConditionFlag.BetweenAreas] && !Condition[ConditionFlag.BetweenAreas51] &&
+            (Configuration.SelfSettings.AetherProximityGrowth || Configuration.PlayerSettings.AetherProximityGrowth || Configuration.MonsterSettings.AetherProximityGrowth));
         bool previewAllowed = !globallyDisabled && !inCombat && localPlayer.CurrentHp > 0 &&
             !Condition[ConditionFlag.BetweenAreas] && !Condition[ConditionFlag.BetweenAreas51];
         selfPreview.Advance(deltaSeconds, previewAllowed && Configuration.AffectSelf,
@@ -273,8 +278,8 @@ public sealed class Plugin : IDalamudPlugin
 
         bool accumulating = Configuration.SelfSettings.GrowthFromDelta &&
             Configuration.SelfSettings.AccumulatorDelaySeconds > 0f &&
-            (!Configuration.SelfSettings.OnlyActiveInCombat || inCombat || selfPreview.Enabled) &&
             TryGetCharacterState(localActor, out var heartbeatState) &&
+            (!Configuration.SelfSettings.OnlyActiveInCombat || inCombat || selfPreview.Enabled || heartbeatState.Aether.InRange || heartbeatState.Aether.PendingGrowth > 0f) &&
             heartbeatState.PendingGrowth > 0f;
         float pendingDamage = TryGetCharacterState(localActor, out var bpmState)
             ? bpmState.PendingDamageRatio : 0f;
@@ -457,9 +462,9 @@ public sealed class Plugin : IDalamudPlugin
         {
             // Stop queued fake hits when preview ends. A visible pulse finishes
             // smoothly before normal decay resumes.
-            charState.PendingGrowth = 0f;
-            charState.PendingDamageRatio = 0f;
-            charState.AccumulatorRemainingSeconds = 0f;
+            charState.PendingGrowth = charState.Aether.PendingGrowth;
+            charState.PendingDamageRatio = charState.Aether.PendingDamageRatio;
+            if (charState.PendingGrowth <= 0f) charState.AccumulatorRemainingSeconds = 0f;
         }
         charState.WasPreviewing = preview != null;
 
@@ -480,46 +485,42 @@ public sealed class Plugin : IDalamudPlugin
         bool inactiveForCombat = settings.OnlyActiveInCombat && outOfCombat;
         float growthMultiplierBeforeRelease = charState.GrowthMultiplier;
         float deltaSeconds = (float)Framework.UpdateDelta.TotalSeconds;
-        if (settings.GrowthFromDelta && !disable && !inactiveForCombat)
+        var position = actor->GameObject.Position;
+        int aetherCount = settings.GrowthFromDelta && settings.AetherProximityGrowth && !disable &&
+            actor->Health > 0 ? aetherSources.CountNear(position.X, position.Y, position.Z, settings.AetherProximityRange) : 0;
+        bool aetherActive = aetherCount > 0;
+        int aetherHits = charState.Aether.Advance(aetherCount, deltaSeconds);
+        void Accumulate(float healthLostRatio, bool aether)
         {
-            // Only add growth while the effect is active. Health is sampled while
-            // inactive so damage cannot be applied retroactively later.
-            // Fake loss enters the same cap/accumulator/overshoot path. Real
-            // health is still sampled below, avoiding a false delta on exit.
-            float healthLost = preview != null
-                ? preview.HitRatio * maxhp
-                : charState.PreviousHealth - health;
-            if (healthLost > 0f)
+            healthLostRatio = Math.Min(healthLostRatio, settings.MaximumHealthLossRatioPerTrigger);
+            float addedGrowth = GrowthScalingMath.CalculateGain(healthLostRatio, settings.DeltaGrowthMultiplier,
+                growthMultiplierBeforeRelease, settings.ScaleGrowthWithSize);
+            if (addedGrowth <= 0f) return;
+            if (settings.AccumulatorDelaySeconds <= 0f)
             {
-                float healthLostRatio = Math.Min(
-                    healthLost / maxhp,
-                    settings.MaximumHealthLossRatioPerTrigger);
-                float addedGrowth =
-                    GrowthScalingMath.CalculateGain(healthLostRatio, settings.DeltaGrowthMultiplier,
-                        charState.GrowthMultiplier, settings.ScaleGrowthWithSize);
-                if (addedGrowth > 0f)
+                charState.GrowthMultiplier += addedGrowth;
+                if (aether) charState.Aether.Bonus += addedGrowth;
+                releasedGrowth = true;
+            }
+            else
+            {
+                charState.PendingGrowth += addedGrowth;
+                charState.PendingDamageRatio = Math.Min(1f, charState.PendingDamageRatio + healthLostRatio);
+                if (aether)
                 {
-                    if (settings.AccumulatorDelaySeconds <= 0f)
-                    {
-                        charState.GrowthMultiplier += addedGrowth;
-                        releasedGrowth = true;
-                    }
-                    else
-                    {
-                        charState.PendingGrowth += addedGrowth;
-                        charState.PendingDamageRatio = Math.Min(1f,
-                            charState.PendingDamageRatio + healthLostRatio);
-                        if (charState.AccumulatorRemainingSeconds <= 0f)
-                        {
-                            // The first qualifying hit starts a fixed window.
-                            // Later hits join it without restarting the timer.
-                            charState.AccumulatorRemainingSeconds =
-                                settings.AccumulatorDelaySeconds;
-                        }
-                    }
+                    charState.Aether.PendingGrowth += addedGrowth;
+                    charState.Aether.PendingDamageRatio = Math.Min(1f, charState.Aether.PendingDamageRatio + healthLostRatio);
                 }
+                if (charState.AccumulatorRemainingSeconds <= 0f)
+                    charState.AccumulatorRemainingSeconds = settings.AccumulatorDelaySeconds;
             }
         }
+        if (settings.GrowthFromDelta && !disable && !inactiveForCombat)
+        {
+            float healthLost = preview != null ? preview.HitRatio * maxhp : charState.PreviousHealth - health;
+            if (healthLost > 0f) Accumulate(healthLost / maxhp, false);
+        }
+        for (int hit = 0; hit < aetherHits; hit++) Accumulate(AetherGrowthState.HitRatio, true);
 
         if (!settings.GrowthFromDelta || disable)
         {
@@ -528,11 +529,12 @@ public sealed class Plugin : IDalamudPlugin
             charState.PendingGrowth = 0f;
             charState.PendingDamageRatio = 0f;
             charState.AccumulatorRemainingSeconds = 0f;
+            charState.Aether = default;
         }
         else if (charState.PendingGrowth > 0f)
         {
             bool releasePendingGrowth =
-                settings.AccumulatorDelaySeconds <= 0f || inactiveForCombat;
+                settings.AccumulatorDelaySeconds <= 0f || (inactiveForCombat && charState.Aether.PendingGrowth <= 0f);
             if (!releasePendingGrowth)
             {
                 // If the configured delay is shortened while a window is open,
@@ -550,6 +552,7 @@ public sealed class Plugin : IDalamudPlugin
             if (releasePendingGrowth)
             {
                 charState.GrowthMultiplier += charState.PendingGrowth;
+                charState.Aether.Release();
                 charState.PendingGrowth = 0f;
                 charState.PendingDamageRatio = 0f;
                 charState.AccumulatorRemainingSeconds = 0f;
@@ -570,7 +573,7 @@ public sealed class Plugin : IDalamudPlugin
         {
             charState.GrowthMultiplier = Math.Min(
                 charState.GrowthMultiplier,
-                settings.DeltaMaxScaleMultiplier);
+                charState.Aether.Cap(settings.DeltaMaxScaleMultiplier));
         }
 
         bool triggerOvershoot = settings.GrowthFromDelta && !disable &&
@@ -641,6 +644,7 @@ public sealed class Plugin : IDalamudPlugin
 
         // Ambient decay is exclusive to Growth From Delta.
         if (settings.GrowthFromDelta &&
+            !aetherActive &&
             charState.PendingGrowth <= 0f &&
             !charState.OvershootPulse.IsActive &&
             !triggerOvershoot &&
@@ -657,6 +661,7 @@ public sealed class Plugin : IDalamudPlugin
             charState.GrowthMultiplier = Math.Max(
                 1.0f,
                 charState.GrowthMultiplier - shrinkAmount);
+            charState.Aether.Decay(shrinkAmount);
         }
 
         float intendedTargetScale = disable
@@ -680,7 +685,7 @@ public sealed class Plugin : IDalamudPlugin
         if (settings.GrowthFromDelta && settings.LimitDeltaGrowth)
         {
             maximumAllowedScale =
-                charState.PlayerScale * settings.DeltaMaxScaleMultiplier;
+                charState.PlayerScale * charState.Aether.Cap(settings.DeltaMaxScaleMultiplier);
             intendedTargetScale = Math.Min(
                 intendedTargetScale,
                 maximumAllowedScale);
@@ -820,8 +825,7 @@ public sealed class Plugin : IDalamudPlugin
         return GrowthSoundPlayer.TryPlay(
             path,
             settings.DeltaGrowthSoundIndex,
-            SoundVolumeScaling.ForSize(settings.DeltaGrowthSoundSizeDrivenVolume, settings.DeltaGrowthSoundVolume,
-                settledScale, settings.DeltaGrowthSoundVolumeGainPerScale, settings.DeltaGrowthSoundMaximumSizeVolume),
+            settings.DeltaGrowthSoundVolume,
             position,
             SoundPlaybackRate.ForSize(settings.DeltaGrowthSoundSizeDrivenRate, settledScale,
                 settings.DeltaGrowthSoundRateDropPerScale, settings.DeltaGrowthSoundMinimumRate));

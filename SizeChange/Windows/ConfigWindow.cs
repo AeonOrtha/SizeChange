@@ -309,20 +309,6 @@ public class ConfigWindow : Window, IDisposable
             if (ImGui.SliderFloat("Minimum Rate", ref minimum, 0.1f, 1f, "%.2fx"))
             { settings.MinimumRate = minimum; configuration.Save(); }
         }
-        bool sizeVolume = settings.SizeDrivenVolume;
-        if (ImGui.Checkbox($"Louder With Size##pulse-volume", ref sizeVolume))
-        { settings.SizeDrivenVolume = sizeVolume; configuration.Save(); }
-        if (settings.SizeDrivenVolume)
-        {
-            float gain = settings.VolumeGainPerScale;
-            if (ImGui.SliderFloat($"Volume Gain per 1x##pulse-volume", ref gain, 0f, 20f, "%.2f"))
-            { settings.VolumeGainPerScale = float.IsFinite(gain) ? Math.Clamp(gain, 0f, 20f) : 0.25f; configuration.Save(); }
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Added fraction of base volume per extra 1x size. 0.25 adds 25%.");
-            float maximum = settings.MaximumSizeVolume;
-            if (ImGui.SliderFloat($"Maximum Volume##pulse-volume", ref maximum, 0f, 20f, "%.2fx"))
-            { settings.MaximumSizeVolume = float.IsFinite(maximum) ? Math.Clamp(maximum, 0f, 20f) : 20f; configuration.Save(); }
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Caps amplified volume at up to 20x. Never lowers your base volume.");
-        }
         bool loop = settings.Loop;
         if (ImGui.Checkbox("Loop##pulse-sound", ref loop))
         {
@@ -740,6 +726,17 @@ public class ConfigWindow : Window, IDisposable
 
         if (!settings.GrowthFromDelta) return;
 
+        bool aetherGrowth = settings.AetherProximityGrowth;
+        if (ImGui.Checkbox($"Aetheryte Proximity Growth##{id}", ref aetherGrowth))
+        { settings.AetherProximityGrowth = aetherGrowth; configuration.Save(); }
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Each nearby teleport crystal gives 0.4% HP-equivalent damage each second, outside combat too. This source bypasses the size limit.");
+        if (settings.AetherProximityGrowth)
+        {
+            float range = settings.AetherProximityRange;
+            if (ImGui.DragFloat($"Aetheryte Range##{id}", ref range, 0.1f, 0.1f, 100f, "%.1f"))
+            { settings.AetherProximityRange = Math.Clamp(range, 0.1f, 100f); configuration.Save(); }
+        }
+
         float deltaGrowthMultiplier = settings.DeltaGrowthMultiplier;
         if (ImGui.DragFloat(
                 $"Damage Growth Multiplier##{id}",
@@ -960,28 +957,14 @@ public class ConfigWindow : Window, IDisposable
                     ref deltaGrowthSoundVolume,
                     0.01f,
                     0.00f,
-                    20.00f))
+                    1.00f))
             {
                 settings.DeltaGrowthSoundVolume =
-                    Math.Clamp(deltaGrowthSoundVolume, 0f, 20f);
+                    Math.Clamp(deltaGrowthSoundVolume, 0f, 1f);
                 growthSoundTestResult = string.Empty;
                 configuration.Save();
             }
 
-            bool sizeVolume = settings.DeltaGrowthSoundSizeDrivenVolume;
-            if (ImGui.Checkbox($"Louder With Size##growth-volume-{id}", ref sizeVolume))
-            { settings.DeltaGrowthSoundSizeDrivenVolume = sizeVolume; configuration.Save(); }
-            if (settings.DeltaGrowthSoundSizeDrivenVolume)
-            {
-                float gain = settings.DeltaGrowthSoundVolumeGainPerScale;
-                if (ImGui.SliderFloat($"Volume Gain per 1x##growth-volume-{id}", ref gain, 0f, 20f, "%.2f"))
-                { settings.DeltaGrowthSoundVolumeGainPerScale = float.IsFinite(gain) ? Math.Clamp(gain, 0f, 20f) : 0.25f; configuration.Save(); }
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Added fraction of base volume per extra 1x size. 0.25 adds 25%.");
-                float maximum = settings.DeltaGrowthSoundMaximumSizeVolume;
-                if (ImGui.SliderFloat($"Maximum Volume##growth-volume-{id}", ref maximum, 0f, 20f, "%.2fx"))
-                { settings.DeltaGrowthSoundMaximumSizeVolume = float.IsFinite(maximum) ? Math.Clamp(maximum, 0f, 20f) : 20f; configuration.Save(); }
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Caps amplified volume at up to 20x. Never lowers your base volume.");
-            }
             bool sizeRate = settings.DeltaGrowthSoundSizeDrivenRate;
             if (ImGui.Checkbox($"Lower Pitch With Size##growth-sound-{id}", ref sizeRate))
             { settings.DeltaGrowthSoundSizeDrivenRate = sizeRate; configuration.Save(); }

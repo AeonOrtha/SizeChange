@@ -10,6 +10,8 @@ public class GrowthSettings
     public const string DefaultDeltaGrowthSoundPath =
         "sound/vfx/monster5/se_vfx_monster_inferno_lpowerrise_c.scd";
 
+    public bool AetherProximityGrowth { get; set; }
+    public float AetherProximityRange { get; set; } = 10f;
     public float PreviewHitPercent { get; set; } = 10f;
     public float PreviewHitIntervalSeconds { get; set; } = 1f;
     public float Speed { get; set; } = 2.0f;
@@ -35,9 +37,6 @@ public class GrowthSettings
     public bool EnableDeltaGrowthSound { get; set; }
     public string DeltaGrowthSoundPath { get; set; } = DefaultDeltaGrowthSoundPath;
     public int DeltaGrowthSoundIndex { get; set; }
-    public bool DeltaGrowthSoundSizeDrivenVolume { get; set; }
-    public float DeltaGrowthSoundVolumeGainPerScale { get; set; } = 0.25f;
-    public float DeltaGrowthSoundMaximumSizeVolume { get; set; } = 20f;
     public bool DeltaGrowthSoundSizeDrivenRate { get; set; }
     public float DeltaGrowthSoundRateDropPerScale { get; set; } = 0.1f;
     public float DeltaGrowthSoundMinimumRate { get; set; } = 0.5f;
@@ -64,6 +63,7 @@ public class GrowthSettings
         Speed = Math.Clamp(Speed, 0.1f, 100f);
         MinScaleMultiplier = Math.Clamp(MinScaleMultiplier, 0.01f, 1f);
         MaxScaleMultiplier = Math.Max(1f, MaxScaleMultiplier);
+        AetherProximityRange = float.IsFinite(AetherProximityRange) ? Math.Clamp(AetherProximityRange, 0.1f, 100f) : 10f;
         DeltaGrowthMultiplier = Math.Max(0f, DeltaGrowthMultiplier);
         MaximumHealthLossRatioPerTrigger =
             Math.Clamp(MaximumHealthLossRatioPerTrigger, 0f, 1f);
@@ -88,9 +88,7 @@ public class GrowthSettings
             ? Math.Clamp(DeltaGrowthSoundRateDropPerScale, 0f, 1f) : 0.1f;
         DeltaGrowthSoundMinimumRate = float.IsFinite(DeltaGrowthSoundMinimumRate)
             ? Math.Clamp(DeltaGrowthSoundMinimumRate, 0.1f, 1f) : 0.5f;
-        DeltaGrowthSoundVolumeGainPerScale = float.IsFinite(DeltaGrowthSoundVolumeGainPerScale) ? Math.Clamp(DeltaGrowthSoundVolumeGainPerScale, 0f, 20f) : 0.25f;
-        DeltaGrowthSoundMaximumSizeVolume = float.IsFinite(DeltaGrowthSoundMaximumSizeVolume) ? Math.Clamp(DeltaGrowthSoundMaximumSizeVolume, 0f, 20f) : 20f;
-        DeltaGrowthSoundVolume = Math.Clamp(DeltaGrowthSoundVolume, 0f, 20f);
+        DeltaGrowthSoundVolume = Math.Clamp(DeltaGrowthSoundVolume, 0f, 1f);
         DeltaGrowthSoundCooldownSeconds =
             Math.Clamp(DeltaGrowthSoundCooldownSeconds, 0f, 60f);
         DeltaGrowthVfxPath = DeltaGrowthVfxPath?.Trim().Replace('\\', '/')
@@ -116,6 +114,8 @@ public class GrowthSettings
     public static GrowthSettings CopyOf(GrowthSettings settings)
         => new()
         {
+            AetherProximityGrowth = settings.AetherProximityGrowth,
+            AetherProximityRange = settings.AetherProximityRange,
             PreviewHitPercent = settings.PreviewHitPercent,
             PreviewHitIntervalSeconds = settings.PreviewHitIntervalSeconds,
             Speed = settings.Speed,
@@ -142,9 +142,6 @@ public class GrowthSettings
             EnableDeltaGrowthSound = settings.EnableDeltaGrowthSound,
             DeltaGrowthSoundPath = settings.DeltaGrowthSoundPath,
             DeltaGrowthSoundIndex = settings.DeltaGrowthSoundIndex,
-            DeltaGrowthSoundSizeDrivenVolume = settings.DeltaGrowthSoundSizeDrivenVolume,
-            DeltaGrowthSoundVolumeGainPerScale = settings.DeltaGrowthSoundVolumeGainPerScale,
-            DeltaGrowthSoundMaximumSizeVolume = settings.DeltaGrowthSoundMaximumSizeVolume,
             DeltaGrowthSoundSizeDrivenRate = settings.DeltaGrowthSoundSizeDrivenRate,
             DeltaGrowthSoundRateDropPerScale = settings.DeltaGrowthSoundRateDropPerScale,
             DeltaGrowthSoundMinimumRate = settings.DeltaGrowthSoundMinimumRate,
