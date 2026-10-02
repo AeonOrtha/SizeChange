@@ -775,7 +775,21 @@ public class ConfigWindow : Window, IDisposable
                 string path = settings.AetherSourceVfxPath;
                 if (ImGui.InputText($"Crystal AVFX##{id}", ref path, 512))
                 { settings.AetherSourceVfxPath = path; configuration.Save(); }
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Effect at each contributing crystal. Use a looping world-space .avfx. Shared crystals show one effect; Self takes priority.");
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Use a looping .avfx. Shared crystals show one effect; Self takes priority.");
+                bool attached = settings.AetherSourceVfxAttached;
+                if (ImGui.Checkbox($"Attach to Crystal##{id}", ref attached))
+                { settings.AetherSourceVfxAttached = attached; configuration.Save(); }
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Target-bound playback. Disable for world-space AVFX. Character-only bone bindings may not work on crystals.");
+                float crystalScale = settings.AetherSourceVfxScale;
+                if (ImGui.DragFloat($"Crystal VFX Scale##{id}", ref crystalScale, 0.05f, 0.01f, 100f, "%.2fx"))
+                { settings.AetherSourceVfxScale = Math.Clamp(crystalScale, 0.01f, 100f); configuration.Save(); }
+                if (!attached)
+                {
+                    float height = settings.AetherSourceVfxHeight;
+                    if (ImGui.DragFloat($"Crystal VFX Height##{id}", ref height, 0.1f, -100f, 100f, "%.1f"))
+                    { settings.AetherSourceVfxHeight = Math.Clamp(height, -100f, 100f); configuration.Save(); }
+                }
+                ImGui.TextDisabled(plugin.CrystalVfxStatus(settings));
             }
         }
 

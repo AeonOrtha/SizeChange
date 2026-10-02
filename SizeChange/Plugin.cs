@@ -511,7 +511,8 @@ public sealed class Plugin : IDalamudPlugin
                 foreach (var hit in nearbyCrystals!)
                     GrowthVfxPlayer.KeepProximity(hit.Crystal.Address, hit.Crystal.EntityId,
                         settings.AetherSourceVfxPath, true,
-                        new Vector3(hit.Crystal.Position.X, hit.Crystal.Position.Y, hit.Crystal.Position.Z));
+                        new Vector3(hit.Crystal.Position.X, hit.Crystal.Position.Y, hit.Crystal.Position.Z),
+                        settings.AetherSourceVfxAttached, settings.AetherSourceVfxScale, settings.AetherSourceVfxHeight);
         }
         bool aetherActive = aetherCount > 0;
         int aetherHits = charState.Aether.Advance(aetherCount, deltaSeconds);
@@ -869,6 +870,9 @@ public sealed class Plugin : IDalamudPlugin
 
         return BitConverter.ToUInt16(data, 0x30);
     }
+
+    internal string CrystalVfxStatus(GrowthSettings settings) =>
+        GrowthVfxPlayer.SourceStatus(settings.AetherSourceVfxPath, settings.AetherSourceVfxAttached);
 
     internal unsafe string TestDeltaGrowthVfx(GrowthSettings settings)
     {

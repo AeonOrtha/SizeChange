@@ -17,6 +17,9 @@ public class GrowthSettings
     public bool AetherActorVfxEnabled { get; set; }
     public string AetherActorVfxPath { get; set; } = string.Empty;
     public bool AetherSourceVfxEnabled { get; set; }
+    public bool AetherSourceVfxAttached { get; set; } = true;
+    public float AetherSourceVfxScale { get; set; } = 1f;
+    public float AetherSourceVfxHeight { get; set; } = 0f;
     public string AetherSourceVfxPath { get; set; } = string.Empty;
     public AetherSoundSettings AetherActorSound { get; set; } = new();
     public AetherSoundSettings AetherSourceSound { get; set; } = new();
@@ -72,6 +75,8 @@ public class GrowthSettings
         MinScaleMultiplier = Math.Clamp(MinScaleMultiplier, 0.01f, 1f);
         MaxScaleMultiplier = Math.Max(1f, MaxScaleMultiplier);
         AetherProximityRange = float.IsFinite(AetherProximityRange) ? Math.Clamp(AetherProximityRange, 0.1f, 100f) : 10f;
+        AetherSourceVfxScale = float.IsFinite(AetherSourceVfxScale) ? Math.Clamp(AetherSourceVfxScale, 0.01f, 100f) : 1f;
+        AetherSourceVfxHeight = float.IsFinite(AetherSourceVfxHeight) ? Math.Clamp(AetherSourceVfxHeight, -100f, 100f) : 0f;
         AetherActorSound ??= new(); AetherActorSound.Validate();
         AetherSourceSound ??= new(); AetherSourceSound.Validate();
         AetherShardHitPercent = float.IsFinite(AetherShardHitPercent) ? Math.Clamp(AetherShardHitPercent, 0f, 100f) : 0.4f;
@@ -134,6 +139,9 @@ public class GrowthSettings
             AetherLargeHitPercent = settings.AetherLargeHitPercent,
             AetherActorVfxEnabled = settings.AetherActorVfxEnabled,
             AetherActorVfxPath = settings.AetherActorVfxPath,
+            AetherSourceVfxAttached = settings.AetherSourceVfxAttached,
+            AetherSourceVfxScale = settings.AetherSourceVfxScale,
+            AetherSourceVfxHeight = settings.AetherSourceVfxHeight,
             AetherSourceVfxEnabled = settings.AetherSourceVfxEnabled,
             AetherSourceVfxPath = settings.AetherSourceVfxPath,
             AetherProximityGrowth = settings.AetherProximityGrowth,
