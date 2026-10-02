@@ -74,6 +74,7 @@ public sealed class Plugin : IDalamudPlugin
     private readonly Dictionary<string, uint> TrackedPlayerEntityIds =
         new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<uint> TrackedMonsterEntityIds = new();
+    private readonly SessionHeightBaselines sessionHeights = new();
     private readonly AetherSources aetherSources = new();
     private readonly AetherSoundPlayer aetherSound = new(() => new HeartbeatScdVoice());
     private readonly GrowthPreview selfPreview = new();
@@ -223,7 +224,7 @@ public sealed class Plugin : IDalamudPlugin
                 Y = OwnedTransformValue.Capture(draw->Scale.Y),
                 Z = OwnedTransformValue.Capture(draw->Scale.Z),
                 ActorScale = OwnedTransformValue.Capture(actor->Scale),
-                Height = OwnedTransformValue.Capture(actor->GameObject.DrawOffset.Y),
+                Height = sessionHeights.ForModel(HeightKey(actor), (nint)draw, actor->GameObject.DrawOffset.Y),
             };
             charState.PlayerScale = draw->Scale.Y;
         }
@@ -252,10 +253,15 @@ public sealed class Plugin : IDalamudPlugin
         aetherSound.BeginFrame((float)Framework.UpdateDelta.TotalSeconds);
         GrowthVfxPlayer.Update();
 
+        if (!ClientState.IsLoggedIn)
+        {
+            sessionHeights.EndSession();
+            CharacterIdToLastScaleMap.Clear();
+        }
         bool globallyDisabled = ClientState.IsPvP || !Configuration.Enable;
         bool inCombat = Condition[ConditionFlag.InCombat];
         var localPlayer = ObjectTable.LocalPlayer;
-        if (localPlayer == null)
+        if (localPlayer == null || !ClientState.IsLoggedIn)
         {
             GrowthVfxPlayer.EndProximityFrame();
             aetherSound.EndFrame();
@@ -265,6 +271,11 @@ public sealed class Plugin : IDalamudPlugin
             HeartbeatSound.Tick(Configuration.SelfBoneHeartbeat.Sound, false, false, 0);
             return;
         }
+
+        // Capture Self at the first ready model after login, even if growth is
+        // disabled. A transient missing model during redraw does not reset it.
+        if (ClientState.IsLoggedIn && ((Character*)localPlayer.Address)->DrawObject != null)
+            sessionHeights.GetOrCapture("self", ((Character*)localPlayer.Address)->GameObject.DrawOffset.Y);
 
         float deltaSeconds = (float)Framework.UpdateDelta.TotalSeconds;
         aetherSources.Refresh(ObjectTable, DataManager, !globallyDisabled && localPlayer.CurrentHp > 0 &&
@@ -493,6 +504,7 @@ public sealed class Plugin : IDalamudPlugin
             actor->Scale = charState.Transform.ActorScale.Restore(actor->Scale);
             var offset = actor->GameObject.DrawOffset;
             actor->GameObject.SetDrawOffset(offset.X, charState.Transform.Height.Restore(offset.Y), offset.Z);
+            sessionHeights.SaveOwnership(HeightKey(actor), charState.Transform.Height);
             charState = new SCCharacterState { ActorAddress = (nint)actor, ActorGroup = actorGroup, GrowthMultiplier = 1f };
             CharacterIdToLastScaleMap[actor->EntityId] = charState;
             return;
@@ -507,7 +519,7 @@ public sealed class Plugin : IDalamudPlugin
                 Y = OwnedTransformValue.Capture(scale),
                 Z = OwnedTransformValue.Capture(draw->Scale.Z),
                 ActorScale = OwnedTransformValue.Capture(actor->Scale),
-                Height = OwnedTransformValue.Capture(actor->GameObject.DrawOffset.Y),
+                Height = sessionHeights.ForModel(HeightKey(actor), (nint)draw, actor->GameObject.DrawOffset.Y),
             };
             charState.PlayerScale = scale;
             charState.PreviousScale = previousScale = scale;
@@ -845,7 +857,7 @@ public sealed class Plugin : IDalamudPlugin
                 settings.DeltaHeightOffsetPerScale;
         }
 
-        if (charState.HasDrawOffset || desiredHeightOffset > 0f)
+        if (charState.HasDrawOffset || charState.Transform.Height.Owned || desiredHeightOffset > 0f)
         {
             ApplyHeightOffset(actor, ref charState, desiredHeightOffset);
         }
@@ -1141,6 +1153,7 @@ public sealed class Plugin : IDalamudPlugin
         charState.BaseDrawOffsetY = charState.Transform.Height.Baseline;
         charState.LastAppliedDrawOffsetY = result;
         charState.HasDrawOffset = charState.Transform.Height.Owned;
+        sessionHeights.SaveOwnership(HeightKey(actor), charState.Transform.Height);
 
     }
 
@@ -1216,7 +1229,7 @@ public sealed class Plugin : IDalamudPlugin
         CharacterIdToLastScaleMap.Remove(actor->EntityId);
     }
 
-    private static unsafe void RestoreOwnedTransforms(Character* actor, ref SCCharacterState state)
+    private unsafe void RestoreOwnedTransforms(Character* actor, ref SCCharacterState state)
     {
         if (!state.Transform.Ready) return;
         var draw = (CharacterBase*)actor->DrawObject;
@@ -1227,6 +1240,15 @@ public sealed class Plugin : IDalamudPlugin
         var offset = actor->GameObject.DrawOffset;
         float y = state.Transform.Height.Restore(offset.Y);
         if (y != offset.Y) actor->GameObject.SetDrawOffset(offset.X, y, offset.Z);
+        sessionHeights.SaveOwnership(HeightKey(actor), state.Transform.Height);
+    }
+
+    private unsafe string HeightKey(Character* actor)
+    {
+        if (ObjectTable.LocalPlayer?.Address == (nint)actor) return "self";
+        var obj = ObjectTable.SearchByEntityId(actor->EntityId);
+        return obj is IPlayerCharacter player ? "player:" + GetPlayerIdentity(player)
+            : $"actor:{actor->EntityId:X}:{(nint)actor:X}";
     }
 
     internal unsafe void RecheckBaselines(SCActorGroup group)
@@ -1251,7 +1273,7 @@ public sealed class Plugin : IDalamudPlugin
             if (state.ActorGroup != group || !state.Transform.Ready) continue;
             string name = ObjectTable.SearchByEntityId(entry.Key)?.Name.TextValue ?? $"Actor {entry.Key:X}";
             lines.Add($"{name}: Base {state.PlayerScale:0.000} | Current {state.PreviousScale:0.000} | " +
-                $"Height base {state.Transform.Height.Baseline:0.000} | Added {(state.Transform.Height.Owned ? state.Transform.Height.LastWritten - state.Transform.Height.Baseline : 0f):0.000}" +
+                $"Session height {state.Transform.Height.Baseline:0.000} | Added {(state.Transform.Height.Owned ? state.Transform.Height.LastWritten - state.Transform.Height.Baseline : 0f):0.000}" +
                 (state.Transform.ScaleConflict ? " | Scale paused: external change" : "") +
                 (state.Transform.Height.Conflict ? " | Height paused: external change" : ""));
         }

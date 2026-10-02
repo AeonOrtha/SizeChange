@@ -82,7 +82,7 @@ public class ConfigWindow : Window, IDisposable
         {
             ImGui.TextWrapped(plugin.TransformDiagnostics(SCActorGroup.Self));
             if (ImGui.Button("Recheck Baseline##self")) plugin.RecheckBaselines(SCActorGroup.Self);
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Restores our owned adjustments, clears growth, then captures the current appearance again.");
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Restores our adjustments and rechecks size. The login-session height stays fixed.");
             ImGui.TreePop();
         }
         if (ImGui.Button("Reset Self Settings"))
@@ -493,7 +493,7 @@ public class ConfigWindow : Window, IDisposable
         {
             ImGui.TextWrapped(plugin.TransformDiagnostics(SCActorGroup.Player));
             if (ImGui.Button("Recheck Baseline##players")) plugin.RecheckBaselines(SCActorGroup.Player);
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Restores our owned adjustments, clears growth, then captures the current appearance again.");
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Restores our adjustments and rechecks size. The login-session height stays fixed.");
             ImGui.TreePop();
         }
         if (ImGui.Button("Reset Player Settings"))
@@ -518,7 +518,7 @@ public class ConfigWindow : Window, IDisposable
         {
             ImGui.TextWrapped(plugin.TransformDiagnostics(SCActorGroup.Monster));
             if (ImGui.Button("Recheck Baseline##monsters")) plugin.RecheckBaselines(SCActorGroup.Monster);
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Restores our owned adjustments, clears growth, then captures the current appearance again.");
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Restores our adjustments and rechecks size. The login-session height stays fixed.");
             ImGui.TreePop();
         }
         if (ImGui.Button("Reset Monster Settings"))
