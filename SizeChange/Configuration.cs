@@ -57,6 +57,9 @@ public class GrowthSettings
     public float DeltaGrowthSoundRateDropPerScale { get; set; } = 0.1f;
     public float DeltaGrowthSoundMinimumRate { get; set; } = 0.5f;
     public float DeltaGrowthSoundVolume { get; set; } = 1.0f;
+    public bool DeltaGrowthSoundSizeDrivenVolume { get; set; }
+    public float DeltaGrowthSoundVolumeGainPerScale { get; set; } = 0.25f;
+    public float DeltaGrowthSoundMaximumVolume { get; set; } = 20f;
     public float DeltaGrowthSoundCooldownSeconds { get; set; } = 1.0f;
     public bool EnableDeltaGrowthVfx { get; set; }
     public string DeltaGrowthVfxPath { get; set; } = string.Empty;
@@ -64,6 +67,7 @@ public class GrowthSettings
     public float DeltaGrowthVfxCooldownSeconds { get; set; } = 1.0f;
     public float DeltaGrowthVfxScale { get; set; } = 1.0f;
     public bool DeltaGrowthVfxScaleWithActor { get; set; } = true;
+    public float DeltaGrowthAnimationChancePercent { get; set; } = 100f;
     public bool EnableDeltaGrowthAnimation { get; set; }
     public string DeltaGrowthAnimationTmbPath { get; set; } = string.Empty;
     public float DeltaGrowthAnimationCooldownSeconds { get; set; } = 1.0f;
@@ -118,7 +122,10 @@ public class GrowthSettings
             ? Math.Clamp(DeltaGrowthSoundRateDropPerScale, 0f, 1f) : 0.1f;
         DeltaGrowthSoundMinimumRate = float.IsFinite(DeltaGrowthSoundMinimumRate)
             ? Math.Clamp(DeltaGrowthSoundMinimumRate, 0.1f, 1f) : 0.5f;
-        DeltaGrowthSoundVolume = Math.Clamp(DeltaGrowthSoundVolume, 0f, 1f);
+        DeltaGrowthSoundVolume = float.IsFinite(DeltaGrowthSoundVolume) ? Math.Clamp(DeltaGrowthSoundVolume, 0f, 20f) : 1f;
+        DeltaGrowthSoundVolumeGainPerScale = float.IsFinite(DeltaGrowthSoundVolumeGainPerScale) ? Math.Clamp(DeltaGrowthSoundVolumeGainPerScale, 0f, 20f) : 0.25f;
+        DeltaGrowthSoundMaximumVolume = float.IsFinite(DeltaGrowthSoundMaximumVolume) ? Math.Clamp(DeltaGrowthSoundMaximumVolume, 0f, 20f) : 20f;
+        DeltaGrowthAnimationChancePercent = float.IsFinite(DeltaGrowthAnimationChancePercent) ? Math.Clamp(DeltaGrowthAnimationChancePercent, 0f, 100f) : 100f;
         DeltaGrowthSoundCooldownSeconds =
             Math.Clamp(DeltaGrowthSoundCooldownSeconds, 0f, 60f);
         DeltaGrowthVfxPath = DeltaGrowthVfxPath?.Trim().Replace('\\', '/')
@@ -192,6 +199,9 @@ public class GrowthSettings
             DeltaGrowthSoundRateDropPerScale = settings.DeltaGrowthSoundRateDropPerScale,
             DeltaGrowthSoundMinimumRate = settings.DeltaGrowthSoundMinimumRate,
             DeltaGrowthSoundVolume = settings.DeltaGrowthSoundVolume,
+            DeltaGrowthSoundSizeDrivenVolume = settings.DeltaGrowthSoundSizeDrivenVolume,
+            DeltaGrowthSoundVolumeGainPerScale = settings.DeltaGrowthSoundVolumeGainPerScale,
+            DeltaGrowthSoundMaximumVolume = settings.DeltaGrowthSoundMaximumVolume,
             DeltaGrowthSoundCooldownSeconds = settings.DeltaGrowthSoundCooldownSeconds,
             EnableDeltaGrowthVfx = settings.EnableDeltaGrowthVfx,
             DeltaGrowthVfxPath = settings.DeltaGrowthVfxPath,
@@ -199,6 +209,7 @@ public class GrowthSettings
             DeltaGrowthVfxCooldownSeconds = settings.DeltaGrowthVfxCooldownSeconds,
             DeltaGrowthVfxScale = settings.DeltaGrowthVfxScale,
             DeltaGrowthVfxScaleWithActor = settings.DeltaGrowthVfxScaleWithActor,
+            DeltaGrowthAnimationChancePercent = settings.DeltaGrowthAnimationChancePercent,
             EnableDeltaGrowthAnimation = settings.EnableDeltaGrowthAnimation,
             DeltaGrowthAnimationTmbPath = settings.DeltaGrowthAnimationTmbPath,
             DeltaGrowthAnimationCooldownSeconds =

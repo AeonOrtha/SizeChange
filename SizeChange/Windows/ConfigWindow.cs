@@ -281,6 +281,10 @@ public class ConfigWindow : Window, IDisposable
         if (ImGui.SliderFloat("Motion Speed##jaw", ref speed, 2f, 60f, "%.1f /min"))
         { settings.BreathsPerMinute = speed; configuration.Save(); }
         if (ImGui.IsItemHovered()) ImGui.SetTooltip("Opening and closing speed, excluding the pause.");
+        float holdOpen = settings.HoldOpenSeconds;
+        if (ImGui.SliderFloat("Hold Open (s)##jaw", ref holdOpen, 0f, 10f, "%.2f"))
+        { settings.HoldOpenSeconds = holdOpen; configuration.Save(); }
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Wait fully open before closing.");
         float pause = settings.PauseSeconds;
         if (ImGui.SliderFloat("Cycle Pause (s)##jaw", ref pause, 0f, 10f, "%.2f"))
         { settings.PauseSeconds = pause; configuration.Save(); }
@@ -316,6 +320,19 @@ public class ConfigWindow : Window, IDisposable
             float minimum = settings.MinimumRate;
             if (ImGui.SliderFloat("Minimum Rate", ref minimum, 0.1f, 1f, "%.2fx"))
             { settings.MinimumRate = minimum; configuration.Save(); }
+        }
+        bool sizeVolume = settings.SizeDrivenVolume;
+        if (ImGui.Checkbox("Louder With Size##pulse", ref sizeVolume))
+        { settings.SizeDrivenVolume = sizeVolume; configuration.Save(); }
+        if (settings.SizeDrivenVolume)
+        {
+            float gain = settings.VolumeGainPerScale;
+            if (ImGui.SliderFloat("Volume Gain per 1x##pulse", ref gain, 0f, 20f, "%.2fx"))
+            { settings.VolumeGainPerScale = gain; configuration.Save(); }
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Fraction of base volume added per extra 1x size. 0.25 adds 25%.");
+            float maximum = settings.MaximumSizeVolume;
+            if (ImGui.SliderFloat("Maximum Volume##pulse", ref maximum, 0f, 20f, "%.2fx"))
+            { settings.MaximumSizeVolume = maximum; configuration.Save(); }
         }
         bool loop = settings.Loop;
         if (ImGui.Checkbox("Loop##pulse-sound", ref loop))
@@ -696,7 +713,7 @@ public class ConfigWindow : Window, IDisposable
             {
                 string input = drainNameInputs.TryGetValue(id, out var saved) ? saved : string.Empty;
                 if (ImGui.InputText("Monster / NPC Name", ref input, 128)) drainNameInputs[id] = input;
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Exact displayed name, ignoring capitalisation. Every matching NPC can contribute.");
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Part of an NPC name, ignoring case. Behemoth matches any name containing behemoth.");
                 ImGui.SameLine();
                 if (ImGui.Button("Add") && !string.IsNullOrWhiteSpace(input))
                 {
@@ -1129,14 +1146,27 @@ public class ConfigWindow : Window, IDisposable
                     ref deltaGrowthSoundVolume,
                     0.01f,
                     0.00f,
-                    1.00f))
+                    20.00f))
             {
                 settings.DeltaGrowthSoundVolume =
-                    Math.Clamp(deltaGrowthSoundVolume, 0f, 1f);
+                    Math.Clamp(deltaGrowthSoundVolume, 0f, 20f);
                 growthSoundTestResult = string.Empty;
                 configuration.Save();
             }
 
+            bool sizeVolume = settings.DeltaGrowthSoundSizeDrivenVolume;
+            if (ImGui.Checkbox($"Louder With Size##growth-sound-{id}", ref sizeVolume))
+            { settings.DeltaGrowthSoundSizeDrivenVolume = sizeVolume; configuration.Save(); }
+            if (settings.DeltaGrowthSoundSizeDrivenVolume)
+            {
+                float gain = settings.DeltaGrowthSoundVolumeGainPerScale;
+                if (ImGui.SliderFloat($"Volume Gain per 1x##growth-sound-{id}", ref gain, 0f, 20f, "%.2fx"))
+                { settings.DeltaGrowthSoundVolumeGainPerScale = gain; configuration.Save(); }
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Fraction of base volume added per extra 1x size. 0.25 adds 25%.");
+                float maximum = settings.DeltaGrowthSoundMaximumVolume;
+                if (ImGui.SliderFloat($"Maximum Volume##growth-sound-{id}", ref maximum, 0f, 20f, "%.2fx"))
+                { settings.DeltaGrowthSoundMaximumVolume = maximum; configuration.Save(); }
+            }
             bool sizeRate = settings.DeltaGrowthSoundSizeDrivenRate;
             if (ImGui.Checkbox($"Lower Pitch With Size##growth-sound-{id}", ref sizeRate))
             { settings.DeltaGrowthSoundSizeDrivenRate = sizeRate; configuration.Save(); }
@@ -1319,6 +1349,11 @@ public class ConfigWindow : Window, IDisposable
                 growthAnimationTestResult = string.Empty;
                 configuration.Save();
             }
+
+            float chance = settings.DeltaGrowthAnimationChancePercent;
+            if (ImGui.SliderFloat("Chance per Pulse##self", ref chance, 0f, 100f, "%.1f%%"))
+            { settings.DeltaGrowthAnimationChancePercent = chance; configuration.Save(); }
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Roll once per growth pulse after the cooldown. A failed roll does nothing. Test always plays.");
 
             float deltaGrowthAnimationCooldown =
                 settings.DeltaGrowthAnimationCooldownSeconds;

@@ -14,6 +14,13 @@ internal sealed class SizeDrainSources
     private readonly HashSet<nint> seen = new();
     private readonly HashSet<string> names = new(StringComparer.OrdinalIgnoreCase);
 
+    private bool MatchesName(string sourceName)
+    {
+        foreach (var name in names)
+            if (sourceName.Contains(name, StringComparison.OrdinalIgnoreCase)) return true;
+        return false;
+    }
+
     public void BeginFrame() { sources.Clear(); seen.Clear(); }
     public void Add(Source source)
     {
@@ -33,7 +40,7 @@ internal sealed class SizeDrainSources
         foreach (var source in sources)
         {
             if (source.Address == receiver ||
-                (!settings.Everyone && (source.Player || !names.Contains(source.Name)))) continue;
+                (!settings.Everyone && (source.Player || !MatchesName(source.Name)))) continue;
             float ratio = AetherExposure.HitRatio(Vector3.Distance(position, source.Position), settings.Range, settings.PeakHitPercent);
             if (ratio > 0f) hits.Add(new Hit(source, ratio));
         }

@@ -765,7 +765,8 @@ public sealed class Plugin : IDalamudPlugin
                     currentTick - charState.LastDeltaGrowthAnimationTick >=
                     animationCooldownMilliseconds;
 
-                if (animationCooldownElapsed &&
+                if (animationCooldownElapsed && settings.EnableDeltaGrowthAnimation &&
+                    Random.Shared.NextDouble() * 100.0 < settings.DeltaGrowthAnimationChancePercent &&
                     TryPlayDeltaGrowthAnimation(actor, settings, false) == null)
                 {
                     charState.LastDeltaGrowthAnimationTick = currentTick;
@@ -970,7 +971,9 @@ public sealed class Plugin : IDalamudPlugin
         return GrowthSoundPlayer.TryPlay(
             path,
             settings.DeltaGrowthSoundIndex,
-            settings.DeltaGrowthSoundVolume,
+            SoundVolumeScaling.ForSize(settings.DeltaGrowthSoundSizeDrivenVolume,
+                settings.DeltaGrowthSoundVolume, settledScale,
+                settings.DeltaGrowthSoundVolumeGainPerScale, settings.DeltaGrowthSoundMaximumVolume),
             position,
             SoundPlaybackRate.ForSize(settings.DeltaGrowthSoundSizeDrivenRate, settledScale,
                 settings.DeltaGrowthSoundRateDropPerScale, settings.DeltaGrowthSoundMinimumRate));
