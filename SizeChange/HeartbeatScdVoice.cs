@@ -23,16 +23,23 @@ internal sealed unsafe class HeartbeatScdVoice : IHeartbeatSoundVoice
         return index < 0 || index >= count ? $"Index range: 0–{count - 1}." : null;
     }
 
-    public void Start(string path, int index, float volume)
+    public void Start(string path, int index, float volume, float playbackRate = 1f)
     {
         Stop();
         var manager = SoundManager.Instance();
         if (manager == null || manager->Disabled) throw new InvalidOperationException("Audio unavailable.");
         // A local, non-positional sound respects the player's sound category.
-        sound = manager->PlaySound(path, volume, 0, 0, 0, 0, 1f, 0,
+        sound = manager->PlaySound(path, volume, 0, 0, 0, 0, Math.Clamp(playbackRate, 0.1f, 1f), 0,
             (uint)index, false, SoundVolumeCategory.Player, false, -1,
             false, false, false, false);
         if (sound == null) throw new InvalidOperationException("SCD playback failed.");
+    }
+
+    public void SetPlaybackRate(float playbackRate)
+    {
+        float rate = Math.Clamp(playbackRate, 0.1f, 1f);
+        if (sound != null && sound->IsActive && sound->Speed != rate)
+            sound->SetSpeed(rate, 0);
     }
 
     public void SetVolume(float volume)

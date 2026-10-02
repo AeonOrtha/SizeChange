@@ -293,6 +293,22 @@ public class ConfigWindow : Window, IDisposable
             settings.Enabled = enabled;
             configuration.Save();
         }
+        bool sizeRate = settings.SizeDrivenRate;
+        if (ImGui.Checkbox("Lower Pitch With Size", ref sizeRate))
+        {
+            settings.SizeDrivenRate = sizeRate;
+            configuration.Save();
+        }
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Slows sound playback as settled size grows. Also lengthens the sound.");
+        if (settings.SizeDrivenRate)
+        {
+            float drop = settings.RateDropPerScale;
+            if (ImGui.SliderFloat("Rate Drop per 1x", ref drop, 0f, 1f, "%.2f"))
+            { settings.RateDropPerScale = drop; configuration.Save(); }
+            float minimum = settings.MinimumRate;
+            if (ImGui.SliderFloat("Minimum Rate", ref minimum, 0.1f, 1f, "%.2fx"))
+            { settings.MinimumRate = minimum; configuration.Save(); }
+        }
         bool loop = settings.Loop;
         if (ImGui.Checkbox("Loop##pulse-sound", ref loop))
         {
@@ -938,6 +954,19 @@ public class ConfigWindow : Window, IDisposable
                 configuration.Save();
             }
 
+            bool sizeRate = settings.DeltaGrowthSoundSizeDrivenRate;
+            if (ImGui.Checkbox($"Lower Pitch With Size##growth-sound-{id}", ref sizeRate))
+            { settings.DeltaGrowthSoundSizeDrivenRate = sizeRate; configuration.Save(); }
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Slows the growth SCD at its starting settled size. Also lengthens the sound.");
+            if (settings.DeltaGrowthSoundSizeDrivenRate)
+            {
+                float drop = settings.DeltaGrowthSoundRateDropPerScale;
+                if (ImGui.SliderFloat($"Rate Drop per 1x##growth-sound-{id}", ref drop, 0f, 1f, "%.2f"))
+                { settings.DeltaGrowthSoundRateDropPerScale = drop; configuration.Save(); }
+                float minimum = settings.DeltaGrowthSoundMinimumRate;
+                if (ImGui.SliderFloat($"Minimum Rate##growth-sound-{id}", ref minimum, 0.1f, 1f, "%.2fx"))
+                { settings.DeltaGrowthSoundMinimumRate = minimum; configuration.Save(); }
+            }
             int deltaGrowthSoundIndex = settings.DeltaGrowthSoundIndex;
             if (ImGui.DragInt(
                     $"SCD Sound Index##{id}",

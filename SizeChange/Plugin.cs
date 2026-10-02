@@ -278,6 +278,10 @@ public sealed class Plugin : IDalamudPlugin
             heartbeatState.PendingGrowth > 0f;
         float pendingDamage = TryGetCharacterState(localActor, out var bpmState)
             ? bpmState.PendingDamageRatio : 0f;
+        float settledSelfScale = TryGetCharacterState(localActor, out var boneGrowthState)
+                ? Configuration.SelfSettings.GrowthFromDelta ? boneGrowthState.GrowthMultiplier
+                    : boneGrowthState.PlayerScale > 0f ? boneGrowthState.PreviousScale / boneGrowthState.PlayerScale : 1f
+                : 1f;
         BoneHeartbeat.Tick(
             Configuration.SelfBoneHeartbeat,
             localPlayer.ObjectIndex,
@@ -291,16 +295,13 @@ public sealed class Plugin : IDalamudPlugin
             accumulating || (TryGetCharacterState(localActor, out var jawState) &&
                 (jawState.OvershootPulse.IsActive || jawState.PreviousScale > scaleBeforeUpdate + 0.00001f)),
             pendingDamage, Configuration.SelfSettings.MaximumHealthLossRatioPerTrigger,
-            TryGetCharacterState(localActor, out var boneGrowthState)
-                ? Configuration.SelfSettings.GrowthFromDelta ? boneGrowthState.GrowthMultiplier
-                    : boneGrowthState.PlayerScale > 0f ? boneGrowthState.PreviousScale / boneGrowthState.PlayerScale : 1f
-                : 1f);
+            settledSelfScale);
 
         bool soundAvailable = !ClientState.IsPvP && localActor->Health > 0 &&
             !Condition[ConditionFlag.BetweenAreas] && !Condition[ConditionFlag.BetweenAreas51];
         HeartbeatSound.Tick(Configuration.SelfBoneHeartbeat.Sound,
             !globallyDisabled && Configuration.AffectSelf && Configuration.SelfBoneHeartbeat.Enabled &&
-            BoneHeartbeat.IsPulsing, soundAvailable, deltaSeconds, BoneHeartbeat.Phase, BoneHeartbeat.PhaseGeneration);
+            BoneHeartbeat.IsPulsing, soundAvailable, deltaSeconds, BoneHeartbeat.Phase, BoneHeartbeat.PhaseGeneration, settledSelfScale);
 
         foreach (var trackedPlayer in TrackedPlayerEntityIds)
         {
@@ -591,7 +592,7 @@ public sealed class Plugin : IDalamudPlugin
                 currentTick - charState.LastDeltaGrowthSoundTick >= soundCooldownMilliseconds;
 
             if (soundCooldownElapsed &&
-                TryPlayDeltaGrowthSound(actor, settings, false) == null)
+                TryPlayDeltaGrowthSound(actor, settings, false, charState.GrowthMultiplier) == null)
             {
                 charState.LastDeltaGrowthSoundTick = currentTick;
             }
@@ -759,7 +760,9 @@ public sealed class Plugin : IDalamudPlugin
         string? error = TryPlayDeltaGrowthSound(
             (Character*)localPlayer.Address,
             settings,
-            true);
+            true,
+            TryGetCharacterState((Character*)localPlayer.Address, out var soundState)
+                ? soundState.GrowthMultiplier : 1f);
         if (error != null)
         {
             return error;
@@ -773,7 +776,8 @@ public sealed class Plugin : IDalamudPlugin
     private unsafe string? TryPlayDeltaGrowthSound(
         Character* actor,
         GrowthSettings settings,
-        bool ignoreEnabled)
+        bool ignoreEnabled,
+        float settledScale = 1f)
     {
         if ((!ignoreEnabled && !settings.EnableDeltaGrowthSound) ||
             settings.DeltaGrowthSoundVolume <= 0f)
@@ -817,7 +821,9 @@ public sealed class Plugin : IDalamudPlugin
             path,
             settings.DeltaGrowthSoundIndex,
             settings.DeltaGrowthSoundVolume,
-            position);
+            position,
+            SoundPlaybackRate.ForSize(settings.DeltaGrowthSoundSizeDrivenRate, settledScale,
+                settings.DeltaGrowthSoundRateDropPerScale, settings.DeltaGrowthSoundMinimumRate));
     }
 
     private static int GetScdSoundCount(string path)

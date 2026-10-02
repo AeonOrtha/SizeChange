@@ -31,7 +31,7 @@ internal sealed class HeartbeatSoundPlayer : IDisposable
     }
 
     public void Tick(HeartbeatSoundSettings settings, bool pulsing, bool available, float seconds,
-        double phase = 0, long phaseGeneration = 0)
+        double phase = 0, long phaseGeneration = 0, float settledScale = 1f)
     {
         if (settings.Loop != wasLoop)
         {
@@ -47,11 +47,12 @@ internal sealed class HeartbeatSoundPlayer : IDisposable
             generation = phaseGeneration;
             previousPhase = -double.Epsilon;
         }
-        first.Sync(settings.FirstBeat);
-        second.Sync(settings.SecondBeat);
+        float playbackRate = settings.RateForSize(settledScale);
+        first.Sync(settings.FirstBeat, playbackRate);
+        second.Sync(settings.SecondBeat, playbackRate);
         if (settings.Loop)
         {
-            loop.Tick(settings, pulsing, available, seconds);
+            loop.Tick(settings, pulsing, available, seconds, playbackRate);
             previousPhase = phase;
             wasRun = false;
             return;
@@ -79,8 +80,8 @@ internal sealed class HeartbeatSoundPlayer : IDisposable
             // never emit a burst of historical sounds on recovery.
             double latestFirst = Math.Floor(phase);
             double latestSecond = Math.Floor(phase - BoneHeartbeatMath.SecondBeatStart) + BoneHeartbeatMath.SecondBeatStart;
-            if (hitFirst && (!hitSecond || latestFirst > latestSecond)) first.Play(settings.FirstBeat);
-            else if (hitSecond) second.Play(settings.SecondBeat);
+            if (hitFirst && (!hitSecond || latestFirst > latestSecond)) first.Play(settings.FirstBeat, playbackRate);
+            else if (hitSecond) second.Play(settings.SecondBeat, playbackRate);
         }
         previousPhase = phase;
     }
@@ -98,7 +99,7 @@ internal sealed class HeartbeatSoundPlayer : IDisposable
         private int index = -1;
         private bool validated;
         public string Error { get; private set; } = string.Empty;
-        public void Sync(HeartbeatSoundSlot slot)
+        public void Sync(HeartbeatSoundSlot slot, float playbackRate)
         {
             string selectedPath = slot.Path.Trim().Replace('\\', '/');
             if (selectedPath != path || slot.Index != index)
@@ -108,10 +109,15 @@ internal sealed class HeartbeatSoundPlayer : IDisposable
                 index = slot.Index;
             }
             if (slot.Volume <= 0) Stop();
+            else if (Error.Length == 0)
+            {
+                try { voice.SetPlaybackRate(playbackRate); }
+                catch (Exception ex) { Stop(); Error = ex.Message; }
+            }
         }
         public void Retry() { Stop(); validated = false; Error = string.Empty; }
         public void Stop() => voice.Stop();
-        public void Play(HeartbeatSoundSlot slot)
+        public void Play(HeartbeatSoundSlot slot, float playbackRate)
         {
             if (path.Length == 0 || slot.Volume <= 0 || Error.Length > 0) return;
             try
@@ -125,7 +131,7 @@ internal sealed class HeartbeatSoundPlayer : IDisposable
                 // Bound ownership to one voice per slot, even if an SCD has
                 // an unexpectedly long tail or internal loop points.
                 Stop();
-                voice.Start(path, index, slot.Volume);
+                voice.Start(path, index, slot.Volume, playbackRate);
             }
             catch (Exception ex) { Stop(); Error = ex.Message; }
         }

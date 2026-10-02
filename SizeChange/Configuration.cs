@@ -35,6 +35,9 @@ public class GrowthSettings
     public bool EnableDeltaGrowthSound { get; set; }
     public string DeltaGrowthSoundPath { get; set; } = DefaultDeltaGrowthSoundPath;
     public int DeltaGrowthSoundIndex { get; set; }
+    public bool DeltaGrowthSoundSizeDrivenRate { get; set; }
+    public float DeltaGrowthSoundRateDropPerScale { get; set; } = 0.1f;
+    public float DeltaGrowthSoundMinimumRate { get; set; } = 0.5f;
     public float DeltaGrowthSoundVolume { get; set; } = 1.0f;
     public float DeltaGrowthSoundCooldownSeconds { get; set; } = 1.0f;
     public bool EnableDeltaGrowthVfx { get; set; }
@@ -78,6 +81,10 @@ public class GrowthSettings
             ? DefaultDeltaGrowthSoundPath
             : DeltaGrowthSoundPath.Trim().Replace('\\', '/');
         DeltaGrowthSoundIndex = Math.Max(0, DeltaGrowthSoundIndex);
+        DeltaGrowthSoundRateDropPerScale = float.IsFinite(DeltaGrowthSoundRateDropPerScale)
+            ? Math.Clamp(DeltaGrowthSoundRateDropPerScale, 0f, 1f) : 0.1f;
+        DeltaGrowthSoundMinimumRate = float.IsFinite(DeltaGrowthSoundMinimumRate)
+            ? Math.Clamp(DeltaGrowthSoundMinimumRate, 0.1f, 1f) : 0.5f;
         DeltaGrowthSoundVolume = Math.Clamp(DeltaGrowthSoundVolume, 0f, 1f);
         DeltaGrowthSoundCooldownSeconds =
             Math.Clamp(DeltaGrowthSoundCooldownSeconds, 0f, 60f);
@@ -130,6 +137,9 @@ public class GrowthSettings
             EnableDeltaGrowthSound = settings.EnableDeltaGrowthSound,
             DeltaGrowthSoundPath = settings.DeltaGrowthSoundPath,
             DeltaGrowthSoundIndex = settings.DeltaGrowthSoundIndex,
+            DeltaGrowthSoundSizeDrivenRate = settings.DeltaGrowthSoundSizeDrivenRate,
+            DeltaGrowthSoundRateDropPerScale = settings.DeltaGrowthSoundRateDropPerScale,
+            DeltaGrowthSoundMinimumRate = settings.DeltaGrowthSoundMinimumRate,
             DeltaGrowthSoundVolume = settings.DeltaGrowthSoundVolume,
             DeltaGrowthSoundCooldownSeconds = settings.DeltaGrowthSoundCooldownSeconds,
             EnableDeltaGrowthVfx = settings.EnableDeltaGrowthVfx,

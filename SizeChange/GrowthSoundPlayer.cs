@@ -62,7 +62,8 @@ internal sealed unsafe class GrowthSoundPlayer : IDisposable
         string path,
         int soundIndex,
         float volume,
-        Vector3 position)
+        Vector3 position,
+        float playbackRate = 1f)
     {
         if (playSound == null || initializeSoundHook == null)
         {
@@ -86,6 +87,10 @@ internal sealed unsafe class GrowthSoundPlayer : IDisposable
             // The second argument is the game's actual play switch. VFXEditor
             // uses 1 here for its working SCD preview action.
             playSound(pathPointer, 1);
+            // Apply after the wrapper has finished initializing the sound.
+            // No native pointer is retained after this request.
+            if (initializedSound != null && initializedSound->IsActive)
+                initializedSound->SetSpeed(Math.Clamp(playbackRate, 0.1f, 1f), 0);
 
             return initializedSound == null
                 ? "FFXIV did not initialize a sound from the SCD preview request."

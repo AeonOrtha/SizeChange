@@ -5,7 +5,7 @@ namespace SizeChange;
 [Serializable]
 public sealed class HeartbeatSoundSlot
 {
-    public const float MaximumVolume = 4f;
+    public const float MaximumVolume = 20f;
     public string Path { get; set; } = string.Empty;
     public int Index { get; set; }
     public float Volume { get; set; } = 0.5f;
@@ -22,6 +22,12 @@ public sealed class HeartbeatSoundSettings
 {
     public bool Enabled { get; set; }
     public bool Loop { get; set; }
+    public bool SizeDrivenRate { get; set; }
+    public float RateDropPerScale { get; set; } = 0.1f;
+    public float MinimumRate { get; set; } = 0.5f;
+
+    public float RateForSize(float settledScale) =>
+        SoundPlaybackRate.ForSize(SizeDrivenRate, settledScale, RateDropPerScale, MinimumRate);
     public HeartbeatSoundSlot FirstBeat { get; set; } = new();
     public HeartbeatSoundSlot SecondBeat { get; set; } = new() { Volume = 0.325f };
     // Existing path/index/volume are retained as the independent loop slot.
@@ -33,6 +39,8 @@ public sealed class HeartbeatSoundSettings
 
     public void Validate()
     {
+        RateDropPerScale = float.IsFinite(RateDropPerScale) ? Math.Clamp(RateDropPerScale, 0f, 1f) : 0.1f;
+        MinimumRate = float.IsFinite(MinimumRate) ? Math.Clamp(MinimumRate, 0.1f, 1f) : 0.5f;
         FirstBeat ??= new();
         SecondBeat ??= new() { Volume = 0.325f };
         FirstBeat.Validate();
@@ -49,7 +57,8 @@ internal interface IHeartbeatSoundVoice
 {
     string? Validate(string path, int index);
     bool IsPlaying { get; }
-    void Start(string path, int index, float volume);
+    void Start(string path, int index, float volume, float playbackRate = 1f);
+    void SetPlaybackRate(float playbackRate);
     void SetVolume(float volume);
     void Stop();
 }
@@ -76,7 +85,7 @@ internal sealed class HeartbeatLoopPlayer(IHeartbeatSoundVoice voice) : IDisposa
         Status = string.Empty;
     }
 
-    public void Tick(HeartbeatSoundSettings settings, bool pulsing, bool available, float seconds)
+    public void Tick(HeartbeatSoundSettings settings, bool pulsing, bool available, float seconds, float playbackRate = 1f)
     {
         seconds = float.IsFinite(seconds) ? Math.Clamp(seconds, 0f, 1f) : 0f;
         string selectedPath = settings.Path.Trim().Replace('\\', '/');
@@ -114,11 +123,12 @@ internal sealed class HeartbeatLoopPlayer(IHeartbeatSoundVoice voice) : IDisposa
             // repeats when finished, without replaying the fade-in envelope.
             if (!started)
             {
-                voice.Start(path, index, level * settings.Volume);
+                voice.Start(path, index, level * settings.Volume, playbackRate);
                 started = true;
                 age = 0f;
             }
             voice.SetVolume(level * settings.Volume);
+            voice.SetPlaybackRate(playbackRate);
             Status = run ? "Sound playing." : "Sound fading.";
         }
         catch (Exception ex)
