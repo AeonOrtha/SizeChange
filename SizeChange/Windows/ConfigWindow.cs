@@ -21,6 +21,7 @@ public class ConfigWindow : Window, IDisposable
     private bool growthAnimationTestSucceeded;
     private string heartbeatBoneInput = string.Empty;
     private string heartbeatInputError = string.Empty;
+    private readonly System.Collections.Generic.Dictionary<string, string> drainNameInputs = new();
 
     public ConfigWindow(Plugin plugin) : base("SizeChange Config")
     {
@@ -678,6 +679,83 @@ public class ConfigWindow : Window, IDisposable
             error);
     }
 
+    private void DrawSizeDrain(SizeDrainSettings settings, string id)
+    {
+        ImGui.PushID($"SizeDrain{id}");
+        bool enabled = settings.Enabled;
+        if (ImGui.Checkbox("Size Drain", ref enabled))
+        { settings.Enabled = enabled; configuration.Save(); }
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Nearby sources grant growth once per second, even outside combat and beyond the size limit. Sources do not shrink.");
+        if (enabled && ImGui.TreeNode("Size Drain Settings"))
+        {
+            bool everyone = settings.Everyone;
+            if (ImGui.Checkbox("Everyone Near Me", ref everyone))
+            { settings.Everyone = everyone; configuration.Save(); }
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("All loaded, living players and NPCs in range of each receiving character, excluding itself. Includes companions and retainers. Overrides the name list while enabled.");
+            if (!everyone)
+            {
+                string input = drainNameInputs.TryGetValue(id, out var saved) ? saved : string.Empty;
+                if (ImGui.InputText("Monster / NPC Name", ref input, 128)) drainNameInputs[id] = input;
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Exact displayed name, ignoring capitalisation. Every matching NPC can contribute.");
+                ImGui.SameLine();
+                if (ImGui.Button("Add") && !string.IsNullOrWhiteSpace(input))
+                {
+                    string name = input.Trim();
+                    if (!settings.Names.Exists(n => string.Equals(n, name, StringComparison.OrdinalIgnoreCase))) settings.Names.Add(name);
+                    drainNameInputs[id] = string.Empty;
+                    configuration.Save();
+                }
+                for (int i = 0; i < settings.Names.Count; i++)
+                {
+                    ImGui.PushID(i);
+                    if (ImGui.SmallButton("Remove"))
+                    { settings.Names.RemoveAt(i--); configuration.Save(); ImGui.PopID(); continue; }
+                    ImGui.SameLine();
+                    ImGui.TextUnformatted(settings.Names[i]);
+                    ImGui.PopID();
+                }
+            }
+            float range = settings.Range;
+            if (ImGui.DragFloat("Range", ref range, 0.1f, 0.1f, 100f, "%.1f"))
+            { settings.Range = Math.Clamp(range, 0.1f, 100f); configuration.Save(); }
+            float peak = settings.PeakHitPercent;
+            if (ImGui.DragFloat("Peak Hit", ref peak, 0.01f, 0f, 100f, "%.2f%% HP"))
+            { settings.PeakHitPercent = Math.Clamp(peak, 0f, 100f); configuration.Save(); }
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Per-source maximum at zero distance, falling smoothly to zero at range. Sources stack. Uses the profile's damage multiplier, HP allowance and accumulator delay.");
+            bool receiver = settings.ReceiverVfxEnabled;
+            if (ImGui.Checkbox("Receiver VFX", ref receiver))
+            { settings.ReceiverVfxEnabled = receiver; configuration.Save(); }
+            if (receiver)
+            {
+                string path = settings.ReceiverVfxPath;
+                if (ImGui.InputText("Receiver AVFX", ref path, 512))
+                { settings.ReceiverVfxPath = path; configuration.Save(); }
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Looping .avfx on the growing character while any source contributes.");
+            }
+            bool source = settings.SourceVfxEnabled;
+            if (ImGui.Checkbox("Target VFX", ref source))
+            { settings.SourceVfxEnabled = source; configuration.Save(); }
+            if (source)
+            {
+                string path = settings.SourceVfxPath;
+                if (ImGui.InputText("Target AVFX", ref path, 512))
+                { settings.SourceVfxPath = path; configuration.Save(); }
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Looping .avfx attached to each contributing source. Shared sources show one effect; Self takes priority.");
+            }
+            if (receiver || source)
+            {
+                float fadeIn = settings.FadeIn, fadeOut = settings.FadeOut;
+                if (ImGui.DragFloat("Fade In", ref fadeIn, 0.05f, 0f, 10f, "%.2fs"))
+                { settings.FadeIn = Math.Clamp(fadeIn, 0f, 10f); configuration.Save(); }
+                if (ImGui.DragFloat("Fade Out", ref fadeOut, 0.05f, 0f, 10f, "%.2fs"))
+                { settings.FadeOut = Math.Clamp(fadeOut, 0f, 10f); configuration.Save(); }
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Uses the existing proximity fade system. Visible fading depends on the AVFX asset.");
+            }
+            ImGui.TreePop();
+        }
+        ImGui.PopID();
+    }
+
     private void DrawGrowthSettings(GrowthSettings settings, string id)
     {
         bool onlyActiveInCombat = settings.OnlyActiveInCombat;
@@ -746,6 +824,8 @@ public class ConfigWindow : Window, IDisposable
         }
 
         if (!settings.GrowthFromDelta) return;
+
+        DrawSizeDrain(settings.SizeDrain, id);
 
         bool aetherGrowth = settings.AetherProximityGrowth;
         if (ImGui.Checkbox($"Aetheryte Proximity Growth##{id}", ref aetherGrowth))

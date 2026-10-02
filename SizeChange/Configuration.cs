@@ -10,6 +10,7 @@ public class GrowthSettings
     public const string DefaultDeltaGrowthSoundPath =
         "sound/vfx/monster5/se_vfx_monster_inferno_lpowerrise_c.scd";
 
+    public SizeDrainSettings SizeDrain { get; set; } = new();
     public bool AetherProximityGrowth { get; set; }
     public float AetherProximityRange { get; set; } = 10f;
     public float AetherShardHitPercent { get; set; } = 0.4f;
@@ -72,6 +73,8 @@ public class GrowthSettings
 
     public void Validate()
     {
+        SizeDrain ??= new();
+        SizeDrain.Validate();
         PreviewHitPercent = float.IsFinite(PreviewHitPercent) ? Math.Clamp(PreviewHitPercent, 0f, 100f) : 10f;
         PreviewHitIntervalSeconds = float.IsFinite(PreviewHitIntervalSeconds)
             ? Math.Clamp(PreviewHitIntervalSeconds, 0.1f, 10f) : 1f;
@@ -141,6 +144,7 @@ public class GrowthSettings
     public static GrowthSettings CopyOf(GrowthSettings settings)
         => new()
         {
+            SizeDrain = SizeDrainSettings.CopyOf(settings.SizeDrain),
             AetherActorSound = AetherSoundSettings.CopyOf(settings.AetherActorSound),
             AetherSourceSound = AetherSoundSettings.CopyOf(settings.AetherSourceSound),
             AetherShardHitPercent = settings.AetherShardHitPercent,

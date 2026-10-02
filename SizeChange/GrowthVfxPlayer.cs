@@ -62,6 +62,7 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable
         public required nint VfxAddress { get; init; }
         public required nint ActorAddress { get; init; }
         public int Channel { get; init; }
+        public bool IsProximitySource => Channel is 2 or 4;
         public VfxFade Fade;
         public float FadeIn;
         public float FadeOut;
@@ -170,8 +171,8 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable
         return null;
     }
 
-    // Channel 0 is the existing timed growth effect; 1 and 2 are persistent
-    // proximity effects on the character and source respectively.
+    // Channel 0: timed growth; 1/2: crystal receiver/source;
+    // 3/4: size-drain receiver/source. Each lifecycle is independent.
     public void BeginProximityFrame(float seconds = 0f)
     {
         proximityRequested.Clear();
@@ -180,15 +181,15 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable
 
     public void KeepProximity(nint address, uint entityId, string configuredPath, bool source, Vector3 position,
         bool attachToSource = false, float sourceScale = 1f, float sourceHeight = 0f,
-        float fadeIn = 0f, float fadeOut = 0f)
+        float fadeIn = 0f, float fadeOut = 0f, bool sizeDrain = false)
     {
         string path = configuredPath.Trim().Replace('\\', '/');
         if (!IsValidProximityPath(path)) return;
         bool isStatic = source && !attachToSource;
         if (isStatic) position.Y += sourceHeight;
-        int channel = source ? 2 : 1;
+        int channel = (source ? 2 : 1) + (sizeDrain ? 2 : 0);
         var key = (address, channel);
-        // A crystal shared by profiles gets one effect, with Self taking priority.
+        // Each shared source gets one effect per source type, with Self taking priority.
         if (!proximityRequested.Add(key)) return;
         if (activeVfxByActor.TryGetValue(key, out var oldAddress) && activeByVfx.TryGetValue(oldAddress, out var old))
         {
@@ -289,7 +290,7 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable
             var active = pair.Value;
             if (active.Channel == 0) continue;
             if (immediate) { expired.Add(pair.Key); continue; }
-            if (active.Channel == 2 && active.CanApplyScale) ApplyScale(active);
+            if (active.IsProximitySource && active.CanApplyScale) ApplyScale(active);
             bool visible = proximityRequested.Contains((active.ActorAddress, active.Channel));
             float opacity = active.Fade.Advance(visible, proximityDelta, active.FadeIn, active.FadeOut);
             ((VfxObject*)pair.Key)->Color.W = active.OriginalAlpha * opacity;
@@ -366,10 +367,10 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable
                 activeVfx.ActorGrowthMultiplier);
         }
 
-        effectiveScale = Math.Clamp(effectiveScale, 0.01f, activeVfx.Channel == 2 ? 200f : 100f);
+        effectiveScale = Math.Clamp(effectiveScale, 0.01f, activeVfx.IsProximitySource ? 200f : 100f);
         // Native target attachment can overwrite transforms even with an
-        // unchanged setting; refresh crystal transforms every active frame.
-        if (activeVfx.Channel != 2 && float.IsFinite(activeVfx.LastAppliedScale) &&
+        // unchanged setting; refresh source transforms every active frame.
+        if (!activeVfx.IsProximitySource && float.IsFinite(activeVfx.LastAppliedScale) &&
             MathF.Abs(activeVfx.LastAppliedScale - effectiveScale) < 0.0001f)
         {
             return;

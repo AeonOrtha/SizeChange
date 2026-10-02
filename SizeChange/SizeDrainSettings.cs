@@ -1,0 +1,40 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+
+namespace SizeChange;
+
+[Serializable]
+public sealed class SizeDrainSettings
+{
+    public bool Enabled { get; set; }
+    public bool Everyone { get; set; }
+    public List<string> Names { get; set; } = new();
+    public float Range { get; set; } = 10f;
+    public float PeakHitPercent { get; set; } = 0.4f;
+    public bool ReceiverVfxEnabled { get; set; }
+    public string ReceiverVfxPath { get; set; } = string.Empty;
+    public bool SourceVfxEnabled { get; set; }
+    public string SourceVfxPath { get; set; } = string.Empty;
+    public float FadeIn { get; set; } = 0.5f;
+    public float FadeOut { get; set; } = 0.5f;
+
+    public void Validate()
+    {
+        Names = (Names ?? new()).Where(n => !string.IsNullOrWhiteSpace(n))
+            .Select(n => n.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        Range = float.IsFinite(Range) ? Math.Clamp(Range, 0.1f, 100f) : 10f;
+        PeakHitPercent = float.IsFinite(PeakHitPercent) ? Math.Clamp(PeakHitPercent, 0f, 100f) : 0.4f;
+        FadeIn = float.IsFinite(FadeIn) ? Math.Clamp(FadeIn, 0f, 10f) : 0.5f;
+        FadeOut = float.IsFinite(FadeOut) ? Math.Clamp(FadeOut, 0f, 10f) : 0.5f;
+        ReceiverVfxPath = ReceiverVfxPath?.Trim().Replace('\\', '/') ?? string.Empty;
+        SourceVfxPath = SourceVfxPath?.Trim().Replace('\\', '/') ?? string.Empty;
+    }
+
+    public static SizeDrainSettings CopyOf(SizeDrainSettings settings)
+    {
+        var copy = (SizeDrainSettings)settings.MemberwiseClone();
+        copy.Names = new(settings.Names);
+        return copy;
+    }
+}

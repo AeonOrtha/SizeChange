@@ -39,6 +39,8 @@ struct SCCharacterState
     public float PendingDamageRatio;
     public AetherGrowthState Aether;
     public int NearbyAetherSources;
+    public int NearbyDrainSources;
+    public List<SizeDrainSources.Hit>? DrainHits;
     public List<AetherSources.Hit>? AetherHits;
     public float AccumulatorRemainingSeconds;
     public GrowthOvershootPulse OvershootPulse;
@@ -81,6 +83,7 @@ public sealed class Plugin : IDalamudPlugin
     private readonly SessionScaleBaselines sessionScales = new();
     private readonly SessionHeightBaselines sessionHeights = new();
     private readonly AetherSources aetherSources = new();
+    private readonly SizeDrainSources drainSources = new();
     private readonly AetherSoundPlayer aetherSound = new(() => new HeartbeatScdVoice());
     private readonly GrowthPreview selfPreview = new();
     private readonly GrowthPreview playerPreview = new();
@@ -287,6 +290,9 @@ public sealed class Plugin : IDalamudPlugin
         aetherSources.Refresh(ObjectTable, DataManager, !globallyDisabled && localPlayer.CurrentHp > 0 &&
             !Condition[ConditionFlag.BetweenAreas] && !Condition[ConditionFlag.BetweenAreas51] &&
             (Configuration.SelfSettings.AetherProximityGrowth || Configuration.PlayerSettings.AetherProximityGrowth || Configuration.MonsterSettings.AetherProximityGrowth));
+        RefreshDrainSources(!globallyDisabled && localPlayer.CurrentHp > 0 &&
+            !Condition[ConditionFlag.BetweenAreas] && !Condition[ConditionFlag.BetweenAreas51] &&
+            (Configuration.SelfSettings.SizeDrain.Enabled || Configuration.PlayerSettings.SizeDrain.Enabled || Configuration.MonsterSettings.SizeDrain.Enabled));
         bool previewAllowed = !globallyDisabled && !inCombat && localPlayer.CurrentHp > 0 &&
             !Condition[ConditionFlag.BetweenAreas] && !Condition[ConditionFlag.BetweenAreas51];
         selfPreview.Advance(deltaSeconds, previewAllowed && Configuration.AffectSelf,
@@ -510,6 +516,7 @@ public sealed class Plugin : IDalamudPlugin
 
         charState.ActorGroup = actorGroup;
         charState.NearbyAetherSources = 0;
+        charState.NearbyDrainSources = 0;
         if (disable)
         {
             RestoreOwnedTransforms(actor, ref charState);
@@ -588,8 +595,29 @@ public sealed class Plugin : IDalamudPlugin
                         settings.AetherSourceVfxAttached, settings.AetherSourceVfxScale * (hit.Crystal.Large ? 2f : 1f), settings.AetherSourceVfxHeight,
                         settings.AetherSourceVfxFadeIn, settings.AetherSourceVfxFadeOut);
         }
-        bool aetherActive = aetherCount > 0;
-        int aetherHits = charState.Aether.Advance(aetherCount, deltaSeconds);
+        charState.DrainHits ??= new List<SizeDrainSources.Hit>();
+        var nearbyTargets = settings.GrowthFromDelta && settings.SizeDrain.Enabled && !disable &&
+            (actor->Health > 0 || aetherWithoutHp) && settings.MaximumHealthLossRatioPerTrigger > 0f && settings.DeltaGrowthMultiplier > 0f
+            ? drainSources.GetHits((nint)actor, new System.Numerics.Vector3(position.X, position.Y, position.Z),
+                settings.SizeDrain, charState.DrainHits) : null;
+        int drainCount = nearbyTargets?.Count ?? 0;
+        charState.NearbyDrainSources = drainCount;
+        if (drainCount > 0)
+        {
+            var drain = settings.SizeDrain;
+            if (drain.ReceiverVfxEnabled)
+                GrowthVfxPlayer.KeepProximity((nint)actor, actor->EntityId, drain.ReceiverVfxPath, false, position,
+                    fadeIn: drain.FadeIn, fadeOut: drain.FadeOut, sizeDrain: true);
+            if (drain.SourceVfxEnabled)
+                foreach (var hit in nearbyTargets!)
+                    GrowthVfxPlayer.KeepProximity(hit.Target.Address, hit.Target.EntityId, drain.SourceVfxPath, true,
+                        new Vector3(hit.Target.Position.X, hit.Target.Position.Y, hit.Target.Position.Z),
+                        attachToSource: true, fadeIn: drain.FadeIn, fadeOut: drain.FadeOut, sizeDrain: true);
+        }
+        // Both source types share the existing exposure accumulator, cap bonus
+        // and one-second cadence. Per-receiver lists prevent cross-profile loss.
+        bool proximityActive = aetherCount + drainCount > 0;
+        bool proximityHitDue = charState.Aether.Advance(aetherCount + drainCount, deltaSeconds) > 0;
         void Accumulate(float healthLostRatio, bool aether)
         {
             healthLostRatio = Math.Min(healthLostRatio, settings.MaximumHealthLossRatioPerTrigger);
@@ -620,7 +648,13 @@ public sealed class Plugin : IDalamudPlugin
             float healthLost = preview != null ? preview.HitRatio * maxhp : charState.PreviousHealth - health;
             if (healthLost > 0f) Accumulate(healthLost / maxhp, false);
         }
-        for (int hit = 0; hit < aetherHits; hit++) Accumulate(nearbyCrystals![hit].Ratio, true);
+        if (proximityHitDue)
+        {
+            if (nearbyCrystals != null)
+                foreach (var hit in nearbyCrystals) Accumulate(hit.Ratio, true);
+            if (nearbyTargets != null)
+                foreach (var hit in nearbyTargets) Accumulate(hit.Ratio, true);
+        }
 
         if (!settings.GrowthFromDelta || disable)
         {
@@ -744,7 +778,7 @@ public sealed class Plugin : IDalamudPlugin
 
         // Ambient decay is exclusive to Growth From Delta.
         if (settings.GrowthFromDelta &&
-            !aetherActive &&
+            !proximityActive &&
             charState.PendingGrowth <= 0f &&
             !charState.OvershootPulse.IsActive &&
             !triggerOvershoot &&
@@ -1155,6 +1189,27 @@ public sealed class Plugin : IDalamudPlugin
 
     }
 
+    private unsafe void RefreshDrainSources(bool allowed)
+    {
+        drainSources.BeginFrame();
+        if (!allowed) return;
+        foreach (var obj in ObjectTable)
+        {
+            var native = (FFXIVClientStructs.FFXIV.Client.Game.Object.GameObject*)obj.Address;
+            if (native == null) continue;
+            var kind = native->ObjectKind;
+            bool player = kind == FFXIVClientStructs.FFXIV.Client.Game.Object.ObjectKind.Pc;
+            bool npc = kind is FFXIVClientStructs.FFXIV.Client.Game.Object.ObjectKind.BattleNpc
+                or FFXIVClientStructs.FFXIV.Client.Game.Object.ObjectKind.EventNpc
+                or FFXIVClientStructs.FFXIV.Client.Game.Object.ObjectKind.Companion
+                or FFXIVClientStructs.FFXIV.Client.Game.Object.ObjectKind.Retainer;
+            if ((!player && !npc) || native->IsDead() || native->DrawObject == null) continue;
+            var p = native->Position;
+            drainSources.Add(new SizeDrainSources.Source(obj.Address, obj.EntityId,
+                new System.Numerics.Vector3(p.X, p.Y, p.Z), obj.Name.TextValue, player));
+        }
+    }
+
     private void RefreshTrackedActorCaches()
     {
         TrackedPlayerEntityIds.Clear();
@@ -1280,7 +1335,7 @@ public sealed class Plugin : IDalamudPlugin
             if (state.ActorGroup != group || !state.Transform.Ready) continue;
             string name = ObjectTable.SearchByEntityId(entry.Key)?.Name.TextValue ?? $"Actor {entry.Key:X}";
             lines.Add($"{name}: Base {state.PlayerScale:0.000} | Current {state.ObservedScale:0.000} | " +
-                $"Crystals {state.NearbyAetherSources} | Growth {state.GrowthMultiplier:0.000} | Pending {state.PendingGrowth:0.000}" +
+                $"Crystals {state.NearbyAetherSources} | Drain sources {state.NearbyDrainSources} | Growth {state.GrowthMultiplier:0.000} | Pending {state.PendingGrowth:0.000}" +
                 (group == SCActorGroup.Self ? $" | Customize+ root lift {state.SelfRootHeightOffset:0.000}" : $" | Session height {state.Transform.Height.Baseline:0.000} | Added {(state.Transform.Height.Owned ? state.Transform.Height.LastWritten - state.Transform.Height.Baseline : 0f):0.000}") +
                 (state.Transform.ScaleConflict ? " | Scale paused: external change" : "") +
                 (state.Transform.Height.Conflict ? " | Height paused: external change" : ""));
