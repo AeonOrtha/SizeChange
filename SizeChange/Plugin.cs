@@ -36,6 +36,8 @@ struct SCCharacterState
     public float PendingGrowth;
     public float PendingDamageRatio;
     public AetherGrowthState Aether;
+    public int NearbyAetherSources;
+    public List<AetherSources.Hit>? AetherHits;
     public float AccumulatorRemainingSeconds;
     public GrowthOvershootPulse OvershootPulse;
     public bool HasPreviousHealth;
@@ -249,7 +251,7 @@ public sealed class Plugin : IDalamudPlugin
 
     private unsafe void OnFrameworkUpdate(IFramework framework)
     {
-        GrowthVfxPlayer.BeginProximityFrame();
+        GrowthVfxPlayer.BeginProximityFrame((float)Framework.UpdateDelta.TotalSeconds);
         aetherSound.BeginFrame((float)Framework.UpdateDelta.TotalSeconds);
         GrowthVfxPlayer.Update();
 
@@ -263,7 +265,7 @@ public sealed class Plugin : IDalamudPlugin
         var localPlayer = ObjectTable.LocalPlayer;
         if (localPlayer == null || !ClientState.IsLoggedIn)
         {
-            GrowthVfxPlayer.EndProximityFrame();
+            GrowthVfxPlayer.EndProximityFrame(true);
             aetherSound.EndFrame();
             selfPreview.Enabled = playerPreview.Enabled = monsterPreview.Enabled = false;
             BoneHeartbeat.Tick(Configuration.SelfBoneHeartbeat, 0, 0, 0,
@@ -412,7 +414,7 @@ public sealed class Plugin : IDalamudPlugin
                 globallyDisabled,
                 inCombat);
         }
-        GrowthVfxPlayer.EndProximityFrame();
+        GrowthVfxPlayer.EndProximityFrame(globallyDisabled || Condition[ConditionFlag.BetweenAreas] || Condition[ConditionFlag.BetweenAreas51]);
         aetherSound.EndFrame();
     }
 
@@ -459,10 +461,22 @@ public sealed class Plugin : IDalamudPlugin
         if (actor == null) return;
 
         float maxhp = actor->MaxHealth;
-        if (maxhp <= 0f) return;
-
-        float shield = (actor->ShieldValue / 100f) * maxhp;
-        float health = actor->Health + shield;
+        bool aetherWithoutHp = actorGroup == SCActorGroup.Monster && settings.GrowthFromDelta &&
+            maxhp <= 0f && !actor->GameObject.IsDead();
+        if (maxhp <= 0f && !aetherWithoutHp)
+        {
+            if (TryGetCharacterState(actor, out var unavailableState))
+            {
+                RestoreOwnedTransforms(actor, ref unavailableState);
+                CharacterIdToLastScaleMap.Remove(actor->EntityId);
+            }
+            return;
+        }
+        // Crystal hits are already fractions of maximum HP; HP-less battle NPCs
+        // need no real health conversion and must not invent ordinary damage.
+        if (aetherWithoutHp) maxhp = 1f;
+        float shield = aetherWithoutHp ? 0f : (actor->ShieldValue / 100f) * maxhp;
+        float health = aetherWithoutHp ? 1f : actor->Health + shield;
         float hpRatio = preview?.HealthRatio ?? health / maxhp;
 
         var draw = (CharacterBase*)actor->DrawObject;
@@ -491,6 +505,7 @@ public sealed class Plugin : IDalamudPlugin
         }
 
         charState.ActorGroup = actorGroup;
+        charState.NearbyAetherSources = 0;
         if (disable)
         {
             RestoreOwnedTransforms(actor, ref charState);
@@ -564,10 +579,12 @@ public sealed class Plugin : IDalamudPlugin
         float growthMultiplierBeforeRelease = charState.GrowthMultiplier;
         float deltaSeconds = (float)Framework.UpdateDelta.TotalSeconds;
         var position = actor->GameObject.Position;
+        charState.AetherHits ??= new List<AetherSources.Hit>();
         var nearbyCrystals = settings.GrowthFromDelta && settings.AetherProximityGrowth && !disable &&
-            actor->Health > 0 && settings.MaximumHealthLossRatioPerTrigger > 0f && settings.DeltaGrowthMultiplier > 0f
-                ? aetherSources.GetHits(position.X, position.Y, position.Z, settings) : null;
+            (actor->Health > 0 || aetherWithoutHp) && settings.MaximumHealthLossRatioPerTrigger > 0f && settings.DeltaGrowthMultiplier > 0f
+                ? aetherSources.GetHits(position.X, position.Y, position.Z, settings, charState.AetherHits) : null;
         int aetherCount = nearbyCrystals?.Count ?? 0;
+        charState.NearbyAetherSources = aetherCount;
         if (aetherCount > 0)
         {
             aetherSound.Request((nint)actor, actor->EntityId, false, settings.AetherActorSound,
@@ -576,13 +593,15 @@ public sealed class Plugin : IDalamudPlugin
                 aetherSound.Request(hit.Crystal.Address, hit.Crystal.EntityId, true, settings.AetherSourceSound,
                     hit.Crystal.Position.X, hit.Crystal.Position.Y, hit.Crystal.Position.Z);
             if (settings.AetherActorVfxEnabled)
-                GrowthVfxPlayer.KeepProximity((nint)actor, actor->EntityId, settings.AetherActorVfxPath, false, position);
+                GrowthVfxPlayer.KeepProximity((nint)actor, actor->EntityId, settings.AetherActorVfxPath, false, position,
+                    fadeIn: settings.AetherActorVfxFadeIn, fadeOut: settings.AetherActorVfxFadeOut);
             if (settings.AetherSourceVfxEnabled)
                 foreach (var hit in nearbyCrystals!)
                     GrowthVfxPlayer.KeepProximity(hit.Crystal.Address, hit.Crystal.EntityId,
                         settings.AetherSourceVfxPath, true,
                         new Vector3(hit.Crystal.Position.X, hit.Crystal.Position.Y, hit.Crystal.Position.Z),
-                        settings.AetherSourceVfxAttached, settings.AetherSourceVfxScale, settings.AetherSourceVfxHeight);
+                        settings.AetherSourceVfxAttached, settings.AetherSourceVfxScale * (hit.Crystal.Large ? 2f : 1f), settings.AetherSourceVfxHeight,
+                        settings.AetherSourceVfxFadeIn, settings.AetherSourceVfxFadeOut);
         }
         bool aetherActive = aetherCount > 0;
         int aetherHits = charState.Aether.Advance(aetherCount, deltaSeconds);
@@ -611,7 +630,7 @@ public sealed class Plugin : IDalamudPlugin
                     charState.AccumulatorRemainingSeconds = settings.AccumulatorDelaySeconds;
             }
         }
-        if (settings.GrowthFromDelta && !disable && !inactiveForCombat)
+        if (settings.GrowthFromDelta && !disable && !inactiveForCombat && !aetherWithoutHp)
         {
             float healthLost = preview != null ? preview.HitRatio * maxhp : charState.PreviousHealth - health;
             if (healthLost > 0f) Accumulate(healthLost / maxhp, false);
@@ -1273,7 +1292,7 @@ public sealed class Plugin : IDalamudPlugin
             if (state.ActorGroup != group || !state.Transform.Ready) continue;
             string name = ObjectTable.SearchByEntityId(entry.Key)?.Name.TextValue ?? $"Actor {entry.Key:X}";
             lines.Add($"{name}: Base {state.PlayerScale:0.000} | Current {state.PreviousScale:0.000} | " +
-                $"Session height {state.Transform.Height.Baseline:0.000} | Added {(state.Transform.Height.Owned ? state.Transform.Height.LastWritten - state.Transform.Height.Baseline : 0f):0.000}" +
+                $"Crystals {state.NearbyAetherSources} | Growth {state.GrowthMultiplier:0.000} | Pending {state.PendingGrowth:0.000} | Session height {state.Transform.Height.Baseline:0.000} | Added {(state.Transform.Height.Owned ? state.Transform.Height.LastWritten - state.Transform.Height.Baseline : 0f):0.000}" +
                 (state.Transform.ScaleConflict ? " | Scale paused: external change" : "") +
                 (state.Transform.Height.Conflict ? " | Height paused: external change" : ""));
         }

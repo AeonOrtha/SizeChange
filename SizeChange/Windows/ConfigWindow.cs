@@ -783,6 +783,12 @@ public class ConfigWindow : Window, IDisposable
             { settings.AetherActorVfxEnabled = actorVfx; configuration.Save(); }
             if (actorVfx)
             {
+                float fadeIn = settings.AetherActorVfxFadeIn;
+                if (ImGui.DragFloat($"Proximity Fade In##{id}", ref fadeIn, 0.05f, 0f, 10f, "%.2fs"))
+                { settings.AetherActorVfxFadeIn = Math.Clamp(fadeIn, 0f, 10f); configuration.Save(); }
+                float fadeOut = settings.AetherActorVfxFadeOut;
+                if (ImGui.DragFloat($"Proximity Fade Out##{id}", ref fadeOut, 0.05f, 0f, 10f, "%.2fs"))
+                { settings.AetherActorVfxFadeOut = Math.Clamp(fadeOut, 0f, 10f); configuration.Save(); }
                 string path = settings.AetherActorVfxPath;
                 if (ImGui.InputText($"Proximity AVFX##{id}", ref path, 512))
                 { settings.AetherActorVfxPath = path; configuration.Save(); }
@@ -793,6 +799,12 @@ public class ConfigWindow : Window, IDisposable
             { settings.AetherSourceVfxEnabled = sourceVfx; configuration.Save(); }
             if (sourceVfx)
             {
+                float fadeIn = settings.AetherSourceVfxFadeIn;
+                if (ImGui.DragFloat($"Crystal Fade In##{id}", ref fadeIn, 0.05f, 0f, 10f, "%.2fs"))
+                { settings.AetherSourceVfxFadeIn = Math.Clamp(fadeIn, 0f, 10f); configuration.Save(); }
+                float fadeOut = settings.AetherSourceVfxFadeOut;
+                if (ImGui.DragFloat($"Crystal Fade Out##{id}", ref fadeOut, 0.05f, 0f, 10f, "%.2fs"))
+                { settings.AetherSourceVfxFadeOut = Math.Clamp(fadeOut, 0f, 10f); configuration.Save(); }
                 string path = settings.AetherSourceVfxPath;
                 if (ImGui.InputText($"Crystal AVFX##{id}", ref path, 512))
                 { settings.AetherSourceVfxPath = path; configuration.Save(); }
@@ -804,6 +816,7 @@ public class ConfigWindow : Window, IDisposable
                 float crystalScale = settings.AetherSourceVfxScale;
                 if (ImGui.DragFloat($"Crystal VFX Scale##{id}", ref crystalScale, 0.05f, 0.01f, 100f, "%.2fx"))
                 { settings.AetherSourceVfxScale = Math.Clamp(crystalScale, 0.01f, 100f); configuration.Save(); }
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Major aetherytes use twice this VFX scale. Shards use this value.");
                 if (!attached)
                 {
                     float height = settings.AetherSourceVfxHeight;

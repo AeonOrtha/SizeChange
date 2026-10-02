@@ -47,6 +47,7 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable
     [Signature("40 53 48 83 EC 20 48 8B D9 48 8B 89 ?? ?? ?? ?? 48 85 C9 74 28 33 D2 E8 ?? ?? ?? ?? 48 8B 8B ?? ?? ?? ?? 48 85 C9",
         DetourName = nameof(StaticVfxRemoveDetour))]
     private readonly Hook<StaticVfxRemoveDelegate>? staticVfxRemoveHook = null;
+    private float proximityDelta;
     private readonly HashSet<(nint Actor, int Channel)> proximityRequested = new();
     private readonly Dictionary<(nint Actor, int Channel), (string Path, long At)> retryAfter = new();
     private readonly Dictionary<string, string> sourceErrors = new(StringComparer.Ordinal);
@@ -61,6 +62,10 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable
         public required nint VfxAddress { get; init; }
         public required nint ActorAddress { get; init; }
         public int Channel { get; init; }
+        public VfxFade Fade;
+        public float FadeIn;
+        public float FadeOut;
+        public float OriginalAlpha = 1f;
         public bool IsStatic { get; init; }
         public uint EntityId { get; init; }
         public string Path { get; init; } = string.Empty;
@@ -167,10 +172,15 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable
 
     // Channel 0 is the existing timed growth effect; 1 and 2 are persistent
     // proximity effects on the character and source respectively.
-    public void BeginProximityFrame() => proximityRequested.Clear();
+    public void BeginProximityFrame(float seconds = 0f)
+    {
+        proximityRequested.Clear();
+        proximityDelta = float.IsFinite(seconds) ? Math.Clamp(seconds, 0f, 1f) : 0f;
+    }
 
     public void KeepProximity(nint address, uint entityId, string configuredPath, bool source, Vector3 position,
-        bool attachToSource = false, float sourceScale = 1f, float sourceHeight = 0f)
+        bool attachToSource = false, float sourceScale = 1f, float sourceHeight = 0f,
+        float fadeIn = 0f, float fadeOut = 0f)
     {
         string path = configuredPath.Trim().Replace('\\', '/');
         if (!IsValidProximityPath(path)) return;
@@ -184,6 +194,8 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable
         {
             if (old.Path == path && old.EntityId == entityId && old.IsStatic == isStatic)
             {
+                old.FadeIn = fadeIn;
+                old.FadeOut = fadeOut;
                 if (isStatic) SetSourcePosition((VfxObject*)oldAddress, position);
                 if (source)
                 {
@@ -199,6 +211,7 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable
         if (retryAfter.TryGetValue(key, out var retry) && retry.Path == path && now < retry.At) return;
         retryAfter[key] = (path, now + 1000);
         VfxObject* vfx;
+        float originalAlpha;
         if (isStatic)
         {
             if (staticVfxRun == null || staticVfxRemoveHook == null)
@@ -208,6 +221,8 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable
             vfx->Rotation = FFXIVClientStructs.FFXIV.Common.Math.Quaternion.Identity;
             vfx->Scale = new Vector3(sourceScale, sourceScale, sourceScale);
             SetSourcePosition(vfx, position);
+            originalAlpha = CaptureAlpha(vfx);
+            if (fadeIn > 0f) vfx->Color.W = 0f;
             staticVfxRun(vfx, 0f, 0xFFFFFFFF);
         }
         else
@@ -216,19 +231,26 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable
             { if (source) sourceErrors[path] = "Attached VFX unavailable."; return; }
             vfx = actorVfxCreate(path, address, address, -1f, (char)0, 0, (char)0);
             if (vfx == null) { if (source) sourceErrors[path] = "VFX creation failed."; return; }
+            originalAlpha = CaptureAlpha(vfx);
         }
+        if (fadeIn > 0f) vfx->Color.W = 0f;
         if (source) sourceErrors.Remove(path);
         nint vfxAddress = (nint)vfx;
         activeByVfx[vfxAddress] = new ActiveGrowthVfx
         {
             VfxAddress = vfxAddress, ActorAddress = address, Channel = channel,
             EntityId = entityId, Path = path, IsStatic = isStatic, RemoveAtTick = long.MaxValue,
+            FadeIn = fadeIn, FadeOut = fadeOut, OriginalAlpha = originalAlpha,
+            Fade = new VfxFade { Level = fadeIn > 0f ? 0f : 1f },
             BaseScale = source ? sourceScale : 1f, ScaleWithActor = false,
             // Character proximity effects keep their own scale; crystal scale is configurable.
             CanApplyScale = !source || isStatic,
         };
         activeVfxByActor[key] = vfxAddress;
     }
+
+    private static float CaptureAlpha(VfxObject* vfx) =>
+        float.IsFinite(vfx->Color.W) && vfx->Color.W > 0f ? vfx->Color.W : 1f;
 
     public string SourceStatus(string configuredPath, bool attached)
     {
@@ -259,15 +281,23 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable
         vfx->UpdateTransforms(true);
     }
 
-    public void EndProximityFrame()
+    public void EndProximityFrame(bool immediate = false)
     {
         var expired = new List<nint>();
         foreach (var pair in activeByVfx)
-            if (pair.Value.Channel != 0 && !proximityRequested.Contains((pair.Value.ActorAddress, pair.Value.Channel)))
-                expired.Add(pair.Key);
+        {
+            var active = pair.Value;
+            if (active.Channel == 0) continue;
+            if (immediate) { expired.Add(pair.Key); continue; }
+            if (active.Channel == 2 && active.CanApplyScale) ApplyScale(active);
+            bool visible = proximityRequested.Contains((active.ActorAddress, active.Channel));
+            float opacity = active.Fade.Advance(visible, proximityDelta, active.FadeIn, active.FadeOut);
+            ((VfxObject*)pair.Key)->Color.W = active.OriginalAlpha * opacity;
+            if (!visible && active.Fade.Level <= 0f) expired.Add(pair.Key);
+        }
         foreach (var address in expired) RemoveTrackedVfx(address);
         foreach (var key in new List<(nint Actor, int Channel)>(retryAfter.Keys))
-            if (!proximityRequested.Contains(key)) retryAfter.Remove(key);
+            if (immediate || !proximityRequested.Contains(key)) retryAfter.Remove(key);
     }
 
     private nint StaticVfxRemoveDetour(VfxObject* vfx)
@@ -336,14 +366,17 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable
                 activeVfx.ActorGrowthMultiplier);
         }
 
-        effectiveScale = Math.Clamp(effectiveScale, 0.01f, 100f);
-        if (float.IsFinite(activeVfx.LastAppliedScale) &&
+        effectiveScale = Math.Clamp(effectiveScale, 0.01f, activeVfx.Channel == 2 ? 200f : 100f);
+        // Native target attachment can overwrite transforms even with an
+        // unchanged setting; refresh crystal transforms every active frame.
+        if (activeVfx.Channel != 2 && float.IsFinite(activeVfx.LastAppliedScale) &&
             MathF.Abs(activeVfx.LastAppliedScale - effectiveScale) < 0.0001f)
         {
             return;
         }
 
         vfx->Scale = new Vector3(effectiveScale, effectiveScale, effectiveScale);
+        vfx->UpdateTransforms(true);
         activeVfx.LastAppliedScale = effectiveScale;
     }
 

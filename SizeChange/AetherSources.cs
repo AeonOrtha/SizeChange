@@ -12,7 +12,6 @@ internal sealed class AetherSources
     internal readonly record struct Source(nint Address, uint EntityId, Vector3 Position, bool Large);
     internal readonly record struct Hit(Source Crystal, float Ratio);
     private readonly List<Source> sources = new();
-    private readonly List<Hit> hits = new();
     private readonly HashSet<uint> largeIds = new();
     private bool loadedTypes;
     private readonly HashSet<nint> seen = new();
@@ -58,8 +57,9 @@ internal sealed class AetherSources
                 native->ObjectKind == ObjectKind.Aetheryte && largeIds.Contains(native->BaseId)));
     }
 
-    // Reused buffer; consume before querying the next character.
-    public IReadOnlyList<Hit> GetHits(float x, float y, float z, GrowthSettings settings)
+    // The destination belongs to one character; never share mutable exposure
+    // results between Self, Players and Monsters.
+    public IReadOnlyList<Hit> GetHits(float x, float y, float z, GrowthSettings settings, List<Hit> hits)
     {
         hits.Clear();
         var point = new Vector3(x, y, z);
