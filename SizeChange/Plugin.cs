@@ -605,10 +605,10 @@ public sealed class Plugin : IDalamudPlugin
         if (drainCount > 0)
         {
             var drain = settings.SizeDrain;
-            if (drain.ReceiverVfxEnabled)
+            if (drain.ReceiverVfxEnabled && !string.IsNullOrWhiteSpace(drain.ReceiverVfxPath))
                 GrowthVfxPlayer.KeepProximity((nint)actor, actor->EntityId, drain.ReceiverVfxPath, false, position,
                     fadeIn: drain.FadeIn, fadeOut: drain.FadeOut, sizeDrain: true);
-            if (drain.SourceVfxEnabled)
+            if (drain.SourceVfxEnabled && !string.IsNullOrWhiteSpace(drain.SourceVfxPath))
                 foreach (var hit in nearbyTargets!)
                     GrowthVfxPlayer.KeepProximity(hit.Target.Address, hit.Target.EntityId, drain.SourceVfxPath, true,
                         new Vector3(hit.Target.Position.X, hit.Target.Position.Y, hit.Target.Position.Z),

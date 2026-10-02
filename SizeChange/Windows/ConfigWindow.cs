@@ -684,13 +684,13 @@ public class ConfigWindow : Window, IDisposable
         ImGui.PushID($"SizeDrain{id}");
         bool enabled = settings.Enabled;
         if (ImGui.Checkbox("Size Drain", ref enabled))
-        { settings.Enabled = enabled; configuration.Save(); }
+        { settings.Enabled = enabled; configuration.SaveSizeDrain(settings); }
         if (ImGui.IsItemHovered()) ImGui.SetTooltip("Nearby sources grant growth once per second, even outside combat and beyond the size limit. Sources do not shrink.");
         if (enabled && ImGui.TreeNode("Size Drain Settings"))
         {
             bool everyone = settings.Everyone;
             if (ImGui.Checkbox("Everyone Near Me", ref everyone))
-            { settings.Everyone = everyone; configuration.Save(); }
+            { settings.Everyone = everyone; configuration.SaveSizeDrain(settings); }
             if (ImGui.IsItemHovered()) ImGui.SetTooltip("All loaded, living players and NPCs in range of each receiving character, excluding itself. Includes companions and retainers. Overrides the name list while enabled.");
             if (!everyone)
             {
@@ -703,13 +703,13 @@ public class ConfigWindow : Window, IDisposable
                     string name = input.Trim();
                     if (!settings.Names.Exists(n => string.Equals(n, name, StringComparison.OrdinalIgnoreCase))) settings.Names.Add(name);
                     drainNameInputs[id] = string.Empty;
-                    configuration.Save();
+                    configuration.SaveSizeDrain(settings);
                 }
                 for (int i = 0; i < settings.Names.Count; i++)
                 {
                     ImGui.PushID(i);
                     if (ImGui.SmallButton("Remove"))
-                    { settings.Names.RemoveAt(i--); configuration.Save(); ImGui.PopID(); continue; }
+                    { settings.Names.RemoveAt(i--); configuration.SaveSizeDrain(settings); ImGui.PopID(); continue; }
                     ImGui.SameLine();
                     ImGui.TextUnformatted(settings.Names[i]);
                     ImGui.PopID();
@@ -717,40 +717,42 @@ public class ConfigWindow : Window, IDisposable
             }
             float range = settings.Range;
             if (ImGui.DragFloat("Range", ref range, 0.1f, 0.1f, 100f, "%.1f"))
-            { settings.Range = Math.Clamp(range, 0.1f, 100f); configuration.Save(); }
+            { settings.Range = Math.Clamp(range, 0.1f, 100f); configuration.SaveSizeDrain(settings); }
             float peak = settings.PeakHitPercent;
             if (ImGui.DragFloat("Peak Hit", ref peak, 0.01f, 0f, 100f, "%.2f%% HP"))
-            { settings.PeakHitPercent = Math.Clamp(peak, 0f, 100f); configuration.Save(); }
+            { settings.PeakHitPercent = Math.Clamp(peak, 0f, 100f); configuration.SaveSizeDrain(settings); }
             if (ImGui.IsItemHovered()) ImGui.SetTooltip("Per-source maximum at zero distance, falling smoothly to zero at range. Sources stack. Uses the profile's damage multiplier, HP allowance and accumulator delay.");
+            // Keep these controls in a stable layout before and after enabling.
+            string receiverPath = settings.ReceiverVfxPath ?? string.Empty;
+            if (ImGui.InputText("Receiver AVFX", ref receiverPath, 512))
+            { settings.ReceiverVfxPath = receiverPath; configuration.SaveSizeDrain(settings); }
             bool receiver = settings.ReceiverVfxEnabled;
+            bool receiverMissing = string.IsNullOrWhiteSpace(receiverPath);
+            ImGui.BeginDisabled(receiverMissing && !receiver);
             if (ImGui.Checkbox("Receiver VFX", ref receiver))
-            { settings.ReceiverVfxEnabled = receiver; configuration.Save(); }
-            if (receiver)
-            {
-                string path = settings.ReceiverVfxPath;
-                if (ImGui.InputText("Receiver AVFX", ref path, 512))
-                { settings.ReceiverVfxPath = path; configuration.Save(); }
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Looping .avfx on the growing character while any source contributes.");
-            }
+            { settings.ReceiverVfxEnabled = receiver; configuration.SaveSizeDrain(settings); }
+            ImGui.EndDisabled();
+            if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
+                ImGui.SetTooltip(receiverMissing ? "Enter an AVFX path first." : "Looping effect on the growing character.");
+
+            string sourcePath = settings.SourceVfxPath ?? string.Empty;
+            if (ImGui.InputText("Target AVFX", ref sourcePath, 512))
+            { settings.SourceVfxPath = sourcePath; configuration.SaveSizeDrain(settings); }
             bool source = settings.SourceVfxEnabled;
+            bool sourceMissing = string.IsNullOrWhiteSpace(sourcePath);
+            ImGui.BeginDisabled(sourceMissing && !source);
             if (ImGui.Checkbox("Target VFX", ref source))
-            { settings.SourceVfxEnabled = source; configuration.Save(); }
-            if (source)
-            {
-                string path = settings.SourceVfxPath;
-                if (ImGui.InputText("Target AVFX", ref path, 512))
-                { settings.SourceVfxPath = path; configuration.Save(); }
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Looping .avfx attached to each contributing source. Shared sources show one effect; Self takes priority.");
-            }
-            if (receiver || source)
-            {
-                float fadeIn = settings.FadeIn, fadeOut = settings.FadeOut;
-                if (ImGui.DragFloat("Fade In", ref fadeIn, 0.05f, 0f, 10f, "%.2fs"))
-                { settings.FadeIn = Math.Clamp(fadeIn, 0f, 10f); configuration.Save(); }
-                if (ImGui.DragFloat("Fade Out", ref fadeOut, 0.05f, 0f, 10f, "%.2fs"))
-                { settings.FadeOut = Math.Clamp(fadeOut, 0f, 10f); configuration.Save(); }
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Uses the existing proximity fade system. Visible fading depends on the AVFX asset.");
-            }
+            { settings.SourceVfxEnabled = source; configuration.SaveSizeDrain(settings); }
+            ImGui.EndDisabled();
+            if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
+                ImGui.SetTooltip(sourceMissing ? "Enter an AVFX path first." : "Effect on each contributing source. Shared sources use Self's settings first.");
+
+            float fadeIn = settings.FadeIn, fadeOut = settings.FadeOut;
+            if (ImGui.DragFloat("Fade In", ref fadeIn, 0.05f, 0f, 10f, "%.2fs"))
+            { settings.FadeIn = Math.Clamp(fadeIn, 0f, 10f); configuration.SaveSizeDrain(settings); }
+            if (ImGui.DragFloat("Fade Out", ref fadeOut, 0.05f, 0f, 10f, "%.2fs"))
+            { settings.FadeOut = Math.Clamp(fadeOut, 0f, 10f); configuration.SaveSizeDrain(settings); }
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Visible fading depends on the AVFX asset.");
             ImGui.TreePop();
         }
         ImGui.PopID();

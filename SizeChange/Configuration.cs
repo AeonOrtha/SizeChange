@@ -320,6 +320,13 @@ public class Configuration : IPluginConfiguration
         NormalizeNames(TrackedMonsterNames);
     }
 
+    // A drain UI edit must not normalize active heartbeat/bone/growth state.
+    public void SaveSizeDrain(SizeDrainSettings settings)
+    {
+        settings.Validate();
+        Plugin.PluginInterface.SavePluginConfig(this);
+    }
+
     public void Save()
     {
         EnsureValid();
