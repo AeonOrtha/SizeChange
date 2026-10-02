@@ -30,6 +30,9 @@ public sealed class BoneHeartbeatSettings
     public bool DamageDrivenBpm { get; set; }
     public float MaximumBeatsPerMinute { get; set; } = 180f;
     public float Strength { get; set; } = 1f;
+    public bool CustomGrowthEnabled { get; set; }
+    public float CustomGrowthPerScale { get; set; } = 0.1f;
+    public float CustomGrowthLimit { get; set; } = 0.4f;
     public List<HeartbeatBone> Bones { get; set; } = new();
 
     public JawBreathingSettings Jaw { get; set; } = new();
@@ -43,10 +46,15 @@ public sealed class BoneHeartbeatSettings
     public void ResolveBones(List<HeartbeatBone> targets, float settledScale = 1f)
     {
         int count = 0;
-        void Add(string name, float amount, double delay, float growth = 0f)
+        void Add(string name, float amount, double delay, float growth = 0f, bool replaceGrowth = false)
         {
             for (int i = 0; i < count; i++)
-                if (targets[i].Name == name) { targets[i].Strength = amount; return; }
+                if (targets[i].Name == name)
+                {
+                    targets[i].Strength = amount;
+                    if (replaceGrowth) targets[i].GrowthOffset = growth;
+                    return;
+                }
             if (count == targets.Count) targets.Add(new HeartbeatBone());
             var target = targets[count++];
             target.Name = name;
@@ -64,7 +72,10 @@ public sealed class BoneHeartbeatSettings
             foreach (var bone in definition.Bones)
                 Add(bone.Name, chain.Enabled ? chain.Strength : 0f, bone.Depth * step, growth);
         }
-        foreach (var bone in Bones) Add(bone.Name, bone.Strength, 0);
+        float customGrowth = CustomGrowthEnabled
+            ? BoneHeartbeatMath.GrowthOffset(settledScale, CustomGrowthPerScale, CustomGrowthLimit) : 0f;
+        foreach (var bone in Bones)
+            Add(bone.Name, bone.Strength, 0, customGrowth, CustomGrowthEnabled);
         if (count < targets.Count) targets.RemoveRange(count, targets.Count - count);
     }
 
@@ -75,6 +86,8 @@ public sealed class BoneHeartbeatSettings
         MaximumBeatsPerMinute = float.IsFinite(MaximumBeatsPerMinute)
             ? Math.Clamp(MaximumBeatsPerMinute, BeatsPerMinute, 180f) : 180f;
         Strength = float.IsFinite(Strength) ? Math.Clamp(Strength, 0f, 5f) : 1f;
+        CustomGrowthPerScale = float.IsFinite(CustomGrowthPerScale) ? Math.Clamp(CustomGrowthPerScale, 0f, 5f) : 0.1f;
+        CustomGrowthLimit = float.IsFinite(CustomGrowthLimit) ? Math.Clamp(CustomGrowthLimit, 0f, 5f) : 0.4f;
         Jaw ??= new();
         Jaw.Validate();
         Sound ??= new();

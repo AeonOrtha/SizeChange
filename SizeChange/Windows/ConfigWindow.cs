@@ -194,7 +194,28 @@ public class ConfigWindow : Window, IDisposable
         DrawBoneGrowthChains(settings);
         if (ImGui.TreeNode("Custom Bones (Overrides)"))
         {
-            ImGui.TextDisabled("JP bone names. Overrides presets.");
+            bool customGrowth = settings.CustomGrowthEnabled;
+            if (ImGui.Checkbox("Size-Driven Growth##custom-bones", ref customGrowth))
+            {
+                settings.CustomGrowthEnabled = customGrowth;
+                configuration.Save();
+            }
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Shared growth for every custom bone. Replaces matching chain growth.");
+            if (settings.CustomGrowthEnabled)
+            {
+                float rate = settings.CustomGrowthPerScale;
+                if (ImGui.DragFloat("Growth per 1x##custom-bones", ref rate, 0.005f, 0f, 5f, "%.3f"))
+                {
+                    settings.CustomGrowthPerScale = Math.Clamp(rate, 0f, 5f);
+                    configuration.Save();
+                }
+                float limit = settings.CustomGrowthLimit;
+                if (ImGui.DragFloat("Growth Limit##custom-bones", ref limit, 0.005f, 0f, 5f, "%.3f"))
+                {
+                    settings.CustomGrowthLimit = Math.Clamp(limit, 0f, 5f);
+                    configuration.Save();
+                }
+            }
             bool add = ImGui.InputText("Bone Name", ref heartbeatBoneInput, 128, ImGuiInputTextFlags.EnterReturnsTrue);
             ImGui.SameLine();
             add |= ImGui.Button("Add Bone");

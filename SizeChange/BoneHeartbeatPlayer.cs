@@ -73,7 +73,8 @@ internal sealed class BoneHeartbeatPlayer : IDisposable
     {
         seconds = float.IsFinite(seconds) ? Math.Clamp(seconds, 0f, 1f) : 0f;
         cleanupElapsed += seconds;
-        bool growthEnabled = settings.Chains.Exists(chain => chain.GrowthEnabled && chain.GrowthPerScale > 0f && chain.GrowthLimit > 0f);
+        bool growthEnabled = (settings.CustomGrowthEnabled && settings.Bones.Count > 0 &&
+            settings.CustomGrowthPerScale > 0f && settings.CustomGrowthLimit > 0f) || settings.Chains.Exists(chain => chain.GrowthEnabled && chain.GrowthPerScale > 0f && chain.GrowthLimit > 0f);
         if ((growthEnabled && !wasGrowthEnabled || settings.Enabled && !wasEnabled || settings.Jaw.Enabled && !wasJawEnabled) && faulted) Retry();
         wasGrowthEnabled = growthEnabled;
         wasEnabled = settings.Enabled;
