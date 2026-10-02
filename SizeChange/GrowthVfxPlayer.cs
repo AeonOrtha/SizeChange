@@ -40,14 +40,28 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable
     private readonly ActorVfxCreateDelegate? actorVfxCreate = null;
 
     private Hook<ActorVfxRemoveDelegate>? actorVfxRemoveHook;
+    private delegate nint StaticVfxRunDelegate(VfxObject* vfx, float time, uint flags);
+    private delegate nint StaticVfxRemoveDelegate(VfxObject* vfx);
+    [Signature("E8 ?? ?? ?? ?? B0 02 EB 02")]
+    private readonly StaticVfxRunDelegate? staticVfxRun = null;
+    [Signature("40 53 48 83 EC 20 48 8B D9 48 8B 89 ?? ?? ?? ?? 48 85 C9 74 28 33 D2 E8 ?? ?? ?? ?? 48 8B 8B ?? ?? ?? ?? 48 85 C9",
+        DetourName = nameof(StaticVfxRemoveDetour))]
+    private readonly Hook<StaticVfxRemoveDelegate>? staticVfxRemoveHook = null;
+    private readonly HashSet<(nint Actor, int Channel)> proximityRequested = new();
+    private readonly Dictionary<(nint Actor, int Channel), (string Path, long At)> retryAfter = new();
+    private readonly Dictionary<string, bool> validPaths = new(StringComparer.Ordinal);
+
 
     private readonly Dictionary<nint, ActiveGrowthVfx> activeByVfx = new();
-    private readonly Dictionary<nint, nint> activeVfxByActor = new();
+    private readonly Dictionary<(nint Actor, int Channel), nint> activeVfxByActor = new();
 
     private sealed class ActiveGrowthVfx
     {
         public required nint VfxAddress { get; init; }
         public required nint ActorAddress { get; init; }
+        public int Channel { get; init; }
+        public uint EntityId { get; init; }
+        public string Path { get; init; } = string.Empty;
         public required long RemoveAtTick { get; init; }
         public required float BaseScale { get; init; }
         public required bool ScaleWithActor { get; init; }
@@ -59,6 +73,7 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable
     public GrowthVfxPlayer()
     {
         Plugin.GameInteropProvider.InitializeFromAttributes(this);
+        staticVfxRemoveHook?.Enable();
 
         if (!Plugin.SigScanner.TryScanText(
                 ActorVfxRemoveSignature,
@@ -96,6 +111,7 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable
 
         actorVfxRemoveHook?.Dispose();
         actorVfxRemoveHook = null;
+        staticVfxRemoveHook?.Dispose();
     }
 
     public string? TryPlay(
@@ -143,8 +159,92 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable
         };
 
         activeByVfx[vfxAddress] = activeVfx;
-        activeVfxByActor[actorAddress] = vfxAddress;
+        activeVfxByActor[(actorAddress, 0)] = vfxAddress;
         return null;
+    }
+
+    // Channel 0 is the existing timed growth effect; 1 and 2 are persistent
+    // proximity effects on the character and source respectively.
+    public void BeginProximityFrame() => proximityRequested.Clear();
+
+    public void KeepProximity(nint address, uint entityId, string configuredPath, bool source, Vector3 position)
+    {
+        string path = configuredPath.Trim().Replace('\\', '/');
+        if (!IsValidProximityPath(path)) return;
+        int channel = source ? 2 : 1;
+        var key = (address, channel);
+        // A crystal shared by profiles gets one effect, with Self taking priority.
+        if (!proximityRequested.Add(key)) return;
+        if (activeVfxByActor.TryGetValue(key, out var oldAddress) && activeByVfx.TryGetValue(oldAddress, out var old))
+        {
+            if (old.Path == path && old.EntityId == entityId)
+            {
+                if (source) SetSourcePosition((VfxObject*)oldAddress, position);
+                return;
+            }
+            RemoveTrackedVfx(oldAddress);
+        }
+        long now = Environment.TickCount64;
+        if (retryAfter.TryGetValue(key, out var retry) && retry.Path == path && now < retry.At) return;
+        retryAfter[key] = (path, now + 1000);
+        VfxObject* vfx;
+        if (source)
+        {
+            if (staticVfxRun == null || staticVfxRemoveHook == null) return;
+            vfx = VfxObject.Create(path, "Client.System.Scheduler.Instance.VfxObject");
+            if (vfx == null) return;
+            staticVfxRun(vfx, 0f, 0xFFFFFFFF);
+            SetSourcePosition(vfx, position);
+        }
+        else
+        {
+            if (actorVfxCreate == null || actorVfxRemoveHook == null) return;
+            vfx = actorVfxCreate(path, address, address, -1f, (char)0, 0, (char)0);
+            if (vfx == null) return;
+        }
+        nint vfxAddress = (nint)vfx;
+        activeByVfx[vfxAddress] = new ActiveGrowthVfx
+        {
+            VfxAddress = vfxAddress, ActorAddress = address, Channel = channel,
+            EntityId = entityId, Path = path, RemoveAtTick = long.MaxValue,
+            BaseScale = 1f, ScaleWithActor = false,
+            // Leave the AVFX's own scale alone for proximity effects.
+            CanApplyScale = true,
+        };
+        activeVfxByActor[key] = vfxAddress;
+    }
+
+    private bool IsValidProximityPath(string path)
+    {
+        if (validPaths.TryGetValue(path, out bool valid)) return valid;
+        valid = path.Length > 0 && !path.StartsWith('/') && !path.Contains("..", StringComparison.Ordinal) &&
+            path.EndsWith(".avfx", StringComparison.OrdinalIgnoreCase) && Plugin.DataManager.FileExists(path);
+        validPaths[path] = valid;
+        return valid;
+    }
+
+    private static void SetSourcePosition(VfxObject* vfx, Vector3 position)
+    {
+        vfx->Position = position;
+        vfx->UpdateTransforms(true);
+    }
+
+    public void EndProximityFrame()
+    {
+        var expired = new List<nint>();
+        foreach (var pair in activeByVfx)
+            if (pair.Value.Channel != 0 && !proximityRequested.Contains((pair.Value.ActorAddress, pair.Value.Channel)))
+                expired.Add(pair.Key);
+        foreach (var address in expired) RemoveTrackedVfx(address);
+        foreach (var key in new List<(nint Actor, int Channel)>(retryAfter.Keys))
+            if (!proximityRequested.Contains(key)) retryAfter.Remove(key);
+    }
+
+    private nint StaticVfxRemoveDetour(VfxObject* vfx)
+    {
+        if (activeByVfx.Remove((nint)vfx, out var active))
+            activeVfxByActor.Remove((active.ActorAddress, active.Channel));
+        return staticVfxRemoveHook!.Original(vfx);
     }
 
     public void Update()
@@ -177,7 +277,7 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable
 
     public void UpdateActorScale(nint actorAddress, float actorGrowthMultiplier)
     {
-        if (!activeVfxByActor.TryGetValue(actorAddress, out nint vfxAddress) ||
+        if (!activeVfxByActor.TryGetValue((actorAddress, 0), out nint vfxAddress) ||
             !activeByVfx.TryGetValue(vfxAddress, out var activeVfx))
         {
             return;
@@ -219,7 +319,7 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable
 
     private void RemoveForActor(nint actorAddress)
     {
-        if (activeVfxByActor.TryGetValue(actorAddress, out nint vfxAddress))
+        if (activeVfxByActor.TryGetValue((actorAddress, 0), out nint vfxAddress))
         {
             RemoveTrackedVfx(vfxAddress);
         }
@@ -232,11 +332,11 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable
             return;
         }
 
-        activeVfxByActor.Remove(activeVfx.ActorAddress);
-        if (actorVfxRemoveHook != null)
-        {
+        activeVfxByActor.Remove((activeVfx.ActorAddress, activeVfx.Channel));
+        if (activeVfx.Channel == 2)
+            staticVfxRemoveHook?.Original((VfxObject*)vfxAddress);
+        else if (actorVfxRemoveHook != null)
             actorVfxRemoveHook.Original((VfxObject*)vfxAddress, (char)1);
-        }
     }
 
     private nint ActorVfxRemoveDetour(VfxObject* vfx, char a2)
@@ -244,7 +344,7 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable
         nint vfxAddress = (nint)vfx;
         if (activeByVfx.Remove(vfxAddress, out var activeVfx))
         {
-            activeVfxByActor.Remove(activeVfx.ActorAddress);
+            activeVfxByActor.Remove((activeVfx.ActorAddress, activeVfx.Channel));
         }
 
         return actorVfxRemoveHook!.Original(vfx, a2);

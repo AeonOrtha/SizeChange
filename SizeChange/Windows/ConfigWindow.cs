@@ -729,12 +729,54 @@ public class ConfigWindow : Window, IDisposable
         bool aetherGrowth = settings.AetherProximityGrowth;
         if (ImGui.Checkbox($"Aetheryte Proximity Growth##{id}", ref aetherGrowth))
         { settings.AetherProximityGrowth = aetherGrowth; configuration.Save(); }
-        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Each nearby teleport crystal gives 0.4% HP-equivalent damage each second, outside combat too. This source bypasses the size limit.");
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Each crystal hits once per second. Damage rises smoothly as you approach. Overlaps stack; crystal growth bypasses the size limit, including outside combat.");
         if (settings.AetherProximityGrowth)
         {
             float range = settings.AetherProximityRange;
             if (ImGui.DragFloat($"Aetheryte Range##{id}", ref range, 0.1f, 0.1f, 100f, "%.1f"))
             { settings.AetherProximityRange = Math.Clamp(range, 0.1f, 100f); configuration.Save(); }
+
+            float shardHit = settings.AetherShardHitPercent;
+            if (ImGui.DragFloat($"Shard Peak Hit##{id}", ref shardHit, 0.01f, 0f, 100f, "%.2f%% HP"))
+            { settings.AetherShardHitPercent = Math.Clamp(shardHit, 0f, 100f); configuration.Save(); }
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Maximum at the source; fades to zero at range. Includes housing crystals. Per-hit HP allowance still applies.");
+            float largeHit = settings.AetherLargeHitPercent;
+            if (ImGui.DragFloat($"Large Peak Hit##{id}", ref largeHit, 0.01f, 0f, 100f, "%.2f%% HP"))
+            { settings.AetherLargeHitPercent = Math.Clamp(largeHit, 0f, 100f); configuration.Save(); }
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Peak HP-equivalent damage from a full-size aetheryte. Per-hit HP allowance still applies.");
+
+            ImGui.PushID($"AetherAudio{id}");
+            bool actorSound = settings.AetherActorSound.Enabled;
+            if (ImGui.Checkbox("Proximity Sound", ref actorSound))
+            { settings.AetherActorSound.Enabled = actorSound; configuration.Save(); }
+            if (actorSound) DrawHeartbeatSoundSlot("Proximity Loop", settings.AetherActorSound.Sound);
+            bool sourceSound = settings.AetherSourceSound.Enabled;
+            if (ImGui.Checkbox("Crystal Sound", ref sourceSound))
+            { settings.AetherSourceSound.Enabled = sourceSound; configuration.Save(); }
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("One positional loop at each contributing crystal. Shared crystals use Self's settings first.");
+            if (sourceSound) DrawHeartbeatSoundSlot("Crystal Loop", settings.AetherSourceSound.Sound);
+            ImGui.PopID();
+
+            bool actorVfx = settings.AetherActorVfxEnabled;
+            if (ImGui.Checkbox($"Proximity VFX##{id}", ref actorVfx))
+            { settings.AetherActorVfxEnabled = actorVfx; configuration.Save(); }
+            if (actorVfx)
+            {
+                string path = settings.AetherActorVfxPath;
+                if (ImGui.InputText($"Proximity AVFX##{id}", ref path, 512))
+                { settings.AetherActorVfxPath = path; configuration.Save(); }
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Character effect while affected. Use a looping game .avfx path. Separate from growth VFX.");
+            }
+            bool sourceVfx = settings.AetherSourceVfxEnabled;
+            if (ImGui.Checkbox($"Crystal VFX##{id}", ref sourceVfx))
+            { settings.AetherSourceVfxEnabled = sourceVfx; configuration.Save(); }
+            if (sourceVfx)
+            {
+                string path = settings.AetherSourceVfxPath;
+                if (ImGui.InputText($"Crystal AVFX##{id}", ref path, 512))
+                { settings.AetherSourceVfxPath = path; configuration.Save(); }
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Effect at each contributing crystal. Use a looping world-space .avfx. Shared crystals show one effect; Self takes priority.");
+            }
         }
 
         float deltaGrowthMultiplier = settings.DeltaGrowthMultiplier;

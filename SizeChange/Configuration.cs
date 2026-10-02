@@ -12,6 +12,14 @@ public class GrowthSettings
 
     public bool AetherProximityGrowth { get; set; }
     public float AetherProximityRange { get; set; } = 10f;
+    public float AetherShardHitPercent { get; set; } = 0.4f;
+    public float AetherLargeHitPercent { get; set; } = 1.2f;
+    public bool AetherActorVfxEnabled { get; set; }
+    public string AetherActorVfxPath { get; set; } = string.Empty;
+    public bool AetherSourceVfxEnabled { get; set; }
+    public string AetherSourceVfxPath { get; set; } = string.Empty;
+    public AetherSoundSettings AetherActorSound { get; set; } = new();
+    public AetherSoundSettings AetherSourceSound { get; set; } = new();
     public float PreviewHitPercent { get; set; } = 10f;
     public float PreviewHitIntervalSeconds { get; set; } = 1f;
     public float Speed { get; set; } = 2.0f;
@@ -64,6 +72,12 @@ public class GrowthSettings
         MinScaleMultiplier = Math.Clamp(MinScaleMultiplier, 0.01f, 1f);
         MaxScaleMultiplier = Math.Max(1f, MaxScaleMultiplier);
         AetherProximityRange = float.IsFinite(AetherProximityRange) ? Math.Clamp(AetherProximityRange, 0.1f, 100f) : 10f;
+        AetherActorSound ??= new(); AetherActorSound.Validate();
+        AetherSourceSound ??= new(); AetherSourceSound.Validate();
+        AetherShardHitPercent = float.IsFinite(AetherShardHitPercent) ? Math.Clamp(AetherShardHitPercent, 0f, 100f) : 0.4f;
+        AetherLargeHitPercent = float.IsFinite(AetherLargeHitPercent) ? Math.Clamp(AetherLargeHitPercent, 0f, 100f) : 1.2f;
+        AetherActorVfxPath = AetherActorVfxPath?.Trim().Replace('\\', '/') ?? string.Empty;
+        AetherSourceVfxPath = AetherSourceVfxPath?.Trim().Replace('\\', '/') ?? string.Empty;
         DeltaGrowthMultiplier = Math.Max(0f, DeltaGrowthMultiplier);
         MaximumHealthLossRatioPerTrigger =
             Math.Clamp(MaximumHealthLossRatioPerTrigger, 0f, 1f);
@@ -114,6 +128,14 @@ public class GrowthSettings
     public static GrowthSettings CopyOf(GrowthSettings settings)
         => new()
         {
+            AetherActorSound = AetherSoundSettings.CopyOf(settings.AetherActorSound),
+            AetherSourceSound = AetherSoundSettings.CopyOf(settings.AetherSourceSound),
+            AetherShardHitPercent = settings.AetherShardHitPercent,
+            AetherLargeHitPercent = settings.AetherLargeHitPercent,
+            AetherActorVfxEnabled = settings.AetherActorVfxEnabled,
+            AetherActorVfxPath = settings.AetherActorVfxPath,
+            AetherSourceVfxEnabled = settings.AetherSourceVfxEnabled,
+            AetherSourceVfxPath = settings.AetherSourceVfxPath,
             AetherProximityGrowth = settings.AetherProximityGrowth,
             AetherProximityRange = settings.AetherProximityRange,
             PreviewHitPercent = settings.PreviewHitPercent,

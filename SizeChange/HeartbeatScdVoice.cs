@@ -6,9 +6,17 @@ namespace SizeChange;
 // Unlike the fire-and-forget growth sound, this entry disables auto-release
 // while owned. That keeps its pooled SoundData from being reused under our
 // retained pointer. Stop hands ownership back to the game's normal cleanup.
-internal sealed unsafe class HeartbeatScdVoice : IHeartbeatSoundVoice
+internal sealed unsafe class HeartbeatScdVoice : IPositionalHeartbeatSoundVoice
 {
     private SoundData* sound;
+    private bool positional;
+    private float positionX, positionY, positionZ;
+    public void SetPosition(float x, float y, float z)
+    {
+        positional = true;
+        positionX = x; positionY = y; positionZ = z;
+        if (sound != null && sound->IsActive) sound->SetPosition(true, x, y, z);
+    }
     public bool IsPlaying => sound != null && sound->IsActive &&
         (sound->GetIsLoadingSoundResource() || sound->IsPlaying());
 
@@ -28,10 +36,10 @@ internal sealed unsafe class HeartbeatScdVoice : IHeartbeatSoundVoice
         Stop();
         var manager = SoundManager.Instance();
         if (manager == null || manager->Disabled) throw new InvalidOperationException("Audio unavailable.");
-        // A local, non-positional sound respects the player's sound category.
-        sound = manager->PlaySound(path, volume, 0, 0, 0, 0, Math.Clamp(playbackRate, 0.1f, 1f), 0,
+        // Heartbeats remain non-positional; proximity loops opt into world positions.
+        sound = manager->PlaySound(path, volume, 0, positionX, positionY, positionZ, Math.Clamp(playbackRate, 0.1f, 1f), 0,
             (uint)index, false, SoundVolumeCategory.Player, false, -1,
-            false, false, false, false);
+            false, false, positional, false);
         if (sound == null) throw new InvalidOperationException("SCD playback failed.");
     }
 

@@ -74,6 +74,7 @@ public sealed class Plugin : IDalamudPlugin
         new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<uint> TrackedMonsterEntityIds = new();
     private readonly AetherSources aetherSources = new();
+    private readonly AetherSoundPlayer aetherSound = new(() => new HeartbeatScdVoice());
     private readonly GrowthPreview selfPreview = new();
     private readonly GrowthPreview playerPreview = new();
     private readonly GrowthPreview monsterPreview = new();
@@ -127,6 +128,7 @@ public sealed class Plugin : IDalamudPlugin
     {
         Framework.Update -= OnFrameworkUpdate;
         HeartbeatSound.Dispose();
+        aetherSound.Dispose();
         BoneHeartbeat.Dispose();
         RestoreCharacterTransforms();
         GrowthVfxPlayer.Dispose();
@@ -231,6 +233,8 @@ public sealed class Plugin : IDalamudPlugin
 
     private unsafe void OnFrameworkUpdate(IFramework framework)
     {
+        GrowthVfxPlayer.BeginProximityFrame();
+        aetherSound.BeginFrame((float)Framework.UpdateDelta.TotalSeconds);
         GrowthVfxPlayer.Update();
 
         bool globallyDisabled = ClientState.IsPvP || !Configuration.Enable;
@@ -238,6 +242,8 @@ public sealed class Plugin : IDalamudPlugin
         var localPlayer = ObjectTable.LocalPlayer;
         if (localPlayer == null)
         {
+            GrowthVfxPlayer.EndProximityFrame();
+            aetherSound.EndFrame();
             selfPreview.Enabled = playerPreview.Enabled = monsterPreview.Enabled = false;
             BoneHeartbeat.Tick(Configuration.SelfBoneHeartbeat, 0, 0, 0,
                 false, false, (float)Framework.UpdateDelta.TotalSeconds);
@@ -246,7 +252,7 @@ public sealed class Plugin : IDalamudPlugin
         }
 
         float deltaSeconds = (float)Framework.UpdateDelta.TotalSeconds;
-        aetherSources.Refresh(ObjectTable, !globallyDisabled && localPlayer.CurrentHp > 0 &&
+        aetherSources.Refresh(ObjectTable, DataManager, !globallyDisabled && localPlayer.CurrentHp > 0 &&
             !Condition[ConditionFlag.BetweenAreas] && !Condition[ConditionFlag.BetweenAreas51] &&
             (Configuration.SelfSettings.AetherProximityGrowth || Configuration.PlayerSettings.AetherProximityGrowth || Configuration.MonsterSettings.AetherProximityGrowth));
         bool previewAllowed = !globallyDisabled && !inCombat && localPlayer.CurrentHp > 0 &&
@@ -380,6 +386,8 @@ public sealed class Plugin : IDalamudPlugin
                 globallyDisabled,
                 inCombat);
         }
+        GrowthVfxPlayer.EndProximityFrame();
+        aetherSound.EndFrame();
     }
 
     private unsafe void ProcessSelectedActor(
@@ -486,8 +494,25 @@ public sealed class Plugin : IDalamudPlugin
         float growthMultiplierBeforeRelease = charState.GrowthMultiplier;
         float deltaSeconds = (float)Framework.UpdateDelta.TotalSeconds;
         var position = actor->GameObject.Position;
-        int aetherCount = settings.GrowthFromDelta && settings.AetherProximityGrowth && !disable &&
-            actor->Health > 0 ? aetherSources.CountNear(position.X, position.Y, position.Z, settings.AetherProximityRange) : 0;
+        var nearbyCrystals = settings.GrowthFromDelta && settings.AetherProximityGrowth && !disable &&
+            actor->Health > 0 && settings.MaximumHealthLossRatioPerTrigger > 0f && settings.DeltaGrowthMultiplier > 0f
+                ? aetherSources.GetHits(position.X, position.Y, position.Z, settings) : null;
+        int aetherCount = nearbyCrystals?.Count ?? 0;
+        if (aetherCount > 0)
+        {
+            aetherSound.Request((nint)actor, actor->EntityId, false, settings.AetherActorSound,
+                position.X, position.Y, position.Z);
+            foreach (var hit in nearbyCrystals!)
+                aetherSound.Request(hit.Crystal.Address, hit.Crystal.EntityId, true, settings.AetherSourceSound,
+                    hit.Crystal.Position.X, hit.Crystal.Position.Y, hit.Crystal.Position.Z);
+            if (settings.AetherActorVfxEnabled)
+                GrowthVfxPlayer.KeepProximity((nint)actor, actor->EntityId, settings.AetherActorVfxPath, false, position);
+            if (settings.AetherSourceVfxEnabled)
+                foreach (var hit in nearbyCrystals!)
+                    GrowthVfxPlayer.KeepProximity(hit.Crystal.Address, hit.Crystal.EntityId,
+                        settings.AetherSourceVfxPath, true,
+                        new Vector3(hit.Crystal.Position.X, hit.Crystal.Position.Y, hit.Crystal.Position.Z));
+        }
         bool aetherActive = aetherCount > 0;
         int aetherHits = charState.Aether.Advance(aetherCount, deltaSeconds);
         void Accumulate(float healthLostRatio, bool aether)
@@ -520,7 +545,7 @@ public sealed class Plugin : IDalamudPlugin
             float healthLost = preview != null ? preview.HitRatio * maxhp : charState.PreviousHealth - health;
             if (healthLost > 0f) Accumulate(healthLost / maxhp, false);
         }
-        for (int hit = 0; hit < aetherHits; hit++) Accumulate(AetherGrowthState.HitRatio, true);
+        for (int hit = 0; hit < aetherHits; hit++) Accumulate(nearbyCrystals![hit].Ratio, true);
 
         if (!settings.GrowthFromDelta || disable)
         {
