@@ -249,8 +249,13 @@ public class ConfigWindow : Window, IDisposable
         if (ImGui.Combo("When##jaw", ref mode, "Always\0During Growth\0"))
         { settings.Mode = (JawBreathingMode)mode; configuration.Save(); }
         float speed = settings.BreathsPerMinute;
-        if (ImGui.SliderFloat("Breaths / Min", ref speed, 2f, 60f, "%.1f"))
+        if (ImGui.SliderFloat("Motion Speed##jaw", ref speed, 2f, 60f, "%.1f /min"))
         { settings.BreathsPerMinute = speed; configuration.Save(); }
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Opening and closing speed, excluding the pause.");
+        float pause = settings.PauseSeconds;
+        if (ImGui.SliderFloat("Cycle Pause (s)##jaw", ref pause, 0f, 10f, "%.2f"))
+        { settings.PauseSeconds = pause; configuration.Save(); }
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Hold the original closed position between cycles. Zero disables the pause.");
         float angle = settings.OpeningDegrees;
         if (ImGui.SliderFloat("Jaw Opening", ref angle, 0f, 45f, "%.1f deg"))
         { settings.OpeningDegrees = angle; configuration.Save(); }

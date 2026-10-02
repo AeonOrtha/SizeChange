@@ -146,11 +146,11 @@ internal sealed class BoneHeartbeatPlayer : IDisposable
                     pendingDamageRatio, maximumDamageRatio)
                 : settings.BeatsPerMinute;
             if (envelope > 0f) phase += seconds * bpm / 60.0;
-            if (jawEnvelope > 0f) jawPhase = (jawPhase + seconds * settings.Jaw.BreathsPerMinute / 60.0) % 1.0;
+            if (jawEnvelope > 0f) jawPhase = (jawPhase + seconds / settings.Jaw.CycleSeconds) % 1.0;
             sendElapsed += seconds;
             if (sendElapsed < 1f / 60f) return;
             sendElapsed %= 1f / 60f;
-            float jawAngle = -JawBreathingSettings.Sample(jawPhase) * settings.Jaw.OpeningDegrees * jawEnvelope;
+            float jawAngle = -settings.Jaw.SampleCycle(jawPhase) * settings.Jaw.OpeningDegrees * jawEnvelope;
             string frame = baseline!.Build(resolvedBones, envelope, settings.Strength, phase, jawAngle, 2);
             if (frame != lastSent)
             {
