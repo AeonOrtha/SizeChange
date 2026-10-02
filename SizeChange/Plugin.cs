@@ -28,6 +28,7 @@ struct SCCharacterState
 {
     public nint ActorAddress;
     public SCActorGroup ActorGroup;
+    public CharacterTransformBaseline Transform;
     public float PlayerScale;
     public float PreviousScale;
     public float PreviousHealth;
@@ -157,22 +158,9 @@ public sealed class Plugin : IDalamudPlugin
             }
 
             var actor = (Character*)gameObject.Address;
-            var draw = (CharacterBase*)actor->DrawObject;
-            if (draw != null && stateEntry.Value.PlayerScale > 0f)
-            {
-                float baseScale = stateEntry.Value.PlayerScale;
-                draw->Scale = new Vector3(baseScale, baseScale, baseScale);
-                actor->Scale = baseScale;
-            }
+            var state = stateEntry.Value;
+            RestoreOwnedTransforms(actor, ref state);
 
-            if (stateEntry.Value.HasDrawOffset)
-            {
-                var currentOffset = actor->GameObject.DrawOffset;
-                actor->GameObject.SetDrawOffset(
-                    currentOffset.X,
-                    stateEntry.Value.BaseDrawOffsetY,
-                    currentOffset.Z);
-            }
         }
     }
 
@@ -226,9 +214,36 @@ public sealed class Plugin : IDalamudPlugin
         var draw = (CharacterBase*)actor->DrawObject;
         if (draw == null) return;
 
+        if (!charState.Transform.Ready)
+        {
+            charState.Transform = new CharacterTransformBaseline
+            {
+                Ready = true, DrawAddress = (nint)draw,
+                X = OwnedTransformValue.Capture(draw->Scale.X),
+                Y = OwnedTransformValue.Capture(draw->Scale.Y),
+                Z = OwnedTransformValue.Capture(draw->Scale.Z),
+                ActorScale = OwnedTransformValue.Capture(actor->Scale),
+                Height = OwnedTransformValue.Capture(actor->GameObject.DrawOffset.Y),
+            };
+            charState.PlayerScale = draw->Scale.Y;
+        }
+        if (charState.PlayerScale <= 0f) return;
+        float factor = scale / charState.PlayerScale;
+        RebaseCommand(ref charState.Transform.X, draw->Scale.X, factor);
+        RebaseCommand(ref charState.Transform.Y, draw->Scale.Y, factor);
+        RebaseCommand(ref charState.Transform.Z, draw->Scale.Z, factor);
+        RebaseCommand(ref charState.Transform.ActorScale, actor->Scale, factor);
         charState.PlayerScale = scale;
         charState.PreviousScale = draw->Scale.Y;
         CharacterIdToLastScaleMap[actor->EntityId] = charState;
+    }
+
+    private static void RebaseCommand(ref OwnedTransformValue value, float current, float factor)
+    {
+        value.Baseline *= factor;
+        value.LastWritten = current;
+        value.Owned = true;
+        value.Conflict = false;
     }
 
     private unsafe void OnFrameworkUpdate(IFramework framework)
@@ -465,6 +480,55 @@ public sealed class Plugin : IDalamudPlugin
         }
 
         charState.ActorGroup = actorGroup;
+        if (disable)
+        {
+            RestoreOwnedTransforms(actor, ref charState);
+            CharacterIdToLastScaleMap.Remove(actor->EntityId);
+            return;
+        }
+        if (charState.Transform.Ready && charState.Transform.DrawAddress != (nint)draw)
+        {
+            // The old draw object may already be freed. Restore only the actor
+            // and height values still owned, then let the game update once.
+            actor->Scale = charState.Transform.ActorScale.Restore(actor->Scale);
+            var offset = actor->GameObject.DrawOffset;
+            actor->GameObject.SetDrawOffset(offset.X, charState.Transform.Height.Restore(offset.Y), offset.Z);
+            charState = new SCCharacterState { ActorAddress = (nint)actor, ActorGroup = actorGroup, GrowthMultiplier = 1f };
+            CharacterIdToLastScaleMap[actor->EntityId] = charState;
+            return;
+        }
+        if (!charState.Transform.Ready)
+        {
+            if (!float.IsFinite(scale) || scale <= 0f || !float.IsFinite(actor->Scale) || actor->Scale <= 0f) return;
+            charState.Transform = new CharacterTransformBaseline
+            {
+                Ready = true, DrawAddress = (nint)draw,
+                X = OwnedTransformValue.Capture(draw->Scale.X),
+                Y = OwnedTransformValue.Capture(scale),
+                Z = OwnedTransformValue.Capture(draw->Scale.Z),
+                ActorScale = OwnedTransformValue.Capture(actor->Scale),
+                Height = OwnedTransformValue.Capture(actor->GameObject.DrawOffset.Y),
+            };
+            charState.PlayerScale = scale;
+            charState.PreviousScale = previousScale = scale;
+            charState.GrowthMultiplier = Math.Max(1f, charState.GrowthMultiplier);
+        }
+        charState.Transform.X.Observe(draw->Scale.X);
+        charState.Transform.Y.Observe(draw->Scale.Y);
+        charState.Transform.Z.Observe(draw->Scale.Z);
+        charState.Transform.ActorScale.Observe(actor->Scale);
+        if (charState.Transform.ScaleConflict)
+        {
+            RestoreOwnedTransforms(actor, ref charState);
+            charState.GrowthMultiplier = 1f;
+            charState.PendingGrowth = charState.PendingDamageRatio = charState.AccumulatorRemainingSeconds = 0f;
+            charState.OvershootPulse = default;
+            charState.Aether = default;
+            charState.PreviousHealth = health;
+            charState.PreviousScale = draw->Scale.Y;
+            CharacterIdToLastScaleMap[actor->EntityId] = charState;
+            return;
+        }
 
         if (charState.WasPreviewing && preview == null)
         {
@@ -475,12 +539,6 @@ public sealed class Plugin : IDalamudPlugin
             if (charState.PendingGrowth <= 0f) charState.AccumulatorRemainingSeconds = 0f;
         }
         charState.WasPreviewing = preview != null;
-
-        if (!settings.GrowthFromDelta &&
-            MathF.Abs(previousScale - scale) > 0.0001f)
-        {
-            charState.PlayerScale = scale;
-        }
 
         if (!charState.HasPreviousHealth)
         {
@@ -744,8 +802,25 @@ public sealed class Plugin : IDalamudPlugin
             scale = float.Lerp(previousScale, intendedTargetScale, settings.Speed / 100f);
             scale = Math.Min(scale, maximumAllowedScale);
         }
-        draw->Scale = new Vector3(scale, scale, scale);
-        actor->Scale = scale;
+        if (settings.GrowthFromDelta) scale = Math.Max(charState.PlayerScale, scale);
+        float appliedMultiplier = scale / charState.PlayerScale;
+        if (!charState.Transform.ScaleConflict)
+        {
+            draw->Scale = new Vector3(
+                charState.Transform.X.Apply(draw->Scale.X, charState.Transform.X.Baseline * appliedMultiplier),
+                charState.Transform.Y.Apply(draw->Scale.Y, charState.Transform.Y.Baseline * appliedMultiplier),
+                charState.Transform.Z.Apply(draw->Scale.Z, charState.Transform.Z.Baseline * appliedMultiplier));
+            actor->Scale = charState.Transform.ActorScale.Apply(actor->Scale,
+                charState.Transform.ActorScale.Baseline * appliedMultiplier);
+        }
+        else
+        {
+            // Release unchanged components but leave external replacements alone.
+            draw->Scale = new Vector3(charState.Transform.X.Restore(draw->Scale.X),
+                charState.Transform.Y.Restore(draw->Scale.Y), charState.Transform.Z.Restore(draw->Scale.Z));
+            actor->Scale = charState.Transform.ActorScale.Restore(actor->Scale);
+            scale = draw->Scale.Y;
+        }
 
         float visibleScaleMultiplier =
             charState.PlayerScale > 0f
@@ -759,7 +834,7 @@ public sealed class Plugin : IDalamudPlugin
         // ApplyHeightOffset adds this and growth lift to the captured original.
         float desiredHeightOffset = actorGroup == SCActorGroup.Self && !disable
             ? Configuration.SelfFlatHeightOffset : 0f;
-        if (settings.GrowthFromDelta &&
+        if (settings.GrowthFromDelta && !charState.Transform.ScaleConflict &&
             settings.EnableDeltaHeightOffset &&
             charState.PlayerScale > 0f)
         {
@@ -1058,28 +1133,15 @@ public sealed class Plugin : IDalamudPlugin
         ref SCCharacterState charState,
         float desiredHeightOffset)
     {
-        const float tolerance = 0.0001f;
         var currentOffset = actor->GameObject.DrawOffset;
+        float target = charState.Transform.Height.Baseline + desiredHeightOffset;
+        float result = charState.Transform.Height.Apply(currentOffset.Y, target);
+        if (result != currentOffset.Y)
+            actor->GameObject.SetDrawOffset(currentOffset.X, result, currentOffset.Z);
+        charState.BaseDrawOffsetY = charState.Transform.Height.Baseline;
+        charState.LastAppliedDrawOffsetY = result;
+        charState.HasDrawOffset = charState.Transform.Height.Owned;
 
-        if (!charState.HasDrawOffset)
-        {
-            charState.BaseDrawOffsetY = currentOffset.Y;
-            charState.LastAppliedDrawOffsetY = currentOffset.Y;
-            charState.HasDrawOffset = true;
-        }
-        // Keep this captured base stable while the actor is managed. Re-learning
-        // another plugin's rewritten offset here can repeatedly add our own
-        // height contribution and launch a listed actor upward every frame.
-        float targetY = charState.BaseDrawOffsetY + desiredHeightOffset;
-        if (MathF.Abs(currentOffset.Y - targetY) > tolerance)
-        {
-            actor->GameObject.SetDrawOffset(
-                currentOffset.X,
-                targetY,
-                currentOffset.Z);
-        }
-
-        charState.LastAppliedDrawOffsetY = actor->GameObject.DrawOffset.Y;
     }
 
     private void RefreshTrackedActorCaches()
@@ -1149,36 +1211,51 @@ public sealed class Plugin : IDalamudPlugin
 
     private unsafe void RemoveStateAfterReturn(Character* actor)
     {
-        if (!TryGetCharacterState(actor, out var charState))
-        {
-            return;
-        }
-
-        var draw = (CharacterBase*)actor->DrawObject;
-        if (draw == null ||
-            MathF.Abs(draw->Scale.Y - charState.PlayerScale) >= 0.001f ||
-            (charState.HasDrawOffset &&
-             MathF.Abs(charState.LastAppliedDrawOffsetY - charState.BaseDrawOffsetY) >= 0.001f))
-        {
-            return;
-        }
-
-        draw->Scale = new Vector3(
-            charState.PlayerScale,
-            charState.PlayerScale,
-            charState.PlayerScale);
-        actor->Scale = charState.PlayerScale;
-
-        if (charState.HasDrawOffset)
-        {
-            var currentOffset = actor->GameObject.DrawOffset;
-            actor->GameObject.SetDrawOffset(
-                currentOffset.X,
-                charState.BaseDrawOffsetY,
-                currentOffset.Z);
-        }
-
+        if (!TryGetCharacterState(actor, out var state)) return;
+        RestoreOwnedTransforms(actor, ref state);
         CharacterIdToLastScaleMap.Remove(actor->EntityId);
+    }
+
+    private static unsafe void RestoreOwnedTransforms(Character* actor, ref SCCharacterState state)
+    {
+        if (!state.Transform.Ready) return;
+        var draw = (CharacterBase*)actor->DrawObject;
+        if (draw != null && state.Transform.DrawAddress == (nint)draw)
+            draw->Scale = new Vector3(state.Transform.X.Restore(draw->Scale.X),
+                state.Transform.Y.Restore(draw->Scale.Y), state.Transform.Z.Restore(draw->Scale.Z));
+        actor->Scale = state.Transform.ActorScale.Restore(actor->Scale);
+        var offset = actor->GameObject.DrawOffset;
+        float y = state.Transform.Height.Restore(offset.Y);
+        if (y != offset.Y) actor->GameObject.SetDrawOffset(offset.X, y, offset.Z);
+    }
+
+    internal unsafe void RecheckBaselines(SCActorGroup group)
+    {
+        foreach (var entry in new List<KeyValuePair<uint, SCCharacterState>>(CharacterIdToLastScaleMap))
+        {
+            if (entry.Value.ActorGroup != group) continue;
+            var obj = ObjectTable.SearchByEntityId(entry.Key);
+            var state = entry.Value;
+            if (obj is IBattleChara && obj.Address == state.ActorAddress)
+                RestoreOwnedTransforms((Character*)obj.Address, ref state);
+            CharacterIdToLastScaleMap.Remove(entry.Key);
+        }
+    }
+
+    internal string TransformDiagnostics(SCActorGroup group)
+    {
+        var lines = new List<string>();
+        foreach (var entry in CharacterIdToLastScaleMap)
+        {
+            var state = entry.Value;
+            if (state.ActorGroup != group || !state.Transform.Ready) continue;
+            string name = ObjectTable.SearchByEntityId(entry.Key)?.Name.TextValue ?? $"Actor {entry.Key:X}";
+            lines.Add($"{name}: Base {state.PlayerScale:0.000} | Current {state.PreviousScale:0.000} | " +
+                $"Height base {state.Transform.Height.Baseline:0.000} | Added {(state.Transform.Height.Owned ? state.Transform.Height.LastWritten - state.Transform.Height.Baseline : 0f):0.000}" +
+                (state.Transform.ScaleConflict ? " | Scale paused: external change" : "") +
+                (state.Transform.Height.Conflict ? " | Height paused: external change" : ""));
+        }
+        return lines.Count == 0 ? "No captured model." : string.Join("\n", lines);
     }
 
     public void ToggleConfigUi() => ConfigWindow.Toggle();

@@ -78,6 +78,13 @@ public class ConfigWindow : Window, IDisposable
 
         DrawBoneHeartbeat();
         DrawGrowthSettings(configuration.SelfSettings, "self");
+        if (ImGui.TreeNode("Transform Values##self"))
+        {
+            ImGui.TextWrapped(plugin.TransformDiagnostics(SCActorGroup.Self));
+            if (ImGui.Button("Recheck Baseline##self")) plugin.RecheckBaselines(SCActorGroup.Self);
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Restores our owned adjustments, clears growth, then captures the current appearance again.");
+            ImGui.TreePop();
+        }
         if (ImGui.Button("Reset Self Settings"))
         {
             configuration.SelfFlatHeightOffset = 0f;
@@ -482,6 +489,13 @@ public class ConfigWindow : Window, IDisposable
         DrawTrackedPlayers();
         ImGui.Separator();
         DrawGrowthSettings(configuration.PlayerSettings, "players");
+        if (ImGui.TreeNode("Transform Values##players"))
+        {
+            ImGui.TextWrapped(plugin.TransformDiagnostics(SCActorGroup.Player));
+            if (ImGui.Button("Recheck Baseline##players")) plugin.RecheckBaselines(SCActorGroup.Player);
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Restores our owned adjustments, clears growth, then captures the current appearance again.");
+            ImGui.TreePop();
+        }
         if (ImGui.Button("Reset Player Settings"))
         {
             plugin.GetPreview(SCActorGroup.Player).Enabled = false;
@@ -500,6 +514,13 @@ public class ConfigWindow : Window, IDisposable
         DrawTrackedMonsters();
         ImGui.Separator();
         DrawGrowthSettings(configuration.MonsterSettings, "monsters");
+        if (ImGui.TreeNode("Transform Values##monsters"))
+        {
+            ImGui.TextWrapped(plugin.TransformDiagnostics(SCActorGroup.Monster));
+            if (ImGui.Button("Recheck Baseline##monsters")) plugin.RecheckBaselines(SCActorGroup.Monster);
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Restores our owned adjustments, clears growth, then captures the current appearance again.");
+            ImGui.TreePop();
+        }
         if (ImGui.Button("Reset Monster Settings"))
         {
             plugin.GetPreview(SCActorGroup.Monster).Enabled = false;
