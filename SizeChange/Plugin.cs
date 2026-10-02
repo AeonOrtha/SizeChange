@@ -820,7 +820,8 @@ public sealed class Plugin : IDalamudPlugin
         return GrowthSoundPlayer.TryPlay(
             path,
             settings.DeltaGrowthSoundIndex,
-            settings.DeltaGrowthSoundVolume,
+            SoundVolumeScaling.ForSize(settings.DeltaGrowthSoundSizeDrivenVolume, settings.DeltaGrowthSoundVolume,
+                settledScale, settings.DeltaGrowthSoundVolumeGainPerScale, settings.DeltaGrowthSoundMaximumSizeVolume),
             position,
             SoundPlaybackRate.ForSize(settings.DeltaGrowthSoundSizeDrivenRate, settledScale,
                 settings.DeltaGrowthSoundRateDropPerScale, settings.DeltaGrowthSoundMinimumRate));

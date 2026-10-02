@@ -22,6 +22,11 @@ public sealed class HeartbeatSoundSettings
 {
     public bool Enabled { get; set; }
     public bool Loop { get; set; }
+    public bool SizeDrivenVolume { get; set; }
+    public float VolumeGainPerScale { get; set; } = 0.25f;
+    public float MaximumSizeVolume { get; set; } = 20f;
+    public float VolumeForSize(float baseVolume, float settledScale) =>
+        SoundVolumeScaling.ForSize(SizeDrivenVolume, baseVolume, settledScale, VolumeGainPerScale, MaximumSizeVolume);
     public bool SizeDrivenRate { get; set; }
     public float RateDropPerScale { get; set; } = 0.1f;
     public float MinimumRate { get; set; } = 0.5f;
@@ -41,6 +46,8 @@ public sealed class HeartbeatSoundSettings
     {
         RateDropPerScale = float.IsFinite(RateDropPerScale) ? Math.Clamp(RateDropPerScale, 0f, 1f) : 0.1f;
         MinimumRate = float.IsFinite(MinimumRate) ? Math.Clamp(MinimumRate, 0.1f, 1f) : 0.5f;
+        VolumeGainPerScale = float.IsFinite(VolumeGainPerScale) ? Math.Clamp(VolumeGainPerScale, 0f, 20f) : 0.25f;
+        MaximumSizeVolume = float.IsFinite(MaximumSizeVolume) ? Math.Clamp(MaximumSizeVolume, 0f, 20f) : 20f;
         FirstBeat ??= new();
         SecondBeat ??= new() { Volume = 0.325f };
         FirstBeat.Validate();
@@ -85,8 +92,9 @@ internal sealed class HeartbeatLoopPlayer(IHeartbeatSoundVoice voice) : IDisposa
         Status = string.Empty;
     }
 
-    public void Tick(HeartbeatSoundSettings settings, bool pulsing, bool available, float seconds, float playbackRate = 1f)
+    public void Tick(HeartbeatSoundSettings settings, bool pulsing, bool available, float seconds, float playbackRate = 1f, float settledScale = 1f)
     {
+        float volume = settings.VolumeForSize(settings.Volume, settledScale);
         seconds = float.IsFinite(seconds) ? Math.Clamp(seconds, 0f, 1f) : 0f;
         string selectedPath = settings.Path.Trim().Replace('\\', '/');
         if (path != selectedPath || index != settings.Index)
@@ -123,11 +131,11 @@ internal sealed class HeartbeatLoopPlayer(IHeartbeatSoundVoice voice) : IDisposa
             // repeats when finished, without replaying the fade-in envelope.
             if (!started)
             {
-                voice.Start(path, index, level * settings.Volume, playbackRate);
+                voice.Start(path, index, level * volume, playbackRate);
                 started = true;
                 age = 0f;
             }
-            voice.SetVolume(level * settings.Volume);
+            voice.SetVolume(level * volume);
             voice.SetPlaybackRate(playbackRate);
             Status = run ? "Sound playing." : "Sound fading.";
         }
