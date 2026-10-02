@@ -74,7 +74,7 @@ public class ConfigWindow : Window, IDisposable
             configuration.SelfFlatHeightOffset = flatHeightOffset;
             configuration.Save();
         }
-        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Persistent lift. 0 = off.");
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Adds to Customize+ base-profile root Y. Requires Customize+. 0 = off.");
 
         DrawBoneHeartbeat();
         DrawGrowthSettings(configuration.SelfSettings, "self");
@@ -82,7 +82,7 @@ public class ConfigWindow : Window, IDisposable
         {
             ImGui.TextWrapped(plugin.TransformDiagnostics(SCActorGroup.Self));
             if (ImGui.Button("Recheck Baseline##self")) plugin.RecheckBaselines(SCActorGroup.Self);
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Restores our adjustments and rechecks size. The login-session height stays fixed.");
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Resumes tracking from the current model. Keeps session originals and earned/pending growth.");
             ImGui.TreePop();
         }
         if (ImGui.Button("Reset Self Settings"))
@@ -493,7 +493,7 @@ public class ConfigWindow : Window, IDisposable
         {
             ImGui.TextWrapped(plugin.TransformDiagnostics(SCActorGroup.Player));
             if (ImGui.Button("Recheck Baseline##players")) plugin.RecheckBaselines(SCActorGroup.Player);
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Restores our adjustments and rechecks size. The login-session height stays fixed.");
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Resumes tracking from the current model. Keeps session originals and earned/pending growth.");
             ImGui.TreePop();
         }
         if (ImGui.Button("Reset Player Settings"))
@@ -518,7 +518,7 @@ public class ConfigWindow : Window, IDisposable
         {
             ImGui.TextWrapped(plugin.TransformDiagnostics(SCActorGroup.Monster));
             if (ImGui.Button("Recheck Baseline##monsters")) plugin.RecheckBaselines(SCActorGroup.Monster);
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Restores our adjustments and rechecks size. The login-session height stays fixed.");
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Resumes tracking from the current model. Keeps session originals and earned/pending growth.");
             ImGui.TreePop();
         }
         if (ImGui.Button("Reset Monster Settings"))

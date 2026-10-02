@@ -11,6 +11,7 @@ internal sealed class BoneHeartbeatProfile
     private readonly JsonObject baseline;
     private JsonObject? working;
     private bool jawTouched;
+    private bool rootTouched;
     private readonly List<string> names = new();
     private readonly List<Target> targets = new();
     private readonly record struct Target(int Index, JsonObject Scale, float X, float Y, float Z);
@@ -23,7 +24,7 @@ internal sealed class BoneHeartbeatProfile
             throw new InvalidOperationException("Customize+ profile has no Bones object.");
     }
 
-    public string Build(IReadOnlyList<HeartbeatBone> selectedBones, float pulse, float strength, double? phase = null, float jawAngle = 0f, int jawAxis = 0)
+    public string Build(IReadOnlyList<HeartbeatBone> selectedBones, float pulse, float strength, double? phase = null, float jawAngle = 0f, int jawAxis = 0, float rootHeightOffset = 0f)
     {
         bool changed = working == null || names.Count != selectedBones.Count;
         for (int i = 0; !changed && i < names.Count; i++)
@@ -45,7 +46,36 @@ internal sealed class BoneHeartbeatProfile
             target.Scale["Z"] = Math.Clamp(target.Z + offset, -512f, 512f);
         }
         ApplyJaw(jawAngle, jawAxis);
+        ApplyRootHeight(rootHeightOffset);
         return working!.ToJsonString();
+    }
+
+    private void ApplyRootHeight(float offset)
+    {
+        if (!float.IsFinite(offset)) offset = 0f;
+        if (offset == 0f && !rootTouched) return;
+        var bones = (JsonObject)working!["Bones"]!;
+        var original = baseline["Bones"]!["n_root"] as JsonObject;
+        if (offset == 0f)
+        {
+            if (original == null) bones.Remove("n_root");
+            else bones["n_root"] = original.DeepClone();
+            rootTouched = false;
+            return;
+        }
+        var root = original?.DeepClone() as JsonObject ?? new JsonObject
+        {
+            ["Translation"] = Vector(0f), ["Rotation"] = Vector(0f),
+            ["Scaling"] = Vector(1f), ["ChildScaling"] = Vector(1f),
+            ["ChildScaleIndependent"] = false,
+            ["PropagateTranslation"] = false, ["PropagateRotation"] = false,
+            ["PropagateScale"] = false,
+        };
+        var translation = root["Translation"] as JsonObject ?? Vector(0f);
+        if (root["Translation"] is not JsonObject) root["Translation"] = translation;
+        translation["Y"] = (translation["Y"]?.GetValue<float>() ?? 0f) + offset;
+        bones["n_root"] = root;
+        rootTouched = true;
     }
 
     private void ApplyJaw(float angle, int axis)
@@ -91,6 +121,7 @@ internal sealed class BoneHeartbeatProfile
     {
         working = (JsonObject)baseline.DeepClone();
         jawTouched = false;
+        rootTouched = false;
         var bones = (JsonObject)working["Bones"]!;
         names.Clear();
         targets.Clear();

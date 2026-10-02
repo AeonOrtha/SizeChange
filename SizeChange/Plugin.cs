@@ -31,6 +31,8 @@ struct SCCharacterState
     public CharacterTransformBaseline Transform;
     public float PlayerScale;
     public float PreviousScale;
+    public float ObservedScale;
+    public float SelfRootHeightOffset;
     public float PreviousHealth;
     public float GrowthMultiplier;
     public float PendingGrowth;
@@ -76,6 +78,7 @@ public sealed class Plugin : IDalamudPlugin
     private readonly Dictionary<string, uint> TrackedPlayerEntityIds =
         new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<uint> TrackedMonsterEntityIds = new();
+    private readonly SessionScaleBaselines sessionScales = new();
     private readonly SessionHeightBaselines sessionHeights = new();
     private readonly AetherSources aetherSources = new();
     private readonly AetherSoundPlayer aetherSound = new(() => new HeartbeatScdVoice());
@@ -217,36 +220,30 @@ public sealed class Plugin : IDalamudPlugin
         var draw = (CharacterBase*)actor->DrawObject;
         if (draw == null) return;
 
-        if (!charState.Transform.Ready)
-        {
-            charState.Transform = new CharacterTransformBaseline
-            {
-                Ready = true, DrawAddress = (nint)draw,
-                X = OwnedTransformValue.Capture(draw->Scale.X),
-                Y = OwnedTransformValue.Capture(draw->Scale.Y),
-                Z = OwnedTransformValue.Capture(draw->Scale.Z),
-                ActorScale = OwnedTransformValue.Capture(actor->Scale),
-                Height = sessionHeights.ForModel(HeightKey(actor), (nint)draw, actor->GameObject.DrawOffset.Y),
-            };
-            charState.PlayerScale = draw->Scale.Y;
-        }
-        if (charState.PlayerScale <= 0f) return;
-        float factor = scale / charState.PlayerScale;
-        RebaseCommand(ref charState.Transform.X, draw->Scale.X, factor);
-        RebaseCommand(ref charState.Transform.Y, draw->Scale.Y, factor);
-        RebaseCommand(ref charState.Transform.Z, draw->Scale.Z, factor);
-        RebaseCommand(ref charState.Transform.ActorScale, actor->Scale, factor);
-        charState.PlayerScale = scale;
-        charState.PreviousScale = draw->Scale.Y;
+        if (!TryBindTransforms(actor, draw, out charState.Transform)) return;
+        sessionScales.SetExplicitReference(HeightKey(actor), scale);
+        if (!TryBindTransforms(actor, draw, out charState.Transform)) return;
+        charState.PlayerScale = charState.Transform.Y.Baseline;
+        charState.PreviousScale = charState.ObservedScale = draw->Scale.Y;
+        charState.OvershootPulse = default;
         CharacterIdToLastScaleMap[actor->EntityId] = charState;
     }
 
-    private static void RebaseCommand(ref OwnedTransformValue value, float current, float factor)
+    private unsafe bool TryBindTransforms(Character* actor, CharacterBase* draw, out CharacterTransformBaseline result)
     {
-        value.Baseline *= factor;
-        value.LastWritten = current;
-        value.Owned = true;
-        value.Conflict = false;
+        result = default;
+        var observed = new ScaleBaseline(draw->Scale.X, draw->Scale.Y, draw->Scale.Z, actor->Scale);
+        if (!observed.Valid || !sessionScales.TryGetOrCapture(HeightKey(actor), observed, out var baseline)) return false;
+        result = new CharacterTransformBaseline
+        {
+            Ready = true, DrawAddress = (nint)draw,
+            X = OwnedTransformValue.Rebind(baseline.X, observed.X),
+            Y = OwnedTransformValue.Rebind(baseline.Y, observed.Y),
+            Z = OwnedTransformValue.Rebind(baseline.Z, observed.Z),
+            ActorScale = OwnedTransformValue.Rebind(baseline.Actor, observed.Actor),
+            Height = sessionHeights.ForModel(HeightKey(actor), (nint)draw, actor->GameObject.DrawOffset.Y),
+        };
+        return true;
     }
 
     private unsafe void OnFrameworkUpdate(IFramework framework)
@@ -258,6 +255,7 @@ public sealed class Plugin : IDalamudPlugin
         if (!ClientState.IsLoggedIn)
         {
             sessionHeights.EndSession();
+            sessionScales.EndSession();
             CharacterIdToLastScaleMap.Clear();
         }
         bool globallyDisabled = ClientState.IsPvP || !Configuration.Enable;
@@ -277,7 +275,13 @@ public sealed class Plugin : IDalamudPlugin
         // Capture Self at the first ready model after login, even if growth is
         // disabled. A transient missing model during redraw does not reset it.
         if (ClientState.IsLoggedIn && ((Character*)localPlayer.Address)->DrawObject != null)
-            sessionHeights.GetOrCapture("self", ((Character*)localPlayer.Address)->GameObject.DrawOffset.Y);
+        {
+            var loginActor = (Character*)localPlayer.Address;
+            var loginDraw = loginActor->DrawObject;
+            sessionHeights.GetOrCapture("self", loginActor->GameObject.DrawOffset.Y);
+            sessionScales.TryGetOrCapture("self", new ScaleBaseline(loginDraw->Scale.X,
+                loginDraw->Scale.Y, loginDraw->Scale.Z, loginActor->Scale), out _);
+        }
 
         float deltaSeconds = (float)Framework.UpdateDelta.TotalSeconds;
         aetherSources.Refresh(ObjectTable, DataManager, !globallyDisabled && localPlayer.CurrentHp > 0 &&
@@ -312,7 +316,7 @@ public sealed class Plugin : IDalamudPlugin
 
         bool accumulating = Configuration.SelfSettings.GrowthFromDelta &&
             Configuration.SelfSettings.AccumulatorDelaySeconds > 0f &&
-            TryGetCharacterState(localActor, out var heartbeatState) &&
+            TryGetCharacterState(localActor, out var heartbeatState) && !heartbeatState.Transform.ScaleConflict &&
             (!Configuration.SelfSettings.OnlyActiveInCombat || inCombat || selfPreview.Enabled || heartbeatState.Aether.InRange || heartbeatState.Aether.PendingGrowth > 0f) &&
             heartbeatState.PendingGrowth > 0f;
         float pendingDamage = TryGetCharacterState(localActor, out var bpmState)
@@ -334,7 +338,7 @@ public sealed class Plugin : IDalamudPlugin
             accumulating || (TryGetCharacterState(localActor, out var jawState) &&
                 (jawState.OvershootPulse.IsActive || jawState.PreviousScale > scaleBeforeUpdate + 0.00001f)),
             pendingDamage, Configuration.SelfSettings.MaximumHealthLossRatioPerTrigger,
-            settledSelfScale);
+            settledSelfScale, boneGrowthState.SelfRootHeightOffset);
 
         bool soundAvailable = !ClientState.IsPvP && localActor->Health > 0 &&
             !Condition[ConditionFlag.BetweenAreas] && !Condition[ConditionFlag.BetweenAreas51];
@@ -512,47 +516,28 @@ public sealed class Plugin : IDalamudPlugin
             CharacterIdToLastScaleMap.Remove(actor->EntityId);
             return;
         }
-        if (charState.Transform.Ready && charState.Transform.DrawAddress != (nint)draw)
+        bool newTracking = !charState.Transform.Ready;
+        if (newTracking || charState.Transform.DrawAddress != (nint)draw)
         {
-            // The old draw object may already be freed. Restore only the actor
-            // and height values still owned, then let the game update once.
-            actor->Scale = charState.Transform.ActorScale.Restore(actor->Scale);
-            var offset = actor->GameObject.DrawOffset;
-            actor->GameObject.SetDrawOffset(offset.X, charState.Transform.Height.Restore(offset.Y), offset.Z);
-            sessionHeights.SaveOwnership(HeightKey(actor), charState.Transform.Height);
-            charState = new SCCharacterState { ActorAddress = (nint)actor, ActorGroup = actorGroup, GrowthMultiplier = 1f };
-            CharacterIdToLastScaleMap[actor->EntityId] = charState;
-            return;
+            if (!TryBindTransforms(actor, draw, out var rebound)) return;
+            charState.Transform = rebound;
+            charState.PlayerScale = rebound.Y.Baseline;
+            // Redraw replaces the model, not logical growth or accumulated damage.
+            // New tracking can start from the observed visual size without ever
+            // treating it as the session's original dimensions.
+            if (newTracking) charState.PreviousScale = previousScale = scale;
         }
-        if (!charState.Transform.Ready)
-        {
-            if (!float.IsFinite(scale) || scale <= 0f || !float.IsFinite(actor->Scale) || actor->Scale <= 0f) return;
-            charState.Transform = new CharacterTransformBaseline
-            {
-                Ready = true, DrawAddress = (nint)draw,
-                X = OwnedTransformValue.Capture(draw->Scale.X),
-                Y = OwnedTransformValue.Capture(scale),
-                Z = OwnedTransformValue.Capture(draw->Scale.Z),
-                ActorScale = OwnedTransformValue.Capture(actor->Scale),
-                Height = sessionHeights.ForModel(HeightKey(actor), (nint)draw, actor->GameObject.DrawOffset.Y),
-            };
-            charState.PlayerScale = scale;
-            charState.PreviousScale = previousScale = scale;
-            charState.GrowthMultiplier = Math.Max(1f, charState.GrowthMultiplier);
-        }
+        charState.ObservedScale = scale;
         charState.Transform.X.Observe(draw->Scale.X);
         charState.Transform.Y.Observe(draw->Scale.Y);
         charState.Transform.Z.Observe(draw->Scale.Z);
         charState.Transform.ActorScale.Observe(actor->Scale);
         if (charState.Transform.ScaleConflict)
         {
-            RestoreOwnedTransforms(actor, ref charState);
-            charState.GrowthMultiplier = 1f;
-            charState.PendingGrowth = charState.PendingDamageRatio = charState.AccumulatorRemainingSeconds = 0f;
-            charState.OvershootPulse = default;
-            charState.Aether = default;
+            // Pause only. Never restore to 1x, delete accumulated damage or
+            // discard the active pulse merely because an external value changed.
             charState.PreviousHealth = health;
-            charState.PreviousScale = draw->Scale.Y;
+            charState.Aether.InRange = false;
             CharacterIdToLastScaleMap[actor->EntityId] = charState;
             return;
         }
@@ -835,23 +820,13 @@ public sealed class Plugin : IDalamudPlugin
         }
         if (settings.GrowthFromDelta) scale = Math.Max(charState.PlayerScale, scale);
         float appliedMultiplier = scale / charState.PlayerScale;
-        if (!charState.Transform.ScaleConflict)
-        {
-            draw->Scale = new Vector3(
-                charState.Transform.X.Apply(draw->Scale.X, charState.Transform.X.Baseline * appliedMultiplier),
-                charState.Transform.Y.Apply(draw->Scale.Y, charState.Transform.Y.Baseline * appliedMultiplier),
-                charState.Transform.Z.Apply(draw->Scale.Z, charState.Transform.Z.Baseline * appliedMultiplier));
-            actor->Scale = charState.Transform.ActorScale.Apply(actor->Scale,
-                charState.Transform.ActorScale.Baseline * appliedMultiplier);
-        }
-        else
-        {
-            // Release unchanged components but leave external replacements alone.
-            draw->Scale = new Vector3(charState.Transform.X.Restore(draw->Scale.X),
-                charState.Transform.Y.Restore(draw->Scale.Y), charState.Transform.Z.Restore(draw->Scale.Z));
-            actor->Scale = charState.Transform.ActorScale.Restore(actor->Scale);
-            scale = draw->Scale.Y;
-        }
+        draw->Scale = new Vector3(
+            charState.Transform.X.Apply(draw->Scale.X, charState.Transform.X.Baseline * appliedMultiplier),
+            charState.Transform.Y.Apply(draw->Scale.Y, charState.Transform.Y.Baseline * appliedMultiplier),
+            charState.Transform.Z.Apply(draw->Scale.Z, charState.Transform.Z.Baseline * appliedMultiplier));
+        actor->Scale = charState.Transform.ActorScale.Apply(actor->Scale,
+            charState.Transform.ActorScale.Baseline * appliedMultiplier);
+        charState.ObservedScale = draw->Scale.Y;
 
         float visibleScaleMultiplier =
             charState.PlayerScale > 0f
@@ -862,7 +837,7 @@ public sealed class Plugin : IDalamudPlugin
             visibleScaleMultiplier);
 
         // Persistent self-only lift. Combat/accumulator state does not gate it.
-        // ApplyHeightOffset adds this and growth lift to the captured original.
+        // Self uses Customize+ root translation; other actors use DrawOffset.
         float desiredHeightOffset = actorGroup == SCActorGroup.Self && !disable
             ? Configuration.SelfFlatHeightOffset : 0f;
         if (settings.GrowthFromDelta && !charState.Transform.ScaleConflict &&
@@ -876,7 +851,11 @@ public sealed class Plugin : IDalamudPlugin
                 settings.DeltaHeightOffsetPerScale;
         }
 
-        if (charState.HasDrawOffset || charState.Transform.Height.Owned || desiredHeightOffset > 0f)
+        if (actorGroup == SCActorGroup.Self)
+        {
+            charState.SelfRootHeightOffset = desiredHeightOffset;
+        }
+        else if (charState.HasDrawOffset || charState.Transform.Height.Owned || desiredHeightOffset > 0f)
         {
             ApplyHeightOffset(actor, ref charState, desiredHeightOffset);
         }
@@ -1277,9 +1256,18 @@ public sealed class Plugin : IDalamudPlugin
             if (entry.Value.ActorGroup != group) continue;
             var obj = ObjectTable.SearchByEntityId(entry.Key);
             var state = entry.Value;
-            if (obj is IBattleChara && obj.Address == state.ActorAddress)
-                RestoreOwnedTransforms((Character*)obj.Address, ref state);
-            CharacterIdToLastScaleMap.Remove(entry.Key);
+            if (obj is not IBattleChara || obj.Address != state.ActorAddress) continue;
+            var actor = (Character*)obj.Address;
+            var draw = (CharacterBase*)actor->DrawObject;
+            if (draw == null || !TryBindTransforms(actor, draw, out var rebound)) continue;
+            rebound.Height = sessionHeights.RecheckOwnership(HeightKey(actor), actor->GameObject.DrawOffset.Y);
+            state.Transform = rebound;
+            state.PlayerScale = rebound.Y.Baseline;
+            state.PreviousScale = state.ObservedScale = draw->Scale.Y;
+            // Resume smoothly from the current visible value. Keep earned and
+            // pending growth, but cancel the interrupted visual-only pulse.
+            state.OvershootPulse = default;
+            CharacterIdToLastScaleMap[entry.Key] = state;
         }
     }
 
@@ -1291,8 +1279,9 @@ public sealed class Plugin : IDalamudPlugin
             var state = entry.Value;
             if (state.ActorGroup != group || !state.Transform.Ready) continue;
             string name = ObjectTable.SearchByEntityId(entry.Key)?.Name.TextValue ?? $"Actor {entry.Key:X}";
-            lines.Add($"{name}: Base {state.PlayerScale:0.000} | Current {state.PreviousScale:0.000} | " +
-                $"Crystals {state.NearbyAetherSources} | Growth {state.GrowthMultiplier:0.000} | Pending {state.PendingGrowth:0.000} | Session height {state.Transform.Height.Baseline:0.000} | Added {(state.Transform.Height.Owned ? state.Transform.Height.LastWritten - state.Transform.Height.Baseline : 0f):0.000}" +
+            lines.Add($"{name}: Base {state.PlayerScale:0.000} | Current {state.ObservedScale:0.000} | " +
+                $"Crystals {state.NearbyAetherSources} | Growth {state.GrowthMultiplier:0.000} | Pending {state.PendingGrowth:0.000}" +
+                (group == SCActorGroup.Self ? $" | Customize+ root lift {state.SelfRootHeightOffset:0.000}" : $" | Session height {state.Transform.Height.Baseline:0.000} | Added {(state.Transform.Height.Owned ? state.Transform.Height.LastWritten - state.Transform.Height.Baseline : 0f):0.000}") +
                 (state.Transform.ScaleConflict ? " | Scale paused: external change" : "") +
                 (state.Transform.Height.Conflict ? " | Height paused: external change" : ""));
         }

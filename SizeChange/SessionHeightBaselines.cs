@@ -30,12 +30,17 @@ internal sealed class SessionHeightBaselines
         {
             // A known model replacement can reset the live offset. Rebind our
             // write ownership, never the session's original height.
-            value.LastWritten = observed;
-            value.Owned = true;
-            value.Conflict = false;
+            value = OwnedTransformValue.Rebind(value.Baseline, observed);
             SaveOwnership(key, value);
         }
         models[key] = model;
+        return value;
+    }
+    public OwnedTransformValue RecheckOwnership(string key, float observed)
+    {
+        var original = GetOrCapture(key, observed);
+        var value = OwnedTransformValue.Rebind(original.Baseline, observed);
+        SaveOwnership(key, value);
         return value;
     }
     public void EndSession() { values.Clear(); models.Clear(); }
