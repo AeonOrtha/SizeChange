@@ -732,6 +732,27 @@ public class ConfigWindow : Window, IDisposable
                     ImGui.PopID();
                 }
             }
+            bool randomContributors = settings.RandomContributors;
+            if (ImGui.Checkbox("Random Contributors", ref randomContributors))
+            { settings.RandomContributors = randomContributors; configuration.SaveSizeDrain(settings); }
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Each nearby source rolls independently for a temporary contribution. Works with Everyone or the name list.");
+            if (randomContributors)
+            {
+                float chance = settings.ContributorChancePercent;
+                if (ImGui.SliderFloat("Chance per Check", ref chance, 0f, 100f, "%.1f%%"))
+                { settings.ContributorChancePercent = chance; configuration.SaveSizeDrain(settings); }
+                float retry = settings.ContributorRetrySeconds;
+                if (ImGui.DragFloat("Retry Delay (s)", ref retry, 0.1f, 0.1f, 300f, "%.1f"))
+                { settings.ContributorRetrySeconds = retry; configuration.SaveSizeDrain(settings); }
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Wait after a failed roll or an expired contribution. One roll on entering range; no rolls while active.");
+                float minimum = settings.ContributorMinimumSeconds;
+                if (ImGui.DragFloat("Minimum Duration (s)", ref minimum, 0.1f, 0.1f, 300f, "%.1f"))
+                { settings.ContributorMinimumSeconds = minimum; configuration.SaveSizeDrain(settings); }
+                float maximum = settings.ContributorMaximumSeconds;
+                if (ImGui.DragFloat("Maximum Duration (s)", ref maximum, 0.1f, settings.ContributorMinimumSeconds, 300f, "%.1f"))
+                { settings.ContributorMaximumSeconds = maximum; configuration.SaveSizeDrain(settings); }
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Duration is chosen on activation. Leaving range ends the contribution; multiple sources can overlap.");
+            }
             float range = settings.Range;
             if (ImGui.DragFloat("Range", ref range, 0.1f, 0.1f, 100f, "%.1f"))
             { settings.Range = Math.Clamp(range, 0.1f, 100f); configuration.SaveSizeDrain(settings); }
@@ -1238,16 +1259,38 @@ public class ConfigWindow : Window, IDisposable
         if (settings.EnableDeltaGrowthVfx)
         {
 
-            string deltaGrowthVfxPath = settings.DeltaGrowthVfxPath;
-            if (ImGui.InputText(
-                    $"Growth AVFX Path##{id}",
-                    ref deltaGrowthVfxPath,
-                    256))
+            var choices = settings.GetGrowthVfxChoices();
+            ImGui.PushID($"GrowthVfxPool-{id}");
+            for (int i = 0; i < choices.Count; i++)
             {
-                settings.DeltaGrowthVfxPath = deltaGrowthVfxPath;
-                growthVfxTestResult = string.Empty;
-                configuration.Save();
+                ImGui.PushID(i);
+                var choice = choices[i];
+                string path = choice.Path;
+                if (ImGui.InputText("AVFX Path", ref path, 512))
+                { choice.Path = path; configuration.Save(); }
+                float available = 100f;
+                for (int j = 0; j < choices.Count; j++)
+                    if (j != i) available -= choices[j].ChancePercent;
+                float chance = choice.ChancePercent;
+                if (ImGui.DragFloat("Chance", ref chance, 0.5f, 0f, Math.Max(0f, available), "%.1f%%"))
+                { choice.ChancePercent = Math.Clamp(chance, 0f, Math.Max(0f, available)); configuration.Save(); }
+                if (ImGui.SmallButton("Test"))
+                {
+                    growthVfxTestResult = plugin.TestDeltaGrowthVfx(settings, choice.Path);
+                    growthVfxTestSucceeded = growthVfxTestResult.StartsWith("Actor-root VFX created", StringComparison.Ordinal);
+                }
+                ImGui.SameLine();
+                if (ImGui.SmallButton("Remove"))
+                { choices.RemoveAt(i--); configuration.Save(); }
+                ImGui.PopID();
             }
+            float remaining = 100f;
+            foreach (var choice in choices) remaining -= choice.ChancePercent;
+            if (ImGui.Button("+"))
+            { choices.Add(new GrowthVfxChoice { ChancePercent = Math.Max(0f, remaining) }); configuration.Save(); }
+            ImGui.SameLine();
+            ImGui.TextUnformatted($"None: {Math.Max(0f, remaining):0.0}%");
+            ImGui.PopID();
 
             float deltaGrowthVfxDuration =
                 settings.DeltaGrowthVfxDurationSeconds;

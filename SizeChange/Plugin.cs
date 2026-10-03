@@ -41,6 +41,7 @@ struct SCCharacterState
     public int NearbyAetherSources;
     public int NearbyDrainSources;
     public List<SizeDrainSources.Hit>? DrainHits;
+    public RandomDrainContributors? DrainContributors;
     public List<AetherSources.Hit>? AetherHits;
     public float AccumulatorRemainingSeconds;
     public GrowthOvershootPulse OvershootPulse;
@@ -600,6 +601,11 @@ public sealed class Plugin : IDalamudPlugin
             (actor->Health > 0 || aetherWithoutHp) && settings.MaximumHealthLossRatioPerTrigger > 0f && settings.DeltaGrowthMultiplier > 0f
             ? drainSources.GetHits((nint)actor, new System.Numerics.Vector3(position.X, position.Y, position.Z),
                 settings.SizeDrain, charState.DrainHits) : null;
+        charState.DrainContributors ??= new RandomDrainContributors();
+        if (nearbyTargets != null)
+            charState.DrainContributors.Filter(charState.DrainHits, settings.SizeDrain,
+                Environment.TickCount64 / 1000.0, Random.Shared.NextDouble);
+        else charState.DrainContributors.Clear();
         int drainCount = nearbyTargets?.Count ?? 0;
         charState.NearbyDrainSources = drainCount;
         if (drainCount > 0)
@@ -996,7 +1002,7 @@ public sealed class Plugin : IDalamudPlugin
     internal string CrystalVfxStatus(GrowthSettings settings) =>
         GrowthVfxPlayer.SourceStatus(settings.AetherSourceVfxPath, settings.AetherSourceVfxAttached);
 
-    internal unsafe string TestDeltaGrowthVfx(GrowthSettings settings)
+    internal unsafe string TestDeltaGrowthVfx(GrowthSettings settings, string? selectedPath = null)
     {
         var localPlayer = ObjectTable.LocalPlayer;
         if (localPlayer == null)
@@ -1018,7 +1024,7 @@ public sealed class Plugin : IDalamudPlugin
             actor,
             settings,
             true,
-            visibleGrowthMultiplier);
+            visibleGrowthMultiplier, selectedPath);
         return error ?? "Actor-root VFX created. It will be removed after the configured duration.";
     }
 
@@ -1026,14 +1032,17 @@ public sealed class Plugin : IDalamudPlugin
         Character* actor,
         GrowthSettings settings,
         bool ignoreEnabled,
-        float actorGrowthMultiplier)
+        float actorGrowthMultiplier,
+        string? selectedPath = null)
     {
         if (!ignoreEnabled && !settings.EnableDeltaGrowthVfx)
         {
             return "Growth VFX is disabled.";
         }
 
-        string path = settings.DeltaGrowthVfxPath.Trim().Replace('\\', '/');
+        string? chosen = selectedPath ?? GrowthVfxChoice.Select(settings.GetGrowthVfxChoices(), Random.Shared.NextDouble());
+        if (chosen == null) return "None selected.";
+        string path = chosen.Trim().Replace('\\', '/');
         if (path.Length == 0 ||
             path.StartsWith('/') ||
             path.Contains("..", StringComparison.Ordinal) ||
