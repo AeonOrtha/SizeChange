@@ -63,17 +63,18 @@ public class GrowthSettings
     public float DeltaGrowthSoundCooldownSeconds { get; set; } = 1.0f;
     public bool EnableDeltaGrowthVfx { get; set; }
     public string DeltaGrowthVfxPath { get; set; } = string.Empty;
-    public List<GrowthVfxChoice>? DeltaGrowthVfxChoices { get; set; }
-    internal List<GrowthVfxChoice> GetGrowthVfxChoices()
-    {
-        // Null identifies an old configuration; an intentionally empty pool stays empty.
-        return DeltaGrowthVfxChoices ??= string.IsNullOrWhiteSpace(DeltaGrowthVfxPath)
-            ? new() : new() { new GrowthVfxChoice { Path = DeltaGrowthVfxPath, ChancePercent = 100f } };
-    }
     public float DeltaGrowthVfxDurationSeconds { get; set; } = 2.0f;
     public float DeltaGrowthVfxCooldownSeconds { get; set; } = 1.0f;
     public float DeltaGrowthVfxScale { get; set; } = 1.0f;
     public bool DeltaGrowthVfxScaleWithActor { get; set; } = true;
+    public List<GrowthAnimationChoice>? DeltaGrowthAnimationChoices { get; set; }
+    internal List<GrowthAnimationChoice> GetGrowthAnimationChoices()
+    {
+        // Migrate the old single animation and its chance once. Empty stays empty.
+        return DeltaGrowthAnimationChoices ??= string.IsNullOrWhiteSpace(DeltaGrowthAnimationTmbPath)
+            ? new() : new() { new GrowthAnimationChoice { Path = DeltaGrowthAnimationTmbPath,
+                ChancePercent = DeltaGrowthAnimationChancePercent } };
+    }
     public float DeltaGrowthAnimationChancePercent { get; set; } = 100f;
     public bool EnableDeltaGrowthAnimation { get; set; }
     public string DeltaGrowthAnimationTmbPath { get; set; } = string.Empty;
@@ -137,7 +138,6 @@ public class GrowthSettings
             Math.Clamp(DeltaGrowthSoundCooldownSeconds, 0f, 60f);
         DeltaGrowthVfxPath = DeltaGrowthVfxPath?.Trim().Replace('\\', '/')
             ?? string.Empty;
-        GrowthVfxChoice.Validate(GetGrowthVfxChoices());
         DeltaGrowthVfxDurationSeconds =
             Math.Clamp(DeltaGrowthVfxDurationSeconds, 0.05f, 300f);
         DeltaGrowthVfxCooldownSeconds =
@@ -145,6 +145,7 @@ public class GrowthSettings
         DeltaGrowthVfxScale = Math.Clamp(DeltaGrowthVfxScale, 0.01f, 100f);
         DeltaGrowthAnimationTmbPath =
             DeltaGrowthAnimationTmbPath?.Trim().Replace('\\', '/') ?? string.Empty;
+        GrowthAnimationChoice.Validate(GetGrowthAnimationChoices());
         DeltaGrowthAnimationCooldownSeconds =
             Math.Clamp(DeltaGrowthAnimationCooldownSeconds, 0f, 60f);
 
@@ -213,8 +214,6 @@ public class GrowthSettings
             DeltaGrowthSoundCooldownSeconds = settings.DeltaGrowthSoundCooldownSeconds,
             EnableDeltaGrowthVfx = settings.EnableDeltaGrowthVfx,
             DeltaGrowthVfxPath = settings.DeltaGrowthVfxPath,
-            DeltaGrowthVfxChoices = settings.GetGrowthVfxChoices().ConvertAll(choice =>
-                new GrowthVfxChoice { Path = choice.Path, ChancePercent = choice.ChancePercent }),
             DeltaGrowthVfxDurationSeconds = settings.DeltaGrowthVfxDurationSeconds,
             DeltaGrowthVfxCooldownSeconds = settings.DeltaGrowthVfxCooldownSeconds,
             DeltaGrowthVfxScale = settings.DeltaGrowthVfxScale,
@@ -222,6 +221,8 @@ public class GrowthSettings
             DeltaGrowthAnimationChancePercent = settings.DeltaGrowthAnimationChancePercent,
             EnableDeltaGrowthAnimation = settings.EnableDeltaGrowthAnimation,
             DeltaGrowthAnimationTmbPath = settings.DeltaGrowthAnimationTmbPath,
+            DeltaGrowthAnimationChoices = settings.GetGrowthAnimationChoices().ConvertAll(choice =>
+                new GrowthAnimationChoice { Path = choice.Path, ChancePercent = choice.ChancePercent }),
             DeltaGrowthAnimationCooldownSeconds =
                 settings.DeltaGrowthAnimationCooldownSeconds,
             OnlyActiveInCombat = settings.OnlyActiveInCombat,

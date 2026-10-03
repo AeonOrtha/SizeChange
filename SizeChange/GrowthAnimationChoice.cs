@@ -4,12 +4,12 @@ using System.Collections.Generic;
 namespace SizeChange;
 
 [Serializable]
-public sealed class GrowthVfxChoice
+public sealed class GrowthAnimationChoice
 {
     public string Path { get; set; } = string.Empty;
     public float ChancePercent { get; set; }
 
-    internal static void Validate(List<GrowthVfxChoice> choices)
+    internal static void Validate(List<GrowthAnimationChoice> choices)
     {
         choices.RemoveAll(choice => choice == null);
         float remaining = 100f;
@@ -22,7 +22,7 @@ public sealed class GrowthVfxChoice
         }
     }
 
-    internal static string? Select(IReadOnlyList<GrowthVfxChoice> choices, double roll)
+    internal static string? Select(IReadOnlyList<GrowthAnimationChoice> choices, double roll)
     {
         double boundary = 0;
         foreach (var choice in choices)

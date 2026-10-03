@@ -772,7 +772,6 @@ public sealed class Plugin : IDalamudPlugin
                     animationCooldownMilliseconds;
 
                 if (animationCooldownElapsed && settings.EnableDeltaGrowthAnimation &&
-                    Random.Shared.NextDouble() * 100.0 < settings.DeltaGrowthAnimationChancePercent &&
                     TryPlayDeltaGrowthAnimation(actor, settings, false) == null)
                 {
                     charState.LastDeltaGrowthAnimationTick = currentTick;
@@ -1002,7 +1001,7 @@ public sealed class Plugin : IDalamudPlugin
     internal string CrystalVfxStatus(GrowthSettings settings) =>
         GrowthVfxPlayer.SourceStatus(settings.AetherSourceVfxPath, settings.AetherSourceVfxAttached);
 
-    internal unsafe string TestDeltaGrowthVfx(GrowthSettings settings, string? selectedPath = null)
+    internal unsafe string TestDeltaGrowthVfx(GrowthSettings settings)
     {
         var localPlayer = ObjectTable.LocalPlayer;
         if (localPlayer == null)
@@ -1024,7 +1023,7 @@ public sealed class Plugin : IDalamudPlugin
             actor,
             settings,
             true,
-            visibleGrowthMultiplier, selectedPath);
+            visibleGrowthMultiplier);
         return error ?? "Actor-root VFX created. It will be removed after the configured duration.";
     }
 
@@ -1032,17 +1031,14 @@ public sealed class Plugin : IDalamudPlugin
         Character* actor,
         GrowthSettings settings,
         bool ignoreEnabled,
-        float actorGrowthMultiplier,
-        string? selectedPath = null)
+        float actorGrowthMultiplier)
     {
         if (!ignoreEnabled && !settings.EnableDeltaGrowthVfx)
         {
             return "Growth VFX is disabled.";
         }
 
-        string? chosen = selectedPath ?? GrowthVfxChoice.Select(settings.GetGrowthVfxChoices(), Random.Shared.NextDouble());
-        if (chosen == null) return "None selected.";
-        string path = chosen.Trim().Replace('\\', '/');
+        string path = settings.DeltaGrowthVfxPath.Trim().Replace('\\', '/');
         if (path.Length == 0 ||
             path.StartsWith('/') ||
             path.Contains("..", StringComparison.Ordinal) ||
@@ -1065,7 +1061,7 @@ public sealed class Plugin : IDalamudPlugin
             actorGrowthMultiplier);
     }
 
-    internal unsafe string TestDeltaGrowthAnimation(GrowthSettings settings)
+    internal unsafe string TestDeltaGrowthAnimation(GrowthSettings settings, string? selectedPath = null)
     {
         var localPlayer = ObjectTable.LocalPlayer;
         if (localPlayer == null)
@@ -1076,23 +1072,20 @@ public sealed class Plugin : IDalamudPlugin
         string? error = TryPlayDeltaGrowthAnimation(
             (Character*)localPlayer.Address,
             settings,
-            true);
+            true, selectedPath);
         if (error != null)
         {
             return error;
         }
 
-        TryResolveActionTimeline(
-            settings.DeltaGrowthAnimationTmbPath,
-            out ushort actionTimelineId,
-            out _);
-        return $"Animation timeline {actionTimelineId} started locally. No chat command was sent.";
+        return "Animation timeline started locally.";
     }
 
     private unsafe string? TryPlayDeltaGrowthAnimation(
         Character* actor,
         GrowthSettings settings,
-        bool ignoreEnabled)
+        bool ignoreEnabled,
+        string? selectedPath = null)
     {
         if (!ignoreEnabled && !settings.EnableDeltaGrowthAnimation)
         {
@@ -1113,8 +1106,10 @@ public sealed class Plugin : IDalamudPlugin
                    "The growth animation was not allowed to interrupt it.";
         }
 
+        string? chosen = selectedPath ?? GrowthAnimationChoice.Select(settings.GetGrowthAnimationChoices(), Random.Shared.NextDouble());
+        if (chosen == null) return "None selected.";
         if (!TryResolveActionTimeline(
-                settings.DeltaGrowthAnimationTmbPath,
+                chosen,
                 out ushort actionTimelineId,
                 out string error))
         {

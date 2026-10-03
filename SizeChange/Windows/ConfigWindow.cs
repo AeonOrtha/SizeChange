@@ -1259,38 +1259,16 @@ public class ConfigWindow : Window, IDisposable
         if (settings.EnableDeltaGrowthVfx)
         {
 
-            var choices = settings.GetGrowthVfxChoices();
-            ImGui.PushID($"GrowthVfxPool-{id}");
-            for (int i = 0; i < choices.Count; i++)
+            string deltaGrowthVfxPath = settings.DeltaGrowthVfxPath;
+            if (ImGui.InputText(
+                    $"Growth AVFX Path##{id}",
+                    ref deltaGrowthVfxPath,
+                    256))
             {
-                ImGui.PushID(i);
-                var choice = choices[i];
-                string path = choice.Path;
-                if (ImGui.InputText("AVFX Path", ref path, 512))
-                { choice.Path = path; configuration.Save(); }
-                float available = 100f;
-                for (int j = 0; j < choices.Count; j++)
-                    if (j != i) available -= choices[j].ChancePercent;
-                float chance = choice.ChancePercent;
-                if (ImGui.DragFloat("Chance", ref chance, 0.5f, 0f, Math.Max(0f, available), "%.1f%%"))
-                { choice.ChancePercent = Math.Clamp(chance, 0f, Math.Max(0f, available)); configuration.Save(); }
-                if (ImGui.SmallButton("Test"))
-                {
-                    growthVfxTestResult = plugin.TestDeltaGrowthVfx(settings, choice.Path);
-                    growthVfxTestSucceeded = growthVfxTestResult.StartsWith("Actor-root VFX created", StringComparison.Ordinal);
-                }
-                ImGui.SameLine();
-                if (ImGui.SmallButton("Remove"))
-                { choices.RemoveAt(i--); configuration.Save(); }
-                ImGui.PopID();
+                settings.DeltaGrowthVfxPath = deltaGrowthVfxPath;
+                growthVfxTestResult = string.Empty;
+                configuration.Save();
             }
-            float remaining = 100f;
-            foreach (var choice in choices) remaining -= choice.ChancePercent;
-            if (ImGui.Button("+"))
-            { choices.Add(new GrowthVfxChoice { ChancePercent = Math.Max(0f, remaining) }); configuration.Save(); }
-            ImGui.SameLine();
-            ImGui.TextUnformatted($"None: {Math.Max(0f, remaining):0.0}%");
-            ImGui.PopID();
 
             float deltaGrowthVfxDuration =
                 settings.DeltaGrowthVfxDurationSeconds;
@@ -1382,21 +1360,38 @@ public class ConfigWindow : Window, IDisposable
         {
             ImGui.TextDisabled("Local animation. One-shot TMB only.");
 
-            string deltaGrowthAnimationPath = settings.DeltaGrowthAnimationTmbPath;
-            if (ImGui.InputText(
-                    "Growth Animation TMB Path##self",
-                    ref deltaGrowthAnimationPath,
-                    256))
+            var choices = settings.GetGrowthAnimationChoices();
+            ImGui.PushID($"GrowthAnimationPool-{id}");
+            for (int i = 0; i < choices.Count; i++)
             {
-                settings.DeltaGrowthAnimationTmbPath = deltaGrowthAnimationPath;
-                growthAnimationTestResult = string.Empty;
-                configuration.Save();
+                ImGui.PushID(i);
+                var choice = choices[i];
+                string path = choice.Path;
+                if (ImGui.InputText("TMB Path", ref path, 512))
+                { choice.Path = path; configuration.Save(); }
+                float available = 100f;
+                for (int j = 0; j < choices.Count; j++)
+                    if (j != i) available -= choices[j].ChancePercent;
+                float chance = choice.ChancePercent;
+                if (ImGui.DragFloat("Chance", ref chance, 0.5f, 0f, Math.Max(0f, available), "%.1f%%"))
+                { choice.ChancePercent = Math.Clamp(chance, 0f, Math.Max(0f, available)); configuration.Save(); }
+                if (ImGui.SmallButton("Test"))
+                {
+                    growthAnimationTestResult = plugin.TestDeltaGrowthAnimation(settings, choice.Path);
+                    growthAnimationTestSucceeded = growthAnimationTestResult.StartsWith("Animation timeline", StringComparison.Ordinal);
+                }
+                ImGui.SameLine();
+                if (ImGui.SmallButton("Remove"))
+                { choices.RemoveAt(i--); configuration.Save(); }
+                ImGui.PopID();
             }
-
-            float chance = settings.DeltaGrowthAnimationChancePercent;
-            if (ImGui.SliderFloat("Chance per Pulse##self", ref chance, 0f, 100f, "%.1f%%"))
-            { settings.DeltaGrowthAnimationChancePercent = chance; configuration.Save(); }
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Roll once per growth pulse after the cooldown. A failed roll does nothing. Test always plays.");
+            float remaining = 100f;
+            foreach (var choice in choices) remaining -= choice.ChancePercent;
+            if (ImGui.Button("+"))
+            { choices.Add(new GrowthAnimationChoice { ChancePercent = Math.Max(0f, remaining) }); configuration.Save(); }
+            ImGui.SameLine();
+            ImGui.TextUnformatted($"None: {Math.Max(0f, remaining):0.0}%");
+            ImGui.PopID();
 
             float deltaGrowthAnimationCooldown =
                 settings.DeltaGrowthAnimationCooldownSeconds;
