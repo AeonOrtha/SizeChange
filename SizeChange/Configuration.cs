@@ -63,6 +63,7 @@ public class GrowthSettings
     public float DeltaGrowthSoundCooldownSeconds { get; set; } = 1.0f;
     public bool EnableDeltaGrowthVfx { get; set; }
     public string DeltaGrowthVfxPath { get; set; } = string.Empty;
+    public List<string> AdditionalGrowthVfxPaths { get; set; } = new();
     public float DeltaGrowthVfxDurationSeconds { get; set; } = 2.0f;
     public float DeltaGrowthVfxCooldownSeconds { get; set; } = 1.0f;
     public float DeltaGrowthVfxScale { get; set; } = 1.0f;
@@ -138,6 +139,10 @@ public class GrowthSettings
             Math.Clamp(DeltaGrowthSoundCooldownSeconds, 0f, 60f);
         DeltaGrowthVfxPath = DeltaGrowthVfxPath?.Trim().Replace('\\', '/')
             ?? string.Empty;
+        AdditionalGrowthVfxPaths ??= new();
+        if (AdditionalGrowthVfxPaths.Count > 15) AdditionalGrowthVfxPaths.RemoveRange(15, AdditionalGrowthVfxPaths.Count - 15);
+        for (int i = 0; i < AdditionalGrowthVfxPaths.Count; i++)
+            AdditionalGrowthVfxPaths[i] = AdditionalGrowthVfxPaths[i]?.Trim().Replace('\\', '/') ?? string.Empty;
         DeltaGrowthVfxDurationSeconds =
             Math.Clamp(DeltaGrowthVfxDurationSeconds, 0.05f, 300f);
         DeltaGrowthVfxCooldownSeconds =
@@ -214,6 +219,7 @@ public class GrowthSettings
             DeltaGrowthSoundCooldownSeconds = settings.DeltaGrowthSoundCooldownSeconds,
             EnableDeltaGrowthVfx = settings.EnableDeltaGrowthVfx,
             DeltaGrowthVfxPath = settings.DeltaGrowthVfxPath,
+            AdditionalGrowthVfxPaths = new(settings.AdditionalGrowthVfxPaths),
             DeltaGrowthVfxDurationSeconds = settings.DeltaGrowthVfxDurationSeconds,
             DeltaGrowthVfxCooldownSeconds = settings.DeltaGrowthVfxCooldownSeconds,
             DeltaGrowthVfxScale = settings.DeltaGrowthVfxScale,

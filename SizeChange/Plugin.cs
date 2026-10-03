@@ -100,6 +100,8 @@ public sealed class Plugin : IDalamudPlugin
     private readonly GrowthSoundPlayer GrowthSoundPlayer;
     internal readonly HeartbeatSoundPlayer HeartbeatSound = new(new HeartbeatScdVoice(), new HeartbeatScdVoice(), new HeartbeatScdVoice());
     private readonly GrowthVfxPlayer GrowthVfxPlayer;
+    private readonly DrainProjectilePlayer drainProjectiles;
+    internal string DrainProjectileStatus => GrowthVfxPlayer.ProjectileStatus;
     internal BoneHeartbeatPlayer BoneHeartbeat { get; }
     private float TrackedActorRefreshElapsed = TrackedActorRefreshIntervalSeconds;
     private bool TrackedActorRefreshRequested = true;
@@ -114,6 +116,7 @@ public sealed class Plugin : IDalamudPlugin
 
         GrowthSoundPlayer = new GrowthSoundPlayer();
         GrowthVfxPlayer = new GrowthVfxPlayer();
+        drainProjectiles = new DrainProjectilePlayer(GrowthVfxPlayer);
         BoneHeartbeat = new BoneHeartbeatPlayer(new CustomizeHeartbeatApi(PluginInterface));
 
         ConfigWindow = new ConfigWindow(this);
@@ -142,6 +145,7 @@ public sealed class Plugin : IDalamudPlugin
         aetherSound.Dispose();
         BoneHeartbeat.Dispose();
         RestoreCharacterTransforms();
+        drainProjectiles.Clear();
         GrowthVfxPlayer.Dispose();
         GrowthSoundPlayer.Dispose();
 
@@ -252,6 +256,7 @@ public sealed class Plugin : IDalamudPlugin
 
     private unsafe void OnFrameworkUpdate(IFramework framework)
     {
+        drainProjectiles.BeginFrame();
         GrowthVfxPlayer.BeginProximityFrame((float)Framework.UpdateDelta.TotalSeconds);
         aetherSound.BeginFrame((float)Framework.UpdateDelta.TotalSeconds);
         GrowthVfxPlayer.Update();
@@ -267,6 +272,7 @@ public sealed class Plugin : IDalamudPlugin
         var localPlayer = ObjectTable.LocalPlayer;
         if (localPlayer == null || !ClientState.IsLoggedIn)
         {
+            drainProjectiles.Clear();
             GrowthVfxPlayer.EndProximityFrame(true);
             aetherSound.EndFrame();
             selfPreview.Enabled = playerPreview.Enabled = monsterPreview.Enabled = false;
@@ -425,6 +431,8 @@ public sealed class Plugin : IDalamudPlugin
                 globallyDisabled,
                 inCombat);
         }
+        drainProjectiles.EndFrame(deltaSeconds, globallyDisabled || localPlayer.CurrentHp == 0 ||
+            Condition[ConditionFlag.BetweenAreas] || Condition[ConditionFlag.BetweenAreas51]);
         GrowthVfxPlayer.EndProximityFrame(globallyDisabled || Condition[ConditionFlag.BetweenAreas] || Condition[ConditionFlag.BetweenAreas51]);
         aetherSound.EndFrame();
     }
@@ -606,6 +614,9 @@ public sealed class Plugin : IDalamudPlugin
             charState.DrainContributors.Filter(charState.DrainHits, settings.SizeDrain,
                 Environment.TickCount64 / 1000.0, Random.Shared.NextDouble);
         else charState.DrainContributors.Clear();
+        if (nearbyTargets != null)
+            drainProjectiles.SetReceiver((nint)actor, actor->EntityId,
+                new System.Numerics.Vector3(position.X, position.Y, position.Z), settings.SizeDrain);
         int drainCount = nearbyTargets?.Count ?? 0;
         charState.NearbyDrainSources = drainCount;
         if (drainCount > 0)
@@ -659,7 +670,11 @@ public sealed class Plugin : IDalamudPlugin
             if (nearbyCrystals != null)
                 foreach (var hit in nearbyCrystals) Accumulate(hit.Ratio, true);
             if (nearbyTargets != null)
-                foreach (var hit in nearbyTargets) Accumulate(hit.Ratio, true);
+                foreach (var hit in nearbyTargets)
+                {
+                    Accumulate(hit.Ratio, true);
+                    drainProjectiles.Launch((nint)actor, actor->EntityId, hit.Target.Position);
+                }
         }
 
         if (!settings.GrowthFromDelta || disable)
@@ -1038,27 +1053,29 @@ public sealed class Plugin : IDalamudPlugin
             return "Growth VFX is disabled.";
         }
 
-        string path = settings.DeltaGrowthVfxPath.Trim().Replace('\\', '/');
-        if (path.Length == 0 ||
-            path.StartsWith('/') ||
-            path.Contains("..", StringComparison.Ordinal) ||
-            !path.EndsWith(".avfx", StringComparison.OrdinalIgnoreCase))
+        var paths = new List<string>();
+        if (!string.IsNullOrWhiteSpace(settings.DeltaGrowthVfxPath)) paths.Add(settings.DeltaGrowthVfxPath);
+        foreach (var extra in settings.AdditionalGrowthVfxPaths)
+            if (!string.IsNullOrWhiteSpace(extra) && paths.Count < 16) paths.Add(extra);
+        if (paths.Count == 0) return "Enter an AVFX path.";
+        for (int i = 0; i < paths.Count; i++)
         {
-            return "Invalid path: use a game resource path ending in .avfx.";
+            string path = paths[i].Trim().Replace('\\', '/');
+            if (path.StartsWith('/') || path.Contains("..", StringComparison.Ordinal) ||
+                !path.EndsWith(".avfx", StringComparison.OrdinalIgnoreCase))
+                return $"Layer {i + 1}: invalid AVFX path.";
+            if (!DataManager.FileExists(path)) return $"Layer {i + 1}: AVFX not found: {path}";
+            paths[i] = path;
         }
-
-        if (!DataManager.FileExists(path))
+        string? firstError = null;
+        for (int i = 0; i < paths.Count; i++)
         {
-            return $"AVFX was not found in the game data: {path}";
+            string? error = GrowthVfxPlayer.TryPlay((nint)actor, paths[i],
+                settings.DeltaGrowthVfxDurationSeconds, settings.DeltaGrowthVfxScale,
+                settings.DeltaGrowthVfxScaleWithActor, actorGrowthMultiplier, i);
+            firstError ??= error;
         }
-
-        return GrowthVfxPlayer.TryPlay(
-            (nint)actor,
-            path,
-            settings.DeltaGrowthVfxDurationSeconds,
-            settings.DeltaGrowthVfxScale,
-            settings.DeltaGrowthVfxScaleWithActor,
-            actorGrowthMultiplier);
+        return firstError;
     }
 
     internal unsafe string TestDeltaGrowthAnimation(GrowthSettings settings, string? selectedPath = null)
