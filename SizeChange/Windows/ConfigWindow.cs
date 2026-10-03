@@ -797,11 +797,14 @@ public class ConfigWindow : Window, IDisposable
                 float receiverHeight = settings.ProjectileReceiverHeight;
                 if (ImGui.DragFloat("Receiver Height", ref receiverHeight, .05f, -10f, 100f, "%.2f"))
                 { settings.ProjectileReceiverHeight = receiverHeight; configuration.SaveSizeDrain(settings); }
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Aim height at normal size. Follows visible growth, overshoot and SizeChange's height adjustment for travel and impact.");
                 int maximum = settings.MaximumProjectiles;
                 if (ImGui.SliderInt("Maximum Projectiles", ref maximum, 1, 64))
                 { settings.MaximumProjectiles = maximum; configuration.SaveSizeDrain(settings); }
                 if (ImGui.IsItemHovered()) ImGui.SetTooltip("Per receiver, including launch/impact lifetimes. Skipped visuals still grant growth. A shared 128-effect budget covers all projectile stages and profiles.");
-                if (plugin.DrainProjectileStatus.Length > 0) ImGui.TextWrapped(plugin.DrainProjectileStatus);
+                ImGui.TextWrapped(plugin.DrainProjectileStatus);
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Session counters across all profiles. Created confirms a native object, not visible particles. Errors persist until reset.");
+                if (ImGui.SmallButton("Reset Status")) plugin.ResetDrainProjectileDiagnostics();
                 ImGui.TreePop();
             }
             // Keep these controls in a stable layout before and after enabling.

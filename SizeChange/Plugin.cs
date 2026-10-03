@@ -101,7 +101,11 @@ public sealed class Plugin : IDalamudPlugin
     internal readonly HeartbeatSoundPlayer HeartbeatSound = new(new HeartbeatScdVoice(), new HeartbeatScdVoice(), new HeartbeatScdVoice());
     private readonly GrowthVfxPlayer GrowthVfxPlayer;
     private readonly DrainProjectilePlayer drainProjectiles;
-    internal string DrainProjectileStatus => GrowthVfxPlayer.ProjectileStatus;
+    internal string DrainProjectileStatus =>
+        $"Drain launches: {drainProjectiles.LaunchRequests} | Active: {drainProjectiles.ActiveCount} | Skipped: {drainProjectiles.BudgetSkipped}\n" +
+        GrowthVfxPlayer.ProjectileStatus;
+    internal void ResetDrainProjectileDiagnostics()
+    { drainProjectiles.ResetDiagnostics(); GrowthVfxPlayer.ResetProjectileDiagnostics(); }
     internal BoneHeartbeatPlayer BoneHeartbeat { get; }
     private float TrackedActorRefreshElapsed = TrackedActorRefreshIntervalSeconds;
     private bool TrackedActorRefreshRequested = true;
@@ -914,6 +918,13 @@ public sealed class Plugin : IDalamudPlugin
         {
             ApplyHeightOffset(actor, ref charState, desiredHeightOffset);
         }
+
+        // Publish this frame's final visible height after growth/overshoot and
+        // height adjustment, before the projectile module advances its effects.
+        if (nearbyTargets != null)
+            drainProjectiles.SetReceiver((nint)actor, actor->EntityId,
+                new System.Numerics.Vector3(position.X, position.Y, position.Z), settings.SizeDrain,
+                visibleScaleMultiplier, desiredHeightOffset);
 
         charState.PreviousHealth = health;
         charState.PreviousScale = scale;

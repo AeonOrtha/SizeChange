@@ -49,7 +49,11 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable, IDrainProjectileVfx
     private readonly Hook<StaticVfxRemoveDelegate>? staticVfxRemoveHook = null;
     private readonly Dictionary<long, nint> projectileAddresses = new();
     private long nextProjectileId;
-    internal string ProjectileStatus { get; private set; } = string.Empty;
+    private string projectileError = string.Empty;
+    private long projectileAttempts, projectileCreated;
+    internal string ProjectileStatus => $"VFX requests: {projectileAttempts} | Created: {projectileCreated} | Live: {projectileAddresses.Count}" +
+        (projectileError.Length > 0 ? "\n" + projectileError : string.Empty);
+    internal void ResetProjectileDiagnostics() { projectileAttempts = projectileCreated = 0; projectileError = string.Empty; }
     private float proximityDelta;
     private readonly HashSet<(nint Actor, int Channel)> proximityRequested = new();
     private readonly Dictionary<(nint Actor, int Channel), (string Path, long At)> retryAfter = new();
@@ -183,13 +187,14 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable, IDrainProjectileVfx
     public long CreateProjectile(string path, System.Numerics.Vector3 position, float scale)
     {
         path = path.Trim().Replace('\\', '/');
-        if (!IsValidProximityPath(path)) { ProjectileStatus = "AVFX invalid or missing."; return 0; }
+        projectileAttempts++;
+        if (!IsValidProximityPath(path)) { projectileError = $"AVFX invalid or missing: {path}"; return 0; }
         if (staticVfxRun == null || staticVfxRemoveHook == null)
-        { ProjectileStatus = "World VFX unavailable."; return 0; }
+        { projectileError = "World VFX unavailable."; return 0; }
         if (projectileAddresses.Count >= DrainProjectilePlayer.GlobalMaximum)
-        { ProjectileStatus = "Visual budget reached."; return 0; }
+        { projectileError = "Visual budget reached."; return 0; }
         var vfx = VfxObject.Create(path, "Client.System.Scheduler.Instance.VfxObject");
-        if (vfx == null) { ProjectileStatus = "VFX creation failed."; return 0; }
+        if (vfx == null) { projectileError = $"VFX creation failed: {path}"; return 0; }
         long id = ++nextProjectileId;
         vfx->Rotation = FFXIVClientStructs.FFXIV.Common.Math.Quaternion.Identity;
         vfx->Scale = new Vector3(scale, scale, scale);
@@ -201,8 +206,15 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable, IDrainProjectileVfx
         };
         projectileAddresses[id] = (nint)vfx;
         staticVfxRun(vfx, 0f, 0xFFFFFFFF);
-        ProjectileStatus = string.Empty;
-        return projectileAddresses.ContainsKey(id) ? id : 0;
+        if (!projectileAddresses.ContainsKey(id))
+        { projectileError = $"Effect ended during startup: {path}"; return 0; }
+        // Playback initialization can reset transforms. Match VFXEditor's
+        // order: start the static effect, then set and update its transform.
+        vfx->Rotation = FFXIVClientStructs.FFXIV.Common.Math.Quaternion.Identity;
+        vfx->Scale = new Vector3(scale, scale, scale);
+        SetSourcePosition(vfx, new Vector3(position.X, position.Y, position.Z));
+        projectileCreated++;
+        return id;
     }
     public bool MoveProjectile(long id, System.Numerics.Vector3 position)
     {

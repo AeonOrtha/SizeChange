@@ -23,7 +23,7 @@ internal sealed class DrainProjectilePlayer(IDrainProjectileVfx vfx)
         public long Travel, Launch, Impact;
         public Receiver Receiver;
         public Vector3 Start;
-        public float Age, ArrivalAge, Duration, LaunchDuration, ImpactDuration, Scale, Height;
+        public float Age, ArrivalAge, Duration, LaunchDuration, ImpactDuration, Scale;
         public string ImpactPath = string.Empty;
         public bool Arrived;
     }
@@ -31,25 +31,38 @@ internal sealed class DrainProjectilePlayer(IDrainProjectileVfx vfx)
     private readonly Dictionary<Receiver, Destination> receivers = new();
     private readonly Dictionary<Receiver, int> counts = new();
     public int ActiveCount => flights.Count;
+    public long LaunchRequests { get; private set; }
+    public long BudgetSkipped { get; private set; }
+    public void ResetDiagnostics() { LaunchRequests = BudgetSkipped = 0; }
     public void BeginFrame() => receivers.Clear();
-    public void SetReceiver(nint address, uint entityId, Vector3 position, SizeDrainSettings settings)
+    public void SetReceiver(nint address, uint entityId, Vector3 position, SizeDrainSettings settings,
+        float visibleScale = 1f, float heightAdjustment = 0f)
     {
         if (settings.ProjectileEnabled && Finite(position))
-            receivers[new(address, entityId)] = new(position, settings);
+            receivers[new(address, entityId)] = new(
+                ReceiverPosition(position, settings.ProjectileReceiverHeight, visibleScale, heightAdjustment), settings);
+    }
+    internal static Vector3 ReceiverPosition(Vector3 position, float normalHeight, float visibleScale, float heightAdjustment)
+    {
+        float scale = float.IsFinite(visibleScale) && visibleScale > 0f ? visibleScale : 1f;
+        position.Y += normalHeight * scale + (float.IsFinite(heightAdjustment) ? heightAdjustment : 0f);
+        return position;
     }
     public void Launch(nint address, uint entityId, Vector3 source)
     {
         var receiver = new Receiver(address, entityId);
         if (!receivers.TryGetValue(receiver, out var destination) || !Finite(source)) return;
+        LaunchRequests++;
         var s = destination.Settings;
-        if (flights.Count >= GlobalMaximum || counts.GetValueOrDefault(receiver) >= s.MaximumProjectiles) return;
+        if (flights.Count >= GlobalMaximum || counts.GetValueOrDefault(receiver) >= s.MaximumProjectiles)
+        { BudgetSkipped++; return; }
         if (string.IsNullOrWhiteSpace(s.ProjectilePath) && string.IsNullOrWhiteSpace(s.ProjectileLaunchPath) &&
             string.IsNullOrWhiteSpace(s.ProjectileImpactPath)) return;
         source.Y += s.ProjectileSourceHeight;
         var flight = new Flight {
             Receiver = receiver, Start = source, Duration = s.ProjectileTravelSeconds,
             LaunchDuration = s.ProjectileLaunchSeconds, ImpactDuration = s.ProjectileImpactSeconds,
-            ImpactPath = s.ProjectileImpactPath, Scale = s.ProjectileScale, Height = s.ProjectileReceiverHeight,
+            ImpactPath = s.ProjectileImpactPath, Scale = s.ProjectileScale,
             Travel = Create(s.ProjectilePath, source, s.ProjectileScale),
             Launch = Create(s.ProjectileLaunchPath, source, s.ProjectileScale)
         };
@@ -72,7 +85,6 @@ internal sealed class DrainProjectilePlayer(IDrainProjectileVfx vfx)
             {
                 f.Age += seconds;
                 var target = destination.Position;
-                target.Y += f.Height;
                 if (f.Age >= f.LaunchDuration) Remove(ref f.Launch);
                 if (!f.Arrived)
                 {
