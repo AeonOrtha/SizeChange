@@ -17,6 +17,15 @@ public sealed class SizeDrainSettings
     public float ContributorMaximumSeconds { get; set; } = 15f;
     public List<string> Names { get; set; } = new();
     public float Range { get; set; } = 10f;
+    public bool SizeDrivenRange { get; set; }
+    public float RangePerScale { get; set; } = 2f;
+    public float MaximumRange { get; set; } = 30f;
+    public bool ExposureBuildup { get; set; }
+    public float ExposureSeconds { get; set; } = 5f;
+    public bool LingeringCorruption { get; set; }
+    public float LingerSeconds { get; set; } = 5f;
+    internal float EffectiveRange(float size) => SizeDrivenRange
+        ? Math.Min(Math.Max(Range, MaximumRange), Range + Math.Max(0f, size - 1f) * RangePerScale) : Range;
     public float PeakHitPercent { get; set; } = 0.4f;
     public bool ReceiverVfxEnabled { get; set; }
     public string ReceiverVfxPath { get; set; } = string.Empty;
@@ -30,6 +39,10 @@ public sealed class SizeDrainSettings
         Names = (Names ?? new()).Where(n => !string.IsNullOrWhiteSpace(n))
             .Select(n => n.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         Range = float.IsFinite(Range) ? Math.Clamp(Range, 0.1f, 100f) : 10f;
+        RangePerScale = float.IsFinite(RangePerScale) ? Math.Clamp(RangePerScale, 0f, 100f) : 2f;
+        MaximumRange = float.IsFinite(MaximumRange) ? Math.Clamp(MaximumRange, Range, 100f) : Math.Max(Range, 30f);
+        ExposureSeconds = float.IsFinite(ExposureSeconds) ? Math.Clamp(ExposureSeconds, 0.1f, 300f) : 5f;
+        LingerSeconds = float.IsFinite(LingerSeconds) ? Math.Clamp(LingerSeconds, 0.1f, 300f) : 5f;
         PeakHitPercent = float.IsFinite(PeakHitPercent) ? Math.Clamp(PeakHitPercent, 0f, 100f) : 0.4f;
         ContributorChancePercent = float.IsFinite(ContributorChancePercent) ? Math.Clamp(ContributorChancePercent, 0f, 100f) : 10f;
         ContributorRetrySeconds = float.IsFinite(ContributorRetrySeconds) ? Math.Clamp(ContributorRetrySeconds, 0.1f, 300f) : 5f;

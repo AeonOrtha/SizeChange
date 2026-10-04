@@ -14,6 +14,8 @@ public sealed class HeartbeatBone
 {
     public string Name { get; set; } = string.Empty;
     public float Strength { get; set; } = 0.05f;
+    public float? GrowthPerScale { get; set; }
+    public float? GrowthLimit { get; set; }
     // Runtime-only offset resolved from the selected chain, measured in cycles.
     internal double DelayCycles { get; set; }
     internal float GrowthOffset { get; set; }
@@ -52,7 +54,7 @@ public sealed class BoneHeartbeatSettings
                 if (targets[i].Name == name)
                 {
                     targets[i].Strength = amount;
-                    if (replaceGrowth) targets[i].GrowthOffset = growth;
+                    targets[i].GrowthOffset = replaceGrowth ? growth : Math.Max(targets[i].GrowthOffset, growth);
                     return;
                 }
             if (count == targets.Count) targets.Add(new HeartbeatBone());
@@ -71,11 +73,16 @@ public sealed class BoneHeartbeatSettings
                 ? BoneHeartbeatMath.GrowthOffset(settledScale, chain.GrowthPerScale, chain.GrowthLimit) : 0f;
             foreach (var bone in definition.Bones)
                 Add(bone.Name, chain.Enabled ? chain.Strength : 0f, bone.Depth * step, growth);
+            if (chain.GrowthEnabled && chain.FullGrowthChain)
+                foreach (var bone in HeartbeatChains.GrowthExtras(definition.Id))
+                    Add(bone.Name, 0f, 0, growth);
         }
-        float customGrowth = CustomGrowthEnabled
-            ? BoneHeartbeatMath.GrowthOffset(settledScale, CustomGrowthPerScale, CustomGrowthLimit) : 0f;
         foreach (var bone in Bones)
-            Add(bone.Name, bone.Strength, 0, customGrowth, CustomGrowthEnabled);
+        {
+            float growth = CustomGrowthEnabled ? BoneHeartbeatMath.GrowthOffset(settledScale,
+                bone.GrowthPerScale ?? CustomGrowthPerScale, bone.GrowthLimit ?? CustomGrowthLimit) : 0f;
+            Add(bone.Name, bone.Strength, 0, growth, CustomGrowthEnabled);
+        }
         if (count < targets.Count) targets.RemoveRange(count, targets.Count - count);
     }
 
@@ -109,6 +116,8 @@ public sealed class BoneHeartbeatSettings
         {
             if (bone == null) return true;
             bone.Name = bone.Name?.Trim() ?? string.Empty;
+            bone.GrowthPerScale = float.IsFinite(bone.GrowthPerScale ?? CustomGrowthPerScale) ? Math.Clamp(bone.GrowthPerScale ?? CustomGrowthPerScale, 0f, 5f) : 0.1f;
+            bone.GrowthLimit = float.IsFinite(bone.GrowthLimit ?? CustomGrowthLimit) ? Math.Clamp(bone.GrowthLimit ?? CustomGrowthLimit, 0f, 5f) : 0.4f;
             bone.Strength = float.IsFinite(bone.Strength) ? Math.Clamp(bone.Strength, 0f, 5f) : 0.05f;
             return bone.Name.Length == 0 ||
                 bone.Name.Equals("n_root", StringComparison.OrdinalIgnoreCase) || !names.Add(bone.Name);

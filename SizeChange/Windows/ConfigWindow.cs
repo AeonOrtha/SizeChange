@@ -208,22 +208,6 @@ public class ConfigWindow : Window, IDisposable
                 settings.CustomGrowthEnabled = customGrowth;
                 configuration.Save();
             }
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Shared growth for every custom bone. Replaces matching chain growth.");
-            if (settings.CustomGrowthEnabled)
-            {
-                float rate = settings.CustomGrowthPerScale;
-                if (ImGui.DragFloat("Growth per 1x##custom-bones", ref rate, 0.005f, 0f, 5f, "%.3f"))
-                {
-                    settings.CustomGrowthPerScale = Math.Clamp(rate, 0f, 5f);
-                    configuration.Save();
-                }
-                float limit = settings.CustomGrowthLimit;
-                if (ImGui.DragFloat("Growth Limit##custom-bones", ref limit, 0.005f, 0f, 5f, "%.3f"))
-                {
-                    settings.CustomGrowthLimit = Math.Clamp(limit, 0f, 5f);
-                    configuration.Save();
-                }
-            }
             bool add = ImGui.InputText("Bone Name", ref heartbeatBoneInput, 128, ImGuiInputTextFlags.EnterReturnsTrue);
             ImGui.SameLine();
             add |= ImGui.Button("Add Bone");
@@ -236,7 +220,7 @@ public class ConfigWindow : Window, IDisposable
                 else if (settings.Bones.Exists(bone => bone.Name == name)) heartbeatInputError = "Bone already listed.";
                 else
                 {
-                    settings.Bones.Add(new HeartbeatBone { Name = name });
+                    settings.Bones.Add(new HeartbeatBone { Name = name, GrowthPerScale = settings.CustomGrowthPerScale, GrowthLimit = settings.CustomGrowthLimit });
                     heartbeatBoneInput = string.Empty;
                     heartbeatInputError = string.Empty;
                     configuration.Save();
@@ -255,6 +239,16 @@ public class ConfigWindow : Window, IDisposable
                 }
                 ImGui.SameLine();
                 bool remove = ImGui.Button("Remove");
+                if (settings.CustomGrowthEnabled)
+                {
+                    float rate = bone.GrowthPerScale ?? settings.CustomGrowthPerScale;
+                    if (ImGui.DragFloat("Growth per 1x", ref rate, 0.005f, 0f, 5f, "%.3f"))
+                    { bone.GrowthPerScale = Math.Clamp(rate, 0f, 5f); configuration.Save(); }
+                    float limit = bone.GrowthLimit ?? settings.CustomGrowthLimit;
+                    if (ImGui.DragFloat("Maximum Growth", ref limit, 0.005f, 0f, 5f, "%.3f"))
+                    { bone.GrowthLimit = Math.Clamp(limit, 0f, 5f); configuration.Save(); }
+                    if (ImGui.IsItemHovered()) ImGui.SetTooltip("Maximum extra scale on this bone. Pulse is added on top.");
+                }
                 ImGui.PopID();
                 if (remove)
                 {
@@ -282,11 +276,11 @@ public class ConfigWindow : Window, IDisposable
         { settings.BreathsPerMinute = speed; configuration.Save(); }
         if (ImGui.IsItemHovered()) ImGui.SetTooltip("Opening and closing speed, excluding the pause.");
         float holdOpen = settings.HoldOpenSeconds;
-        if (ImGui.SliderFloat("Hold Open (s)##jaw", ref holdOpen, 0f, 10f, "%.2f"))
+        if (ImGui.SliderFloat("Open Hold (s)##jaw", ref holdOpen, 0f, 10f, "%.2f"))
         { settings.HoldOpenSeconds = holdOpen; configuration.Save(); }
         if (ImGui.IsItemHovered()) ImGui.SetTooltip("Wait fully open before closing.");
         float pause = settings.PauseSeconds;
-        if (ImGui.SliderFloat("Cycle Pause (s)##jaw", ref pause, 0f, 10f, "%.2f"))
+        if (ImGui.SliderFloat("Closed Hold (s)##jaw", ref pause, 0f, 10f, "%.2f"))
         { settings.PauseSeconds = pause; configuration.Save(); }
         if (ImGui.IsItemHovered()) ImGui.SetTooltip("Hold the original closed position between cycles. Zero disables the pause.");
         float angle = settings.OpeningDegrees;
@@ -410,6 +404,15 @@ public class ConfigWindow : Window, IDisposable
             }
             if (chain != null && chain.GrowthEnabled)
             {
+                if (definition.Id is "clavicles" or "torso")
+                {
+                    bool full = chain.FullGrowthChain;
+                    if (ImGui.Checkbox("Full Chain", ref full))
+                    { chain.FullGrowthChain = full; configuration.Save(); }
+                    if (ImGui.IsItemHovered()) ImGui.SetTooltip(definition.Id == "clavicles"
+                        ? "Also grows wrists, hands and fingers. Pulse membership stays unchanged."
+                        : "Also grows the pelvis, through all three spine bones. Pulse membership stays unchanged.");
+                }
                 float rate = chain.GrowthPerScale;
                 if (ImGui.DragFloat("Growth per 1x", ref rate, 0.005f, 0f, 5f, "%.3f"))
                 {
@@ -696,6 +699,41 @@ public class ConfigWindow : Window, IDisposable
             error);
     }
 
+    private void DrawAccumulatingEffects(AccumulatingEffectSettings settings)
+    {
+        if (!ImGui.TreeNode("Accumulating Effects")) return;
+        bool enabled = settings.Enabled;
+        if (ImGui.Checkbox("Enable Layers", ref enabled)) { settings.Enabled = enabled; configuration.Save(); }
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Receiver AVFX while growth is pending, from any source. Use looping effects.");
+        for (int i = 0; i < settings.Paths.Count; i++)
+        {
+            ImGui.PushID(i);
+            string path = settings.Paths[i];
+            if (ImGui.InputText("AVFX", ref path, 512)) { settings.Paths[i] = path; configuration.Save(); }
+            ImGui.SameLine();
+            if (ImGui.SmallButton("Remove")) { settings.Paths.RemoveAt(i--); configuration.Save(); }
+            ImGui.PopID();
+        }
+        ImGui.BeginDisabled(settings.Paths.Count >= 16);
+        if (ImGui.Button("+ Layer")) { settings.Paths.Add(string.Empty); configuration.Save(); }
+        ImGui.EndDisabled();
+        float fadeIn = settings.FadeIn, fadeOut = settings.FadeOut;
+        if (ImGui.DragFloat("Fade In (s)", ref fadeIn, 0.05f, 0f, 10f, "%.2f"))
+        { settings.FadeIn = fadeIn; configuration.Save(); }
+        if (ImGui.DragFloat("Fade Out (s)", ref fadeOut, 0.05f, 0f, 10f, "%.2f"))
+        { settings.FadeOut = fadeOut; configuration.Save(); }
+        bool afterglow = settings.Afterglow;
+        if (ImGui.Checkbox("Afterglow", ref afterglow)) { settings.Afterglow = afterglow; configuration.Save(); }
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Keeps these effects and Self's enabled bone heartbeat active briefly after absorption or growth. Adds no growth.");
+        if (afterglow)
+        {
+            float seconds = settings.AfterglowSeconds;
+            if (ImGui.DragFloat("Afterglow (s)", ref seconds, 0.1f, 0f, 60f, "%.1f"))
+            { settings.AfterglowSeconds = seconds; configuration.Save(); }
+        }
+        ImGui.TreePop();
+    }
+
     private void DrawSizeDrain(SizeDrainSettings settings, string id)
     {
         ImGui.PushID($"SizeDrain{id}");
@@ -755,11 +793,43 @@ public class ConfigWindow : Window, IDisposable
                 float maximum = settings.ContributorMaximumSeconds;
                 if (ImGui.DragFloat("Maximum Duration (s)", ref maximum, 0.1f, settings.ContributorMinimumSeconds, 300f, "%.1f"))
                 { settings.ContributorMaximumSeconds = maximum; configuration.SaveSizeDrain(settings); }
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Duration is chosen on activation. Leaving range ends the contribution; multiple sources can overlap.");
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Duration is chosen on activation. Leaving range ends contribution unless lingering is enabled. Multiple sources can overlap.");
             }
             float range = settings.Range;
             if (ImGui.DragFloat("Range", ref range, 0.1f, 0.1f, 100f, "%.1f"))
             { settings.Range = Math.Clamp(range, 0.1f, 100f); configuration.SaveSizeDrain(settings); }
+            bool sizeRange = settings.SizeDrivenRange;
+            if (ImGui.Checkbox("Range Grows With Size", ref sizeRange))
+            { settings.SizeDrivenRange = sizeRange; configuration.SaveSizeDrain(settings); }
+            if (sizeRange)
+            {
+                float gain = settings.RangePerScale, maximum = settings.MaximumRange;
+                if (ImGui.DragFloat("Range per 1x", ref gain, 0.1f, 0f, 100f, "%.1f"))
+                { settings.RangePerScale = gain; configuration.SaveSizeDrain(settings); }
+                if (ImGui.DragFloat("Maximum Range", ref maximum, 0.1f, settings.Range, 100f, "%.1f"))
+                { settings.MaximumRange = maximum; configuration.SaveSizeDrain(settings); }
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Based on settled size, excluding overshoot. Limited to loaded entities.");
+            }
+            bool exposure = settings.ExposureBuildup;
+            if (ImGui.Checkbox("Exposure Buildup", ref exposure))
+            { settings.ExposureBuildup = exposure; configuration.SaveSizeDrain(settings); }
+            if (exposure)
+            {
+                float seconds = settings.ExposureSeconds;
+                if (ImGui.DragFloat("Exposure Time (s)", ref seconds, 0.1f, 0.1f, 300f, "%.1f"))
+                { settings.ExposureSeconds = seconds; configuration.SaveSizeDrain(settings); }
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Time at the source before contribution can begin. Up to 4x longer at range edge. Random rolls start after exposure. Leaving range resets buildup.");
+            }
+            bool linger = settings.LingeringCorruption;
+            if (ImGui.Checkbox("Lingering Corruption", ref linger))
+            { settings.LingeringCorruption = linger; configuration.SaveSizeDrain(settings); }
+            if (linger)
+            {
+                float seconds = settings.LingerSeconds;
+                if (ImGui.DragFloat("Linger Time (s)", ref seconds, 0.1f, 0.1f, 300f, "%.1f"))
+                { settings.LingerSeconds = seconds; configuration.SaveSizeDrain(settings); }
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Contribution fades after leaving range. Ends on expiry, death or despawn. Still occupies a target slot.");
+            }
             float peak = settings.PeakHitPercent;
             if (ImGui.DragFloat("Peak Hit", ref peak, 0.01f, 0f, 100f, "%.2f%% HP"))
             { settings.PeakHitPercent = Math.Clamp(peak, 0f, 100f); configuration.SaveSizeDrain(settings); }
@@ -869,6 +939,9 @@ public class ConfigWindow : Window, IDisposable
 
         if (!settings.GrowthFromDelta) return;
 
+        ImGui.PushID("accumulation-" + id);
+        DrawAccumulatingEffects(settings.AccumulatingEffects);
+        ImGui.PopID();
         DrawSizeDrain(settings.SizeDrain, id);
 
         bool aetherGrowth = settings.AetherProximityGrowth;

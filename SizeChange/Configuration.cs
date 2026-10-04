@@ -39,6 +39,7 @@ public class GrowthSettings
     public bool LimitDeltaGrowth { get; set; }
     public float DeltaMaxScaleMultiplier { get; set; } = 5.0f;
     public float AccumulatorDelaySeconds { get; set; }
+    public AccumulatingEffectSettings AccumulatingEffects { get; set; } = new();
     public float GrowthOvershootSmallBoost { get; set; } = 5f;
     public float GrowthOvershootBoostRangePercent { get; set; } = 5f;
     public float GrowthOvershootPercent { get; set; }
@@ -139,6 +140,8 @@ public class GrowthSettings
             Math.Clamp(DeltaGrowthSoundCooldownSeconds, 0f, 60f);
         DeltaGrowthVfxPath = DeltaGrowthVfxPath?.Trim().Replace('\\', '/')
             ?? string.Empty;
+        AccumulatingEffects ??= new();
+        AccumulatingEffects.Validate();
         AdditionalGrowthVfxPaths ??= new();
         if (AdditionalGrowthVfxPaths.Count > 15) AdditionalGrowthVfxPaths.RemoveRange(15, AdditionalGrowthVfxPaths.Count - 15);
         for (int i = 0; i < AdditionalGrowthVfxPaths.Count; i++)
@@ -220,6 +223,7 @@ public class GrowthSettings
             EnableDeltaGrowthVfx = settings.EnableDeltaGrowthVfx,
             DeltaGrowthVfxPath = settings.DeltaGrowthVfxPath,
             AdditionalGrowthVfxPaths = new(settings.AdditionalGrowthVfxPaths),
+            AccumulatingEffects = AccumulatingEffectSettings.CopyOf(settings.AccumulatingEffects),
             DeltaGrowthVfxDurationSeconds = settings.DeltaGrowthVfxDurationSeconds,
             DeltaGrowthVfxCooldownSeconds = settings.DeltaGrowthVfxCooldownSeconds,
             DeltaGrowthVfxScale = settings.DeltaGrowthVfxScale,

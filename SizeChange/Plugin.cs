@@ -40,6 +40,8 @@ struct SCCharacterState
     public AetherGrowthState Aether;
     public int NearbyAetherSources;
     public int NearbyDrainSources;
+    public GrowthAfterglow Afterglow;
+    public bool AfterglowActive;
     public List<SizeDrainSources.Hit>? DrainHits;
     public RandomDrainContributors? DrainContributors;
     public List<AetherSources.Hit>? AetherHits;
@@ -340,7 +342,7 @@ public sealed class Plugin : IDalamudPlugin
             !globallyDisabled && Configuration.AffectSelf && localActor->Health > 0 &&
                 localActor->DrawObject != null && !Condition[ConditionFlag.BetweenAreas] &&
                 !Condition[ConditionFlag.BetweenAreas51],
-            accumulating,
+            accumulating || (boneGrowthState.AfterglowActive && !boneGrowthState.Transform.ScaleConflict),
             deltaSeconds,
             accumulating || (TryGetCharacterState(localActor, out var jawState) &&
                 (jawState.OvershootPulse.IsActive || jawState.PreviousScale > scaleBeforeUpdate + 0.00001f)),
@@ -600,7 +602,7 @@ public sealed class Plugin : IDalamudPlugin
         var nearbyTargets = settings.GrowthFromDelta && settings.SizeDrain.Enabled && !disable &&
             (actor->Health > 0 || aetherWithoutHp) && settings.MaximumHealthLossRatioPerTrigger > 0f && settings.DeltaGrowthMultiplier > 0f
             ? drainSources.GetHits((nint)actor, new System.Numerics.Vector3(position.X, position.Y, position.Z),
-                settings.SizeDrain, charState.DrainHits) : null;
+                settings.SizeDrain, charState.DrainHits, charState.GrowthMultiplier) : null;
         charState.DrainContributors ??= new RandomDrainContributors();
         if (nearbyTargets != null)
             charState.DrainContributors.Filter(charState.DrainHits, settings.SizeDrain,
@@ -703,6 +705,15 @@ public sealed class Plugin : IDalamudPlugin
         {
             charState.AccumulatorRemainingSeconds = 0f;
         }
+
+        var accumulationFx = settings.AccumulatingEffects;
+        bool feedbackAllowed = settings.GrowthFromDelta && !disable && (actor->Health > 0 || aetherWithoutHp);
+        charState.AfterglowActive = charState.Afterglow.Advance(feedbackAllowed,
+            charState.PendingGrowth > 0f || proximityActive || releasedGrowth, accumulationFx, deltaSeconds);
+        if (feedbackAllowed && accumulationFx.Enabled && (charState.PendingGrowth > 0f || charState.AfterglowActive))
+            for (int layer = 0; layer < Math.Min(16, accumulationFx.Paths.Count); layer++)
+                GrowthVfxPlayer.KeepProximity((nint)actor, actor->EntityId, accumulationFx.Paths[layer], false,
+                    position, fadeIn: accumulationFx.FadeIn, fadeOut: accumulationFx.FadeOut, accumulatorLayer: layer);
 
         // Measure the damage-driven release before capping earned growth so a
         // character already at the cap can still display a temporary pulse.

@@ -175,7 +175,8 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable
     }
 
     // Channel 0: timed growth; 1/2: crystal receiver/source;
-    // 3/4: size-drain receiver/source. Each lifecycle is independent.
+    // 3/4: size-drain receiver/source; 10..25: accumulator layers.
+    // Each lifecycle is independent from timed growth layers (0 and 100+).
     public void BeginProximityFrame(float seconds = 0f)
     {
         proximityRequested.Clear();
@@ -184,13 +185,14 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable
 
     public void KeepProximity(nint address, uint entityId, string configuredPath, bool source, Vector3 position,
         bool attachToSource = false, float sourceScale = 1f, float sourceHeight = 0f,
-        float fadeIn = 0f, float fadeOut = 0f, bool sizeDrain = false)
+        float fadeIn = 0f, float fadeOut = 0f, bool sizeDrain = false, int accumulatorLayer = -1)
     {
         string path = configuredPath.Trim().Replace('\\', '/');
         if (!IsValidProximityPath(path)) return;
         bool isStatic = source && !attachToSource;
         if (isStatic) position.Y += sourceHeight;
-        int channel = (source ? 2 : 1) + (sizeDrain ? 2 : 0);
+        if (accumulatorLayer < -1 || accumulatorLayer >= 16) return;
+        int channel = accumulatorLayer >= 0 ? 10 + accumulatorLayer : (source ? 2 : 1) + (sizeDrain ? 2 : 0);
         var key = (address, channel);
         // Each shared source gets one effect per source type, with Self taking priority.
         if (!proximityRequested.Add(key)) return;
@@ -291,7 +293,7 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable
         foreach (var pair in activeByVfx)
         {
             var active = pair.Value;
-            if (active.Channel < 1 || active.Channel > 4) continue;
+            if (!(active.Channel is >= 1 and <= 4 or >= 10 and <= 25)) continue;
             if (immediate) { expired.Add(pair.Key); continue; }
             if (active.IsProximitySource && active.CanApplyScale) ApplyScale(active);
             bool visible = proximityRequested.Contains((active.ActorAddress, active.Channel));

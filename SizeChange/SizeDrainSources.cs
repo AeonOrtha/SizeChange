@@ -29,7 +29,7 @@ internal sealed class SizeDrainSources
             float.IsFinite(p.Z) && seen.Add(source.Address)) sources.Add(source);
     }
 
-    public IReadOnlyList<Hit> GetHits(nint receiver, Vector3 position, SizeDrainSettings settings, List<Hit> hits)
+    public IReadOnlyList<Hit> GetHits(nint receiver, Vector3 position, SizeDrainSettings settings, List<Hit> hits, float settledScale = 1f)
     {
         hits.Clear();
         if (!settings.Enabled) return hits;
@@ -41,8 +41,8 @@ internal sealed class SizeDrainSources
         {
             if (source.Address == receiver ||
                 (!settings.Everyone && (source.Player || !MatchesName(source.Name)))) continue;
-            float ratio = AetherExposure.HitRatio(Vector3.Distance(position, source.Position), settings.Range, settings.PeakHitPercent);
-            if (ratio > 0f) hits.Add(new Hit(source, ratio));
+            float ratio = AetherExposure.HitRatio(Vector3.Distance(position, source.Position), settings.EffectiveRange(settledScale), settings.PeakHitPercent);
+            if (ratio > 0f || settings.LingeringCorruption) hits.Add(new Hit(source, ratio));
         }
         return hits;
     }
