@@ -70,12 +70,12 @@ internal sealed class BoneHeartbeatPlayer : IDisposable
 
     public void Tick(BoneHeartbeatSettings settings, ushort objectIndex, nint address,
         uint actorEntityId, bool allowed, bool accumulating, float seconds, bool growing = false,
-        float pendingDamageRatio = 0f, float maximumDamageRatio = 1f, float settledScale = 1f, float rootHeightOffset = 0f)
+        float pendingDamageRatio = 0f, float maximumDamageRatio = 1f, float settledScale = 1f, float rootHeightOffset = 0f, string reserveBone = "", float reserveAddition = 0f)
     {
         seconds = float.IsFinite(seconds) ? Math.Clamp(seconds, 0f, 1f) : 0f;
         cleanupElapsed += seconds;
         bool heightEnabled = float.IsFinite(rootHeightOffset) && rootHeightOffset != 0f;
-        bool growthEnabled = (settings.CustomGrowthEnabled && settings.Bones.Count > 0 &&
+        bool growthEnabled = (reserveAddition > 0f && !string.IsNullOrWhiteSpace(reserveBone)) || (settings.CustomGrowthEnabled && settings.Bones.Count > 0 &&
             settings.Bones.Exists(bone => (bone.GrowthPerScale ?? settings.CustomGrowthPerScale) > 0f && (bone.GrowthLimit ?? settings.CustomGrowthLimit) > 0f)) || settings.Chains.Exists(chain => chain.GrowthEnabled && chain.GrowthPerScale > 0f && chain.GrowthLimit > 0f);
         if ((heightEnabled && !wasHeightEnabled || growthEnabled && !wasGrowthEnabled || settings.Enabled && !wasEnabled || settings.Jaw.Enabled && !wasJawEnabled) && faulted) Retry();
         wasHeightEnabled = heightEnabled;
@@ -95,7 +95,7 @@ internal sealed class BoneHeartbeatPlayer : IDisposable
             faulted = false;
         }
 
-        settings.ResolveBones(resolvedBones, settledScale);
+        settings.ResolveBones(resolvedBones, settledScale, reserveBone, reserveAddition);
         bool growthRun = resolvedBones.Exists(bone => bone.GrowthOffset > 0f);
         bool bonesEnabled = settings.Enabled && settings.Strength > 0f && resolvedBones.Exists(bone => bone.Strength > 0f);
         bool jawEnabled = settings.Jaw.Enabled && settings.Jaw.OpeningDegrees > 0f;

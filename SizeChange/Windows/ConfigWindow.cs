@@ -734,6 +734,52 @@ public class ConfigWindow : Window, IDisposable
         ImGui.TreePop();
     }
 
+    private void DrawDigestion(DigestionSettings settings, string id)
+    {
+        ImGui.PushID("digestion-" + id);
+        if (ImGui.TreeNode("Digestion Reserve"))
+        {
+            bool enabled = settings.Enabled;
+            if (ImGui.Checkbox("Enabled", ref enabled)) { settings.Enabled = enabled; configuration.Save(); }
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Stores part of crystal and size-drain growth. Digests after all contributors stop. Disabling clears the stored reserve.");
+            if (enabled)
+            {
+                float percent = settings.StoredPercent;
+                if (ImGui.SliderFloat("Stored Share", ref percent, 0f, 100f, "%.1f%%"))
+                { settings.StoredPercent = percent; configuration.Save(); }
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Defers this share of earned proximity growth. Full-reserve overflow grows normally. Damage and preview are unaffected.");
+                float speed = settings.GrowthPerSecond;
+                if (ImGui.DragFloat("Digestion Rate", ref speed, 0.001f, 0.001f, 100f, "%.3f x/s"))
+                { settings.GrowthPerSecond = speed; configuration.Save(); }
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Extra size multiplier per second, fed into the normal accumulator once per second. 0.05 releases +1x over 20 seconds. Pauses near contributors, including lingering targets.");
+                float maximum = settings.MaximumReserve;
+                if (ImGui.DragFloat("Reserve Limit", ref maximum, 0.1f, 0.001f, 10000f, "%.3f x"))
+                { settings.MaximumReserve = maximum; configuration.Save(); }
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Maximum stored extra size. +5x at 0.05x/s takes 100 seconds to digest. Lowering the limit preserves an existing balance.");
+                if (id == "self")
+                {
+                    bool boneEnabled = settings.BoneEnabled;
+                    if (ImGui.Checkbox("Reserve Bone", ref boneEnabled))
+                    { settings.BoneEnabled = boneEnabled; configuration.Save(); }
+                    if (ImGui.IsItemHovered()) ImGui.SetTooltip("Self only. Customize+ required. Independent of the heartbeat enable toggle.");
+                    if (boneEnabled)
+                    {
+                        string boneName = settings.BoneName;
+                        if (ImGui.InputText("Bone Name", ref boneName, 128))
+                        { settings.BoneName = boneName; configuration.Save(); }
+                        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Exact JP bone name. n_root is reserved.");
+                        float addition = settings.BoneMaximumAddition;
+                        if (ImGui.DragFloat("Full Reserve Addition", ref addition, 0.005f, 0f, 5f, "%.3f"))
+                        { settings.BoneMaximumAddition = addition; configuration.Save(); }
+                        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Extra bone scale at a full reserve; half at half-full, zero when empty. Added on top of the base profile, size-driven growth and heartbeat pulse.");
+                    }
+                }
+            }
+            ImGui.TreePop();
+        }
+        ImGui.PopID();
+    }
+
     private void DrawSizeDrain(SizeDrainSettings settings, string id)
     {
         ImGui.PushID($"SizeDrain{id}");
@@ -942,6 +988,7 @@ public class ConfigWindow : Window, IDisposable
         ImGui.PushID("accumulation-" + id);
         DrawAccumulatingEffects(settings.AccumulatingEffects);
         ImGui.PopID();
+        DrawDigestion(settings.Digestion, id);
         DrawSizeDrain(settings.SizeDrain, id);
 
         bool aetherGrowth = settings.AetherProximityGrowth;

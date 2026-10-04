@@ -45,7 +45,7 @@ public sealed class BoneHeartbeatSettings
 
     // Reuse targets across frames. Custom entries override a preset's amount,
     // retaining its timing; selecting a bone twice never doubles the addition.
-    public void ResolveBones(List<HeartbeatBone> targets, float settledScale = 1f)
+    public void ResolveBones(List<HeartbeatBone> targets, float settledScale = 1f, string reserveBone = "", float reserveAddition = 0f)
     {
         int count = 0;
         void Add(string name, float amount, double delay, float growth = 0f, bool replaceGrowth = false)
@@ -82,6 +82,17 @@ public sealed class BoneHeartbeatSettings
             float growth = CustomGrowthEnabled ? BoneHeartbeatMath.GrowthOffset(settledScale,
                 bone.GrowthPerScale ?? CustomGrowthPerScale, bone.GrowthLimit ?? CustomGrowthLimit) : 0f;
             Add(bone.Name, bone.Strength, 0, growth, CustomGrowthEnabled);
+        }
+        // The reserve is an independent additive contribution, applied AFTER
+        // chain/custom growth. Never replace the bone's pulse strength or delay.
+        if (float.IsFinite(reserveAddition) && reserveAddition > 0f &&
+            !string.IsNullOrWhiteSpace(reserveBone) && !reserveBone.Equals("n_root", StringComparison.OrdinalIgnoreCase))
+        {
+            int existing = -1;
+            for (int i = 0; i < count; i++)
+                if (targets[i].Name == reserveBone) { existing = i; break; }
+            if (existing >= 0) targets[existing].GrowthOffset += reserveAddition;
+            else Add(reserveBone, 0f, 0, reserveAddition);
         }
         if (count < targets.Count) targets.RemoveRange(count, targets.Count - count);
     }

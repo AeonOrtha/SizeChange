@@ -38,6 +38,7 @@ struct SCCharacterState
     public float PendingGrowth;
     public float PendingDamageRatio;
     public AetherGrowthState Aether;
+    public DigestionReserve Digestion;
     public int NearbyAetherSources;
     public int NearbyDrainSources;
     public GrowthAfterglow Afterglow;
@@ -347,7 +348,9 @@ public sealed class Plugin : IDalamudPlugin
             accumulating || (TryGetCharacterState(localActor, out var jawState) &&
                 (jawState.OvershootPulse.IsActive || jawState.PreviousScale > scaleBeforeUpdate + 0.00001f)),
             pendingDamage, Configuration.SelfSettings.MaximumHealthLossRatioPerTrigger,
-            settledSelfScale, boneGrowthState.SelfRootHeightOffset);
+            settledSelfScale, boneGrowthState.SelfRootHeightOffset,
+            Configuration.SelfSettings.Digestion.BoneName,
+            Configuration.SelfSettings.Digestion.BoneAddition(boneGrowthState.Digestion.Growth));
 
         bool soundAvailable = !ClientState.IsPvP && localActor->Health > 0 &&
             !Condition[ConditionFlag.BetweenAreas] && !Condition[ConditionFlag.BetweenAreas51];
@@ -526,6 +529,9 @@ public sealed class Plugin : IDalamudPlugin
             CharacterIdToLastScaleMap.Remove(actor->EntityId);
             return;
         }
+        bool aliveForDigestion = actor->Health > 0 || aetherWithoutHp;
+        if (!settings.GrowthFromDelta || !settings.Digestion.Enabled || !aliveForDigestion)
+            charState.Digestion = default;
         bool newTracking = !charState.Transform.Ready;
         if (newTracking || charState.Transform.DrawAddress != (nint)draw)
         {
@@ -626,11 +632,10 @@ public sealed class Plugin : IDalamudPlugin
         // and one-second cadence. Per-receiver lists prevent cross-profile loss.
         bool proximityActive = aetherCount + drainCount > 0;
         bool proximityHitDue = charState.Aether.Advance(aetherCount + drainCount, deltaSeconds) > 0;
-        void Accumulate(float healthLostRatio, bool aether)
+        void QueueGrowth(EarnedGrowth earned, bool aether)
         {
-            healthLostRatio = Math.Min(healthLostRatio, settings.MaximumHealthLossRatioPerTrigger);
-            float addedGrowth = GrowthScalingMath.CalculateGain(healthLostRatio, settings.DeltaGrowthMultiplier,
-                growthMultiplierBeforeRelease, settings.ScaleGrowthWithSize);
+            float addedGrowth = (float)earned.Growth;
+            float healthLostRatio = (float)earned.DamageRatio;
             if (addedGrowth <= 0f) return;
             if (settings.AccumulatorDelaySeconds <= 0f)
             {
@@ -651,6 +656,16 @@ public sealed class Plugin : IDalamudPlugin
                     charState.AccumulatorRemainingSeconds = settings.AccumulatorDelaySeconds;
             }
         }
+        void Accumulate(float healthLostRatio, bool aether)
+        {
+            healthLostRatio = Math.Min(healthLostRatio, settings.MaximumHealthLossRatioPerTrigger);
+            float addedGrowth = GrowthScalingMath.CalculateGain(healthLostRatio, settings.DeltaGrowthMultiplier,
+                growthMultiplierBeforeRelease, settings.ScaleGrowthWithSize);
+            // Real damage/preview never fills the proximity reserve.
+            var earned = aether ? charState.Digestion.Absorb(addedGrowth, healthLostRatio, settings.Digestion)
+                : new EarnedGrowth(addedGrowth, healthLostRatio);
+            QueueGrowth(earned, aether);
+        }
         if (settings.GrowthFromDelta && !disable && !inactiveForCombat && !aetherWithoutHp)
         {
             float healthLost = preview != null ? preview.HitRatio * maxhp : charState.PreviousHealth - health;
@@ -663,6 +678,15 @@ public sealed class Plugin : IDalamudPlugin
             if (nearbyTargets != null)
                 foreach (var hit in nearbyTargets) Accumulate(hit.Ratio, true);
         }
+
+        bool digestionPaused = !settings.GrowthFromDelta || disable || !aliveForDigestion ||
+            Condition[ConditionFlag.BetweenAreas] || Condition[ConditionFlag.BetweenAreas51];
+        var digested = charState.Digestion.Advance(proximityActive, digestionPaused, deltaSeconds, settings.Digestion);
+        // Already valued and already subject to the original hit allowance.
+        // It retains proximity's cap bonus and out-of-combat accumulator path.
+        if (digested.Growth > 0) QueueGrowth(digested, true);
+        bool digesting = settings.Digestion.Enabled && !digestionPaused &&
+            (charState.Digestion.HasGrowth || digested.Growth > 0);
 
         if (!settings.GrowthFromDelta || disable)
         {
@@ -709,7 +733,7 @@ public sealed class Plugin : IDalamudPlugin
         var accumulationFx = settings.AccumulatingEffects;
         bool feedbackAllowed = settings.GrowthFromDelta && !disable && (actor->Health > 0 || aetherWithoutHp);
         charState.AfterglowActive = charState.Afterglow.Advance(feedbackAllowed,
-            charState.PendingGrowth > 0f || proximityActive || releasedGrowth, accumulationFx, deltaSeconds);
+            charState.PendingGrowth > 0f || proximityActive || releasedGrowth || digesting, accumulationFx, deltaSeconds);
         if (feedbackAllowed && accumulationFx.Enabled && (charState.PendingGrowth > 0f || charState.AfterglowActive))
             for (int layer = 0; layer < Math.Min(16, accumulationFx.Paths.Count); layer++)
                 GrowthVfxPlayer.KeepProximity((nint)actor, actor->EntityId, accumulationFx.Paths[layer], false,
@@ -795,7 +819,7 @@ public sealed class Plugin : IDalamudPlugin
 
         // Ambient decay is exclusive to Growth From Delta.
         if (settings.GrowthFromDelta &&
-            !proximityActive &&
+            !proximityActive && !digesting &&
             charState.PendingGrowth <= 0f &&
             !charState.OvershootPulse.IsActive &&
             !triggerOvershoot &&
@@ -1355,7 +1379,7 @@ public sealed class Plugin : IDalamudPlugin
             if (state.ActorGroup != group || !state.Transform.Ready) continue;
             string name = ObjectTable.SearchByEntityId(entry.Key)?.Name.TextValue ?? $"Actor {entry.Key:X}";
             lines.Add($"{name}: Base {state.PlayerScale:0.000} | Current {state.ObservedScale:0.000} | " +
-                $"Crystals {state.NearbyAetherSources} | Drain sources {state.NearbyDrainSources} | Growth {state.GrowthMultiplier:0.000} | Pending {state.PendingGrowth:0.000}" +
+                $"Crystals {state.NearbyAetherSources} | Drain sources {state.NearbyDrainSources} | Growth {state.GrowthMultiplier:0.000} | Pending {state.PendingGrowth:0.000} | Reserve {state.Digestion.Growth:0.000}" +
                 (group == SCActorGroup.Self ? $" | Customize+ root lift {state.SelfRootHeightOffset:0.000}" : $" | Session height {state.Transform.Height.Baseline:0.000} | Added {(state.Transform.Height.Owned ? state.Transform.Height.LastWritten - state.Transform.Height.Baseline : 0f):0.000}") +
                 (state.Transform.ScaleConflict ? " | Scale paused: external change" : "") +
                 (state.Transform.Height.Conflict ? " | Height paused: external change" : ""));

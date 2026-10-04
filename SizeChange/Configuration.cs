@@ -11,6 +11,7 @@ public class GrowthSettings
         "sound/vfx/monster5/se_vfx_monster_inferno_lpowerrise_c.scd";
 
     public SizeDrainSettings SizeDrain { get; set; } = new();
+    public DigestionSettings Digestion { get; set; } = new();
     public bool AetherProximityGrowth { get; set; }
     public float AetherProximityRange { get; set; } = 10f;
     public float AetherShardHitPercent { get; set; } = 0.4f;
@@ -89,6 +90,8 @@ public class GrowthSettings
     {
         SizeDrain ??= new();
         SizeDrain.Validate();
+        Digestion ??= new();
+        Digestion.Validate();
         PreviewHitPercent = float.IsFinite(PreviewHitPercent) ? Math.Clamp(PreviewHitPercent, 0f, 100f) : 10f;
         PreviewHitIntervalSeconds = float.IsFinite(PreviewHitIntervalSeconds)
             ? Math.Clamp(PreviewHitIntervalSeconds, 0.1f, 10f) : 1f;
@@ -169,6 +172,7 @@ public class GrowthSettings
         => new()
         {
             SizeDrain = SizeDrainSettings.CopyOf(settings.SizeDrain),
+            Digestion = DigestionSettings.CopyOf(settings.Digestion),
             AetherActorSound = AetherSoundSettings.CopyOf(settings.AetherActorSound),
             AetherSourceSound = AetherSoundSettings.CopyOf(settings.AetherSourceSound),
             AetherShardHitPercent = settings.AetherShardHitPercent,
