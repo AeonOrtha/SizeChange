@@ -12,7 +12,7 @@ namespace SizeChange;
 /// Creates AVFX instances bound to an actor's root and keeps enough ownership
 /// information to scale and explicitly remove the instances created here.
 /// </summary>
-internal sealed unsafe class GrowthVfxPlayer : IDisposable, IDrainProjectileVfx
+internal sealed unsafe class GrowthVfxPlayer : IDisposable
 {
     // Cross-checked against VFXEditor's current actor-VFX interop.
     private const string ActorVfxCreateSignature =
@@ -47,13 +47,6 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable, IDrainProjectileVfx
     [Signature("40 53 48 83 EC 20 48 8B D9 48 8B 89 ?? ?? ?? ?? 48 85 C9 74 28 33 D2 E8 ?? ?? ?? ?? 48 8B 8B ?? ?? ?? ?? 48 85 C9",
         DetourName = nameof(StaticVfxRemoveDetour))]
     private readonly Hook<StaticVfxRemoveDelegate>? staticVfxRemoveHook = null;
-    private readonly Dictionary<long, nint> projectileAddresses = new();
-    private long nextProjectileId;
-    private string projectileError = string.Empty;
-    private long projectileAttempts, projectileCreated;
-    internal string ProjectileStatus => $"VFX requests: {projectileAttempts} | Created: {projectileCreated} | Live: {projectileAddresses.Count}" +
-        (projectileError.Length > 0 ? "\n" + projectileError : string.Empty);
-    internal void ResetProjectileDiagnostics() { projectileAttempts = projectileCreated = 0; projectileError = string.Empty; }
     private float proximityDelta;
     private readonly HashSet<(nint Actor, int Channel)> proximityRequested = new();
     private readonly Dictionary<(nint Actor, int Channel), (string Path, long At)> retryAfter = new();
@@ -70,7 +63,6 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable, IDrainProjectileVfx
         public required nint ActorAddress { get; init; }
         public int Channel { get; init; }
         public bool IsGrowth => Channel == 0 || Channel >= 100;
-        public long ProjectileId { get; init; }
         public bool IsProximitySource => Channel is 2 or 4;
         public VfxFade Fade;
         public float FadeIn;
@@ -180,51 +172,6 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable, IDrainProjectileVfx
         activeByVfx[vfxAddress] = activeVfx;
         activeVfxByActor[(actorAddress, channel)] = vfxAddress;
         return null;
-    }
-
-    // Small adapter for the optional managed projectile module. Native removal
-    // invalidates generation handles before a later frame can touch the VFX.
-    public long CreateProjectile(string path, System.Numerics.Vector3 position, float scale)
-    {
-        path = path.Trim().Replace('\\', '/');
-        projectileAttempts++;
-        if (!IsValidProximityPath(path)) { projectileError = $"AVFX invalid or missing: {path}"; return 0; }
-        if (staticVfxRun == null || staticVfxRemoveHook == null)
-        { projectileError = "World VFX unavailable."; return 0; }
-        if (projectileAddresses.Count >= DrainProjectilePlayer.GlobalMaximum)
-        { projectileError = "Visual budget reached."; return 0; }
-        var vfx = VfxObject.Create(path, "Client.System.Scheduler.Instance.VfxObject");
-        if (vfx == null) { projectileError = $"VFX creation failed: {path}"; return 0; }
-        long id = ++nextProjectileId;
-        vfx->Rotation = FFXIVClientStructs.FFXIV.Common.Math.Quaternion.Identity;
-        vfx->Scale = new Vector3(scale, scale, scale);
-        SetSourcePosition(vfx, new Vector3(position.X, position.Y, position.Z));
-        activeByVfx[(nint)vfx] = new ActiveGrowthVfx {
-            VfxAddress = (nint)vfx, ActorAddress = 0, Channel = -1, ProjectileId = id,
-            IsStatic = true, Path = path, RemoveAtTick = Environment.TickCount64 + 31000,
-            BaseScale = scale, ScaleWithActor = false, CanApplyScale = true
-        };
-        projectileAddresses[id] = (nint)vfx;
-        staticVfxRun(vfx, 0f, 0xFFFFFFFF);
-        if (!projectileAddresses.ContainsKey(id))
-        { projectileError = $"Effect ended during startup: {path}"; return 0; }
-        // Playback initialization can reset transforms. Match VFXEditor's
-        // order: start the static effect, then set and update its transform.
-        vfx->Rotation = FFXIVClientStructs.FFXIV.Common.Math.Quaternion.Identity;
-        vfx->Scale = new Vector3(scale, scale, scale);
-        SetSourcePosition(vfx, new Vector3(position.X, position.Y, position.Z));
-        projectileCreated++;
-        return id;
-    }
-    public bool MoveProjectile(long id, System.Numerics.Vector3 position)
-    {
-        if (!projectileAddresses.TryGetValue(id, out var address)) return false;
-        SetSourcePosition((VfxObject*)address, new Vector3(position.X, position.Y, position.Z));
-        return true;
-    }
-    public void RemoveProjectile(long id)
-    {
-        if (projectileAddresses.TryGetValue(id, out var address)) RemoveTrackedVfx(address);
     }
 
     // Channel 0: timed growth; 1/2: crystal receiver/source;
@@ -362,7 +309,6 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable, IDrainProjectileVfx
         if (activeByVfx.Remove((nint)vfx, out var active))
         {
             activeVfxByActor.Remove((active.ActorAddress, active.Channel));
-            if (active.ProjectileId != 0) projectileAddresses.Remove(active.ProjectileId);
         }
         return staticVfxRemoveHook!.Original(vfx);
     }
@@ -451,7 +397,6 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable, IDrainProjectileVfx
         }
 
         activeVfxByActor.Remove((activeVfx.ActorAddress, activeVfx.Channel));
-        if (activeVfx.ProjectileId != 0) projectileAddresses.Remove(activeVfx.ProjectileId);
         if (activeVfx.IsStatic)
             staticVfxRemoveHook?.Original((VfxObject*)vfxAddress);
         else if (actorVfxRemoveHook != null)

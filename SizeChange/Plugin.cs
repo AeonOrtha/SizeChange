@@ -100,12 +100,6 @@ public sealed class Plugin : IDalamudPlugin
     private readonly GrowthSoundPlayer GrowthSoundPlayer;
     internal readonly HeartbeatSoundPlayer HeartbeatSound = new(new HeartbeatScdVoice(), new HeartbeatScdVoice(), new HeartbeatScdVoice());
     private readonly GrowthVfxPlayer GrowthVfxPlayer;
-    private readonly DrainProjectilePlayer drainProjectiles;
-    internal string DrainProjectileStatus =>
-        $"Drain launches: {drainProjectiles.LaunchRequests} | Active: {drainProjectiles.ActiveCount} | Skipped: {drainProjectiles.BudgetSkipped}\n" +
-        GrowthVfxPlayer.ProjectileStatus;
-    internal void ResetDrainProjectileDiagnostics()
-    { drainProjectiles.ResetDiagnostics(); GrowthVfxPlayer.ResetProjectileDiagnostics(); }
     internal BoneHeartbeatPlayer BoneHeartbeat { get; }
     private float TrackedActorRefreshElapsed = TrackedActorRefreshIntervalSeconds;
     private bool TrackedActorRefreshRequested = true;
@@ -120,7 +114,6 @@ public sealed class Plugin : IDalamudPlugin
 
         GrowthSoundPlayer = new GrowthSoundPlayer();
         GrowthVfxPlayer = new GrowthVfxPlayer();
-        drainProjectiles = new DrainProjectilePlayer(GrowthVfxPlayer);
         BoneHeartbeat = new BoneHeartbeatPlayer(new CustomizeHeartbeatApi(PluginInterface));
 
         ConfigWindow = new ConfigWindow(this);
@@ -149,7 +142,6 @@ public sealed class Plugin : IDalamudPlugin
         aetherSound.Dispose();
         BoneHeartbeat.Dispose();
         RestoreCharacterTransforms();
-        drainProjectiles.Clear();
         GrowthVfxPlayer.Dispose();
         GrowthSoundPlayer.Dispose();
 
@@ -260,7 +252,6 @@ public sealed class Plugin : IDalamudPlugin
 
     private unsafe void OnFrameworkUpdate(IFramework framework)
     {
-        drainProjectiles.BeginFrame();
         GrowthVfxPlayer.BeginProximityFrame((float)Framework.UpdateDelta.TotalSeconds);
         aetherSound.BeginFrame((float)Framework.UpdateDelta.TotalSeconds);
         GrowthVfxPlayer.Update();
@@ -276,7 +267,6 @@ public sealed class Plugin : IDalamudPlugin
         var localPlayer = ObjectTable.LocalPlayer;
         if (localPlayer == null || !ClientState.IsLoggedIn)
         {
-            drainProjectiles.Clear();
             GrowthVfxPlayer.EndProximityFrame(true);
             aetherSound.EndFrame();
             selfPreview.Enabled = playerPreview.Enabled = monsterPreview.Enabled = false;
@@ -435,8 +425,6 @@ public sealed class Plugin : IDalamudPlugin
                 globallyDisabled,
                 inCombat);
         }
-        drainProjectiles.EndFrame(deltaSeconds, globallyDisabled || localPlayer.CurrentHp == 0 ||
-            Condition[ConditionFlag.BetweenAreas] || Condition[ConditionFlag.BetweenAreas51]);
         GrowthVfxPlayer.EndProximityFrame(globallyDisabled || Condition[ConditionFlag.BetweenAreas] || Condition[ConditionFlag.BetweenAreas51]);
         aetherSound.EndFrame();
     }
@@ -618,9 +606,6 @@ public sealed class Plugin : IDalamudPlugin
             charState.DrainContributors.Filter(charState.DrainHits, settings.SizeDrain,
                 Environment.TickCount64 / 1000.0, Random.Shared.NextDouble);
         else charState.DrainContributors.Clear();
-        if (nearbyTargets != null)
-            drainProjectiles.SetReceiver((nint)actor, actor->EntityId,
-                new System.Numerics.Vector3(position.X, position.Y, position.Z), settings.SizeDrain);
         int drainCount = nearbyTargets?.Count ?? 0;
         charState.NearbyDrainSources = drainCount;
         if (drainCount > 0)
@@ -674,11 +659,7 @@ public sealed class Plugin : IDalamudPlugin
             if (nearbyCrystals != null)
                 foreach (var hit in nearbyCrystals) Accumulate(hit.Ratio, true);
             if (nearbyTargets != null)
-                foreach (var hit in nearbyTargets)
-                {
-                    Accumulate(hit.Ratio, true);
-                    drainProjectiles.Launch((nint)actor, actor->EntityId, hit.Target.Position);
-                }
+                foreach (var hit in nearbyTargets) Accumulate(hit.Ratio, true);
         }
 
         if (!settings.GrowthFromDelta || disable)
@@ -918,13 +899,6 @@ public sealed class Plugin : IDalamudPlugin
         {
             ApplyHeightOffset(actor, ref charState, desiredHeightOffset);
         }
-
-        // Publish this frame's final visible height after growth/overshoot and
-        // height adjustment, before the projectile module advances its effects.
-        if (nearbyTargets != null)
-            drainProjectiles.SetReceiver((nint)actor, actor->EntityId,
-                new System.Numerics.Vector3(position.X, position.Y, position.Z), settings.SizeDrain,
-                visibleScaleMultiplier, desiredHeightOffset);
 
         charState.PreviousHealth = health;
         charState.PreviousScale = scale;

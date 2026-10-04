@@ -764,49 +764,6 @@ public class ConfigWindow : Window, IDisposable
             if (ImGui.DragFloat("Peak Hit", ref peak, 0.01f, 0f, 100f, "%.2f%% HP"))
             { settings.PeakHitPercent = Math.Clamp(peak, 0f, 100f); configuration.SaveSizeDrain(settings); }
             if (ImGui.IsItemHovered()) ImGui.SetTooltip("Per-source maximum at zero distance, falling smoothly to zero at range. Sources stack. Uses the profile's damage multiplier, HP allowance and accumulator delay.");
-            if (ImGui.TreeNode("Drain Projectiles"))
-            {
-                bool projectiles = settings.ProjectileEnabled;
-                if (ImGui.Checkbox("Enabled##projectiles", ref projectiles))
-                { settings.ProjectileEnabled = projectiles; configuration.SaveSizeDrain(settings); }
-                string launch = settings.ProjectileLaunchPath;
-                if (ImGui.InputText("Launch AVFX", ref launch, 512))
-                { settings.ProjectileLaunchPath = launch; configuration.SaveSizeDrain(settings); }
-                string travel = settings.ProjectilePath;
-                if (ImGui.InputText("Travel AVFX", ref travel, 512))
-                { settings.ProjectilePath = travel; configuration.SaveSizeDrain(settings); }
-                string impact = settings.ProjectileImpactPath;
-                if (ImGui.InputText("Impact AVFX", ref impact, 512))
-                { settings.ProjectileImpactPath = impact; configuration.SaveSizeDrain(settings); }
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Optional stages: launch at the source, travel toward the receiver, impact on arrival. Blank skips that stage. Use world-space compatible AVFX.");
-                float travelTime = settings.ProjectileTravelSeconds;
-                if (ImGui.DragFloat("Travel Time (s)", ref travelTime, .05f, .05f, 10f, "%.2f"))
-                { settings.ProjectileTravelSeconds = travelTime; configuration.SaveSizeDrain(settings); }
-                float launchTime = settings.ProjectileLaunchSeconds;
-                if (ImGui.DragFloat("Launch Lifetime (s)", ref launchTime, .05f, .05f, 10f, "%.2f"))
-                { settings.ProjectileLaunchSeconds = launchTime; configuration.SaveSizeDrain(settings); }
-                float impactTime = settings.ProjectileImpactSeconds;
-                if (ImGui.DragFloat("Impact Lifetime (s)", ref impactTime, .05f, .05f, 10f, "%.2f"))
-                { settings.ProjectileImpactSeconds = impactTime; configuration.SaveSizeDrain(settings); }
-                float scale = settings.ProjectileScale;
-                if (ImGui.DragFloat("Effect Scale", ref scale, .05f, .01f, 100f, "%.2f"))
-                { settings.ProjectileScale = scale; configuration.SaveSizeDrain(settings); }
-                float sourceHeight = settings.ProjectileSourceHeight;
-                if (ImGui.DragFloat("Source Height", ref sourceHeight, .05f, -10f, 100f, "%.2f"))
-                { settings.ProjectileSourceHeight = sourceHeight; configuration.SaveSizeDrain(settings); }
-                float receiverHeight = settings.ProjectileReceiverHeight;
-                if (ImGui.DragFloat("Receiver Height", ref receiverHeight, .05f, -10f, 100f, "%.2f"))
-                { settings.ProjectileReceiverHeight = receiverHeight; configuration.SaveSizeDrain(settings); }
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Aim height at normal size. Follows visible growth, overshoot and SizeChange's height adjustment for travel and impact.");
-                int maximum = settings.MaximumProjectiles;
-                if (ImGui.SliderInt("Maximum Projectiles", ref maximum, 1, 64))
-                { settings.MaximumProjectiles = maximum; configuration.SaveSizeDrain(settings); }
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Per receiver, including launch/impact lifetimes. Skipped visuals still grant growth. A shared 128-effect budget covers all projectile stages and profiles.");
-                ImGui.TextWrapped(plugin.DrainProjectileStatus);
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Session counters across all profiles. Created confirms a native object, not visible particles. Errors persist until reset.");
-                if (ImGui.SmallButton("Reset Status")) plugin.ResetDrainProjectileDiagnostics();
-                ImGui.TreePop();
-            }
             // Keep these controls in a stable layout before and after enabling.
             string receiverPath = settings.ReceiverVfxPath ?? string.Empty;
             if (ImGui.InputText("Receiver AVFX", ref receiverPath, 512))
