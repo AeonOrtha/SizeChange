@@ -8,6 +8,8 @@ namespace SizeChange;
 public sealed class SizeDrainSettings
 {
     public bool Enabled { get; set; }
+    public bool EnableInDuties { get; set; }
+    internal bool AllowsLocation(bool inDuty) => !inDuty || EnableInDuties;
     public bool Everyone { get; set; }
     public int MaximumTargets { get; set; } = 8;
     public bool RandomContributors { get; set; }

@@ -61,6 +61,7 @@ struct SCCharacterState
 public sealed class Plugin : IDalamudPlugin
 {
     [PluginService] internal static IDalamudPluginInterface PluginInterface { get; private set; } = null!;
+    [PluginService] internal static IPluginLog Log { get; private set; } = null!;
     [PluginService] internal static ICommandManager CommandManager { get; private set; } = null!;
     [PluginService] internal static IObjectTable ObjectTable { get; private set; } = null!;
     [PluginService] internal static IFramework Framework { get; private set; } = null!;
@@ -82,6 +83,7 @@ public sealed class Plugin : IDalamudPlugin
     private ConfigWindow ConfigWindow { get; init; }
     private readonly Dictionary<uint, SCCharacterState> CharacterIdToLastScaleMap = new();
     private readonly Dictionary<nint, uint> vfxActorIdentities = new();
+    private readonly Dictionary<nint, nint> vfxActorModels = new();
     private readonly Dictionary<string, uint> TrackedPlayerEntityIds =
         new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<uint> TrackedMonsterEntityIds = new();
@@ -117,7 +119,10 @@ public sealed class Plugin : IDalamudPlugin
         }
 
         GrowthSoundPlayer = new GrowthSoundPlayer();
-        GrowthVfxPlayer = new GrowthVfxPlayer((address, id) => vfxActorIdentities.TryGetValue(address, out var current) && current == id);
+        GrowthVfxPlayer = new GrowthVfxPlayer(
+            (address, id) => vfxActorIdentities.TryGetValue(address, out var current) && current == id,
+            address => vfxActorModels.TryGetValue(address, out var model) ? model : 0,
+            message => Log.Debug("VFX: {Event}", message));
         BoneHeartbeat = new BoneHeartbeatPlayer(new CustomizeHeartbeatApi(PluginInterface));
 
         ConfigWindow = new ConfigWindow(this);
@@ -257,9 +262,15 @@ public sealed class Plugin : IDalamudPlugin
     private unsafe void OnFrameworkUpdate(IFramework framework)
     {
         vfxActorIdentities.Clear();
+        vfxActorModels.Clear();
         if (ClientState.IsLoggedIn && !Condition[ConditionFlag.BetweenAreas] && !Condition[ConditionFlag.BetweenAreas51])
             foreach (var obj in ObjectTable)
-                if (obj.Address != 0) vfxActorIdentities[obj.Address] = obj.EntityId;
+                if (obj.Address != 0)
+                {
+                    vfxActorIdentities[obj.Address] = obj.EntityId;
+                    var raw = (FFXIVClientStructs.FFXIV.Client.Game.Object.GameObject*)obj.Address;
+                    vfxActorModels[obj.Address] = (nint)raw->DrawObject;
+                }
         GrowthVfxPlayer.BeginProximityFrame((float)Framework.UpdateDelta.TotalSeconds);
         aetherSound.BeginFrame((float)Framework.UpdateDelta.TotalSeconds);
         GrowthVfxPlayer.Update();
@@ -610,7 +621,10 @@ public sealed class Plugin : IDalamudPlugin
                         settings.AetherSourceVfxFadeIn, settings.AetherSourceVfxFadeOut);
         }
         charState.DrainHits ??= new List<SizeDrainSources.Hit>();
-        var nearbyTargets = settings.GrowthFromDelta && settings.SizeDrain.Enabled && !disable &&
+        bool inDuty = Condition[ConditionFlag.BoundByDuty] || Condition[ConditionFlag.BoundByDuty56] ||
+            Condition[ConditionFlag.BoundByDuty95];
+        var nearbyTargets = settings.GrowthFromDelta && settings.SizeDrain.Enabled &&
+            settings.SizeDrain.AllowsLocation(inDuty) && !disable &&
             (actor->Health > 0 || aetherWithoutHp) && settings.MaximumHealthLossRatioPerTrigger > 0f && settings.DeltaGrowthMultiplier > 0f
             ? drainSources.GetHits((nint)actor, new System.Numerics.Vector3(position.X, position.Y, position.Z),
                 settings.SizeDrain, charState.DrainHits, charState.GrowthMultiplier) : null;

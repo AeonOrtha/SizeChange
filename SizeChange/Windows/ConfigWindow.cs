@@ -789,6 +789,10 @@ public class ConfigWindow : Window, IDisposable
         if (ImGui.IsItemHovered()) ImGui.SetTooltip("Nearby sources grant growth once per second, even outside combat and beyond the size limit. Sources do not shrink.");
         if (enabled && ImGui.TreeNode("Size Drain Settings"))
         {
+            bool inDuties = settings.EnableInDuties;
+            if (ImGui.Checkbox("Enable in Duties", ref inDuties))
+            { settings.EnableInDuties = inDuties; configuration.SaveSizeDrain(settings); }
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Off: Size Drain only outside duties; entering clears contributor timers. Aetherytes, stored digestion and already accumulated growth are unaffected.");
             bool everyone = settings.Everyone;
             if (ImGui.Checkbox("Everyone Near Me", ref everyone))
             { settings.Everyone = everyone; configuration.SaveSizeDrain(settings); }
