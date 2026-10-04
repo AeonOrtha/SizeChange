@@ -50,6 +50,7 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable
     private float proximityDelta;
     private readonly Func<nint, uint, bool> actorIsCurrent;
     private bool disposed;
+    private readonly Func<long> tickCount;
     private readonly Func<nint, nint> modelForActor;
     private readonly Action<string>? diagnostic;
     private readonly HashSet<(nint Actor, int Channel)> proximityRequested = new();
@@ -77,6 +78,7 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable
         public nint ModelAddress { get; init; }
         public string Path { get; init; } = string.Empty;
         public required long RemoveAtTick { get; init; }
+        public float PlaybackSeconds { get; init; }
         public required float BaseScale { get; set; }
         public required bool ScaleWithActor { get; init; }
         public float ActorGrowthMultiplier { get; set; } = 1f;
@@ -87,8 +89,9 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable
         public bool ScaleDiagnosticWritten { get; set; }
     }
 
-    public GrowthVfxPlayer(Func<nint, uint, bool> actorIsCurrent, Func<nint, nint> modelForActor, Action<string>? diagnostic = null)
+    public GrowthVfxPlayer(Func<nint, uint, bool> actorIsCurrent, Func<nint, nint> modelForActor, Action<string>? diagnostic = null, Func<long>? tickCount = null)
     {
+        this.tickCount = tickCount ?? (() => Environment.TickCount64);
         this.actorIsCurrent = actorIsCurrent;
         this.modelForActor = modelForActor;
         this.diagnostic = diagnostic;
@@ -142,7 +145,7 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable
         float durationSeconds,
         float baseScale,
         bool scaleWithActor,
-        float actorGrowthMultiplier, int layer = 0, uint entityId = 0)
+        float actorGrowthMultiplier, int layer = 0, uint entityId = 0, bool restart = true)
     {
         if (disposed || actorAddress == 0 || (!actorIsCurrent(actorAddress, entityId) || modelForActor(actorAddress) == 0)) return "VFX actor is no longer available.";
         if (layer < 0 || layer >= 16 || !float.IsFinite(durationSeconds) || durationSeconds <= 0f ||
@@ -154,10 +157,14 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable
             return "The native actor-VFX functions could not be located.";
         }
 
-        // A fresh pulse replaces all its old layers, independently of proximity VFX.
-        if (layer == 0) RemoveForActor(actorAddress);
         int channel = layer == 0 ? 0 : 100 + layer;
-        if (activeVfxByActor.TryGetValue((actorAddress, channel), out var previous)) RemoveTrackedVfx(previous);
+        if (activeVfxByActor.TryGetValue((actorAddress, channel), out var previous))
+        {
+            if (!restart && activeByVfx.TryGetValue(previous, out var existing) &&
+                existing.Path == path && IsCurrent(existing) && tickCount() < existing.RemoveAtTick)
+                return null;
+            RemoveTrackedVfx(previous);
+        }
 
         diagnostic?.Invoke($"Create growth channel={channel}, actor={entityId:X}, path={path}");
         VfxObject* vfx = actorVfxCreate(
@@ -185,7 +192,7 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable
             EntityId = entityId,
             ModelAddress = modelForActor(actorAddress),
             Path = path,
-            RemoveAtTick = Environment.TickCount64 + durationMilliseconds,
+            RemoveAtTick = tickCount() + durationMilliseconds,
             BaseScale = baseScale,
             ScaleWithActor = scaleWithActor,
             ActorGrowthMultiplier = actorGrowthMultiplier,
@@ -207,17 +214,19 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable
 
     public void KeepProximity(nint address, uint entityId, string configuredPath, bool source, Vector3 position,
         bool attachToSource = false, float sourceScale = 1f, float sourceHeight = 0f,
-        float fadeIn = 0f, float fadeOut = 0f, bool sizeDrain = false, int accumulatorLayer = -1)
+        float fadeIn = 0f, float fadeOut = 0f, bool sizeDrain = false, int accumulatorLayer = -1, float durationSeconds = 0f)
     {
         string path = configuredPath?.Trim().Replace('\\', '/') ?? string.Empty;
-        if (disposed || address == 0 || !actorIsCurrent(address, entityId) || modelForActor(address) == 0 ||
+        bool isStatic = source && !attachToSource;
+        if (disposed || address == 0 || !actorIsCurrent(address, entityId) || (!isStatic && !(source && !sizeDrain) && modelForActor(address) == 0) ||
+            !float.IsFinite(durationSeconds) || durationSeconds < 0f ||
             !float.IsFinite(position.X) || !float.IsFinite(position.Y) || !float.IsFinite(position.Z) ||
             !float.IsFinite(sourceScale) || !float.IsFinite(sourceHeight) ||
             !float.IsFinite(fadeIn) || !float.IsFinite(fadeOut) || !IsValidProximityPath(path)) return;
+        durationSeconds = accumulatorLayer >= 0 && durationSeconds > 0f ? Math.Clamp(durationSeconds, 0.05f, 300f) : 0f;
         sourceScale = Math.Clamp(sourceScale, 0.01f, 200f);
         fadeIn = Math.Clamp(fadeIn, 0f, 10f);
         fadeOut = Math.Clamp(fadeOut, 0f, 10f);
-        bool isStatic = source && !attachToSource;
         if (isStatic) position.Y += sourceHeight;
         if (accumulatorLayer < -1 || accumulatorLayer >= 16) return;
         int channel = accumulatorLayer >= 0 ? 10 + accumulatorLayer : (source ? 2 : 1) + (sizeDrain ? 2 : 0);
@@ -226,7 +235,7 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable
         if (!proximityRequested.Add(key)) return;
         if (activeVfxByActor.TryGetValue(key, out var oldAddress) && activeByVfx.TryGetValue(oldAddress, out var old))
         {
-            if (old.Path == path && old.EntityId == entityId && old.IsStatic == isStatic && IsCurrent(old))
+            if (old.Path == path && old.EntityId == entityId && old.IsStatic == isStatic && old.PlaybackSeconds == durationSeconds && IsCurrent(old))
             {
                 old.FadeIn = fadeIn;
                 old.FadeOut = fadeOut;
@@ -241,7 +250,7 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable
             RemoveTrackedVfx(oldAddress);
             retryAfter.Remove(key);
         }
-        long now = Environment.TickCount64;
+        long now = tickCount();
         if (retryAfter.TryGetValue(key, out var retry) && retry.Path == path && now < retry.At) return;
         retryAfter[key] = (path, now + 1000);
         diagnostic?.Invoke($"Create proximity channel={channel}, actor={entityId:X}, static={isStatic}, path={path}");
@@ -274,13 +283,16 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable
         activeByVfx[vfxAddress] = new ActiveGrowthVfx
         {
             VfxAddress = vfxAddress, ActorAddress = address, Channel = channel,
-            EntityId = entityId, ModelAddress = modelForActor(address), Path = path, IsStatic = isStatic, RemoveAtTick = long.MaxValue,
+            EntityId = entityId, ModelAddress = modelForActor(address), Path = path, IsStatic = isStatic, RemoveAtTick = accumulatorLayer >= 0 && durationSeconds > 0f
+                ? now + (long)(Math.Clamp(durationSeconds, 0.05f, 300f) * 1000f) : long.MaxValue,
+            PlaybackSeconds = durationSeconds,
             FadeIn = fadeIn, FadeOut = fadeOut, OriginalAlpha = originalAlpha,
             Fade = new VfxFade { Level = fadeIn > 0f ? 0f : 1f },
             BaseScale = source ? sourceScale : 1f, ScaleWithActor = false,
             ScaleInitialized = isStatic,
         };
         activeVfxByActor[key] = vfxAddress;
+        if (durationSeconds > 0f) retryAfter[key] = (path, now + (long)(durationSeconds * 1000f));
     }
 
     private static float CaptureAlpha(VfxObject* vfx) =>
@@ -347,7 +359,7 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable
 
     public void Update()
     {
-        long currentTick = Environment.TickCount64;
+        long currentTick = tickCount();
         var expiredAddresses = new List<nint>();
         foreach (var activeEntry in new List<KeyValuePair<nint, ActiveGrowthVfx>>(activeByVfx))
         {
@@ -383,9 +395,11 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable
         }
     }
 
+    // World effects only need a live source identity. Crystal attachments can
+    // legitimately have no DrawObject; character attachments still require one.
     private bool IsCurrent(ActiveGrowthVfx active) =>
-        actorIsCurrent(active.ActorAddress, active.EntityId) && active.ModelAddress != 0 &&
-        modelForActor(active.ActorAddress) == active.ModelAddress;
+        actorIsCurrent(active.ActorAddress, active.EntityId) && (active.IsStatic ||
+        ((active.ModelAddress != 0 || active.Channel == 2) && modelForActor(active.ActorAddress) == active.ModelAddress));
 
     private void ApplyScale(ActiveGrowthVfx activeVfx)
     {
@@ -428,14 +442,6 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable
         if (activeVfx.IsStatic) vfx->UpdateTransforms(true);
         activeVfx.ScaleInitialized = true;
         activeVfx.LastAppliedScale = effectiveScale;
-    }
-
-    private void RemoveForActor(nint actorAddress)
-    {
-        var addresses = new List<nint>();
-        foreach (var active in new List<ActiveGrowthVfx>(activeByVfx.Values))
-            if (active.ActorAddress == actorAddress && active.IsGrowth) addresses.Add(active.VfxAddress);
-        foreach (var address in addresses) RemoveTrackedVfx(address);
     }
 
     private void ForgetActorMapping(ActiveGrowthVfx active)

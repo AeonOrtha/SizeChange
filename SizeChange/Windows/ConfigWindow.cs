@@ -77,8 +77,8 @@ public class ConfigWindow : Window, IDisposable
         }
         if (ImGui.IsItemHovered()) ImGui.SetTooltip("Adds to Customize+ base-profile root Y. Requires Customize+. 0 = off.");
 
-        DrawBoneHeartbeat();
         DrawGrowthSettings(configuration.SelfSettings, "self");
+        DrawBoneHeartbeat();
         if (ImGui.TreeNode("Transform Values##self"))
         {
             ImGui.TextWrapped(plugin.TransformDiagnostics(SCActorGroup.Self));
@@ -125,7 +125,7 @@ public class ConfigWindow : Window, IDisposable
 
     private void DrawBoneHeartbeat()
     {
-        if (!ImGui.CollapsingHeader("Bone Heartbeat (Self)")) return;
+        if (!ImGui.CollapsingHeader("Bones & Heartbeat")) return;
         var settings = configuration.SelfBoneHeartbeat;
         bool enabled = settings.Enabled;
         if (ImGui.Checkbox("Enable Bone Heartbeat", ref enabled))
@@ -460,8 +460,7 @@ public class ConfigWindow : Window, IDisposable
             var chain = settings.Chains.Find(x => x.Id == definition.Id);
             if (chain == null || !chain.Enabled) continue;
             ImGui.PushID("heartbeat-chain-" + definition.Id);
-            ImGui.Separator();
-            ImGui.TextUnformatted(definition.Label);
+            if (!ImGui.TreeNode(definition.Label)) { ImGui.PopID(); continue; }
             float amount = chain.Strength;
             if (ImGui.DragFloat("Additive Scale", ref amount, 0.005f, 0f, 5f, "%.3f"))
             {
@@ -484,10 +483,10 @@ public class ConfigWindow : Window, IDisposable
                         chain.DelayPercent = Math.Clamp(delay, 0f, 10f);
                         configuration.Save();
                     }
-                    ImGui.TextWrapped($"{600f * chain.DelayPercent / settings.BeatsPerMinute:0.0} ms per step at base BPM.");
+                    if (ImGui.IsItemHovered()) ImGui.SetTooltip($"{600f * chain.DelayPercent / settings.BeatsPerMinute:0.0} ms per step at base BPM.");
                 }
             }
-            else ImGui.TextDisabled("Single bone.");
+
             if (ImGui.TreeNode("Bone Order"))
             {
                 foreach (var bone in definition.Bones)
@@ -498,6 +497,7 @@ public class ConfigWindow : Window, IDisposable
                 }
                 ImGui.TreePop();
             }
+            ImGui.TreePop();
             ImGui.PopID();
         }
     }
@@ -701,7 +701,8 @@ public class ConfigWindow : Window, IDisposable
 
     private void DrawAccumulatingEffects(AccumulatingEffectSettings settings)
     {
-        if (!ImGui.TreeNode("Accumulating Effects")) return;
+        if (!ImGui.CollapsingHeader("Accumulator VFX")) return;
+        settings.Validate();
         bool enabled = settings.Enabled;
         if (ImGui.Checkbox("Enable Layers", ref enabled)) { settings.Enabled = enabled; configuration.Save(); }
         if (ImGui.IsItemHovered()) ImGui.SetTooltip("Receiver AVFX while growth is pending, from any source. Use looping effects.");
@@ -711,11 +712,17 @@ public class ConfigWindow : Window, IDisposable
             string path = settings.Paths[i];
             if (ImGui.InputText("AVFX", ref path, 512)) { settings.Paths[i] = path; configuration.Save(); }
             ImGui.SameLine();
-            if (ImGui.SmallButton("Remove")) { settings.Paths.RemoveAt(i--); configuration.Save(); }
+            bool remove = ImGui.SmallButton("Remove");
+            float duration = settings.Durations[i];
+            if (ImGui.DragFloat("Repeat Every (s)", ref duration, 0.05f, 0f, 300f, "%.2f"))
+            { settings.Durations[i] = Math.Clamp(duration, 0f, 300f); configuration.Save(); }
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("0 keeps the effect active continuously. A positive time removes and restarts this layer while accumulation is active. AVFX may finish naturally sooner.");
+            if (remove) { settings.Paths.RemoveAt(i); settings.Durations.RemoveAt(i--); configuration.Save(); }
+            ImGui.Separator();
             ImGui.PopID();
         }
         ImGui.BeginDisabled(settings.Paths.Count >= 16);
-        if (ImGui.Button("+ Layer")) { settings.Paths.Add(string.Empty); configuration.Save(); }
+        if (ImGui.Button("+ Layer")) { settings.Paths.Add(string.Empty); settings.Durations.Add(0f); configuration.Save(); }
         ImGui.EndDisabled();
         float fadeIn = settings.FadeIn, fadeOut = settings.FadeOut;
         if (ImGui.DragFloat("Fade In (s)", ref fadeIn, 0.05f, 0f, 10f, "%.2f"))
@@ -731,13 +738,12 @@ public class ConfigWindow : Window, IDisposable
             if (ImGui.DragFloat("Afterglow (s)", ref seconds, 0.1f, 0f, 60f, "%.1f"))
             { settings.AfterglowSeconds = seconds; configuration.Save(); }
         }
-        ImGui.TreePop();
     }
 
     private void DrawDigestion(DigestionSettings settings, string id)
     {
         ImGui.PushID("digestion-" + id);
-        if (ImGui.TreeNode("Digestion Reserve"))
+        if (ImGui.CollapsingHeader($"Digestion Reserve##{id}"))
         {
             bool enabled = settings.Enabled;
             if (ImGui.Checkbox("Enabled", ref enabled)) { settings.Enabled = enabled; configuration.Save(); }
@@ -775,19 +781,19 @@ public class ConfigWindow : Window, IDisposable
                     }
                 }
             }
-            ImGui.TreePop();
         }
         ImGui.PopID();
     }
 
     private void DrawSizeDrain(SizeDrainSettings settings, string id)
     {
+        if (!ImGui.CollapsingHeader($"Size Drain##{id}")) return;
         ImGui.PushID($"SizeDrain{id}");
         bool enabled = settings.Enabled;
         if (ImGui.Checkbox("Size Drain", ref enabled))
         { settings.Enabled = enabled; configuration.SaveSizeDrain(settings); }
         if (ImGui.IsItemHovered()) ImGui.SetTooltip("Nearby sources grant growth once per second, even outside combat and beyond the size limit. Sources do not shrink.");
-        if (enabled && ImGui.TreeNode("Size Drain Settings"))
+        if (enabled)
         {
             bool inDuties = settings.EnableInDuties;
             if (ImGui.Checkbox("Enable in Duties", ref inDuties))
@@ -824,26 +830,30 @@ public class ConfigWindow : Window, IDisposable
             if (ImGui.SliderInt("Maximum Targets", ref maximumTargets, 1, 64))
             { settings.MaximumTargets = maximumTargets; configuration.SaveSizeDrain(settings); }
             if (ImGui.IsItemHovered()) ImGui.SetTooltip("Per receiving character. Keeps active targets until expiry or range exit; limits both growth sources and their effects.");
-            bool randomContributors = settings.RandomContributors;
-            if (ImGui.Checkbox("Random Contributors", ref randomContributors))
-            { settings.RandomContributors = randomContributors; configuration.SaveSizeDrain(settings); }
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Each nearby source rolls independently for a temporary contribution. Works with Everyone or the name list.");
-            if (randomContributors)
+            if (ImGui.TreeNode("Random Contributors"))
             {
-                float chance = settings.ContributorChancePercent;
-                if (ImGui.SliderFloat("Chance per Check", ref chance, 0f, 100f, "%.1f%%"))
-                { settings.ContributorChancePercent = chance; configuration.SaveSizeDrain(settings); }
-                float retry = settings.ContributorRetrySeconds;
-                if (ImGui.DragFloat("Retry Delay (s)", ref retry, 0.1f, 0.1f, 300f, "%.1f"))
-                { settings.ContributorRetrySeconds = retry; configuration.SaveSizeDrain(settings); }
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Wait after a failed roll or an expired contribution. One roll on entering range; no rolls while active.");
-                float minimum = settings.ContributorMinimumSeconds;
-                if (ImGui.DragFloat("Minimum Duration (s)", ref minimum, 0.1f, 0.1f, 300f, "%.1f"))
-                { settings.ContributorMinimumSeconds = minimum; configuration.SaveSizeDrain(settings); }
-                float maximum = settings.ContributorMaximumSeconds;
-                if (ImGui.DragFloat("Maximum Duration (s)", ref maximum, 0.1f, settings.ContributorMinimumSeconds, 300f, "%.1f"))
-                { settings.ContributorMaximumSeconds = maximum; configuration.SaveSizeDrain(settings); }
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Duration is chosen on activation. Leaving range ends contribution unless lingering is enabled. Multiple sources can overlap.");
+                bool randomContributors = settings.RandomContributors;
+                if (ImGui.Checkbox("Random Contributors", ref randomContributors))
+                { settings.RandomContributors = randomContributors; configuration.SaveSizeDrain(settings); }
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Each nearby source rolls independently for a temporary contribution. Works with Everyone or the name list.");
+                if (randomContributors)
+                {
+                    float chance = settings.ContributorChancePercent;
+                    if (ImGui.SliderFloat("Chance per Check", ref chance, 0f, 100f, "%.1f%%"))
+                    { settings.ContributorChancePercent = chance; configuration.SaveSizeDrain(settings); }
+                    float retry = settings.ContributorRetrySeconds;
+                    if (ImGui.DragFloat("Retry Delay (s)", ref retry, 0.1f, 0.1f, 300f, "%.1f"))
+                    { settings.ContributorRetrySeconds = retry; configuration.SaveSizeDrain(settings); }
+                    if (ImGui.IsItemHovered()) ImGui.SetTooltip("Wait after a failed roll or an expired contribution. One roll on entering range; no rolls while active.");
+                    float minimum = settings.ContributorMinimumSeconds;
+                    if (ImGui.DragFloat("Minimum Duration (s)", ref minimum, 0.1f, 0.1f, 300f, "%.1f"))
+                    { settings.ContributorMinimumSeconds = minimum; configuration.SaveSizeDrain(settings); }
+                    float maximum = settings.ContributorMaximumSeconds;
+                    if (ImGui.DragFloat("Maximum Duration (s)", ref maximum, 0.1f, settings.ContributorMinimumSeconds, 300f, "%.1f"))
+                    { settings.ContributorMaximumSeconds = maximum; configuration.SaveSizeDrain(settings); }
+                    if (ImGui.IsItemHovered()) ImGui.SetTooltip("Duration is chosen on activation. Leaving range ends contribution unless lingering is enabled. Multiple sources can overlap.");
+                }
+                ImGui.TreePop();
             }
             float range = settings.Range;
             if (ImGui.DragFloat("Range", ref range, 0.1f, 0.1f, 100f, "%.1f"))
@@ -860,131 +870,142 @@ public class ConfigWindow : Window, IDisposable
                 { settings.MaximumRange = maximum; configuration.SaveSizeDrain(settings); }
                 if (ImGui.IsItemHovered()) ImGui.SetTooltip("Based on settled size, excluding overshoot. Limited to loaded entities.");
             }
-            bool exposure = settings.ExposureBuildup;
-            if (ImGui.Checkbox("Exposure Buildup", ref exposure))
-            { settings.ExposureBuildup = exposure; configuration.SaveSizeDrain(settings); }
-            if (exposure)
+            if (ImGui.TreeNode("Exposure & Lingering"))
             {
-                float seconds = settings.ExposureSeconds;
-                if (ImGui.DragFloat("Exposure Time (s)", ref seconds, 0.1f, 0.1f, 300f, "%.1f"))
-                { settings.ExposureSeconds = seconds; configuration.SaveSizeDrain(settings); }
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Time at the source before contribution can begin. Up to 4x longer at range edge. Random rolls start after exposure. Leaving range resets buildup.");
-            }
-            bool linger = settings.LingeringCorruption;
-            if (ImGui.Checkbox("Lingering Corruption", ref linger))
-            { settings.LingeringCorruption = linger; configuration.SaveSizeDrain(settings); }
-            if (linger)
-            {
-                float seconds = settings.LingerSeconds;
-                if (ImGui.DragFloat("Linger Time (s)", ref seconds, 0.1f, 0.1f, 300f, "%.1f"))
-                { settings.LingerSeconds = seconds; configuration.SaveSizeDrain(settings); }
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Contribution fades after leaving range. Ends on expiry, death or despawn. Still occupies a target slot.");
+                bool exposure = settings.ExposureBuildup;
+                if (ImGui.Checkbox("Exposure Buildup", ref exposure))
+                { settings.ExposureBuildup = exposure; configuration.SaveSizeDrain(settings); }
+                if (exposure)
+                {
+                    float seconds = settings.ExposureSeconds;
+                    if (ImGui.DragFloat("Exposure Time (s)", ref seconds, 0.1f, 0.1f, 300f, "%.1f"))
+                    { settings.ExposureSeconds = seconds; configuration.SaveSizeDrain(settings); }
+                    if (ImGui.IsItemHovered()) ImGui.SetTooltip("Time at the source before contribution can begin. Up to 4x longer at range edge. Random rolls start after exposure. Leaving range resets buildup.");
+                }
+                bool linger = settings.LingeringCorruption;
+                if (ImGui.Checkbox("Lingering Corruption", ref linger))
+                { settings.LingeringCorruption = linger; configuration.SaveSizeDrain(settings); }
+                if (linger)
+                {
+                    float seconds = settings.LingerSeconds;
+                    if (ImGui.DragFloat("Linger Time (s)", ref seconds, 0.1f, 0.1f, 300f, "%.1f"))
+                    { settings.LingerSeconds = seconds; configuration.SaveSizeDrain(settings); }
+                    if (ImGui.IsItemHovered()) ImGui.SetTooltip("Contribution fades after leaving range. Ends on expiry, death or despawn. Still occupies a target slot.");
+                }
+                ImGui.TreePop();
             }
             float peak = settings.PeakHitPercent;
             if (ImGui.DragFloat("Peak Hit", ref peak, 0.01f, 0f, 100f, "%.2f%% HP"))
             { settings.PeakHitPercent = Math.Clamp(peak, 0f, 100f); configuration.SaveSizeDrain(settings); }
             if (ImGui.IsItemHovered()) ImGui.SetTooltip("Per-source maximum at zero distance, falling smoothly to zero at range. Sources stack. Uses the profile's damage multiplier, HP allowance and accumulator delay.");
-            // Keep these controls in a stable layout before and after enabling.
-            string receiverPath = settings.ReceiverVfxPath ?? string.Empty;
-            if (ImGui.InputText("Receiver AVFX", ref receiverPath, 512))
-            { settings.ReceiverVfxPath = receiverPath; configuration.SaveSizeDrain(settings); }
-            bool receiver = settings.ReceiverVfxEnabled;
-            bool receiverMissing = string.IsNullOrWhiteSpace(receiverPath);
-            ImGui.BeginDisabled(receiverMissing && !receiver);
-            if (ImGui.Checkbox("Receiver VFX", ref receiver))
-            { settings.ReceiverVfxEnabled = receiver; configuration.SaveSizeDrain(settings); }
-            ImGui.EndDisabled();
-            if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
-                ImGui.SetTooltip(receiverMissing ? "Enter an AVFX path first." : "Looping effect on the growing character.");
+            if (ImGui.TreeNode("Drain VFX"))
+            {
+                // Keep these controls in a stable layout before and after enabling.
+                string receiverPath = settings.ReceiverVfxPath ?? string.Empty;
+                if (ImGui.InputText("Receiver AVFX", ref receiverPath, 512))
+                { settings.ReceiverVfxPath = receiverPath; configuration.SaveSizeDrain(settings); }
+                bool receiver = settings.ReceiverVfxEnabled;
+                bool receiverMissing = string.IsNullOrWhiteSpace(receiverPath);
+                ImGui.BeginDisabled(receiverMissing && !receiver);
+                if (ImGui.Checkbox("Receiver VFX", ref receiver))
+                { settings.ReceiverVfxEnabled = receiver; configuration.SaveSizeDrain(settings); }
+                ImGui.EndDisabled();
+                if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
+                    ImGui.SetTooltip(receiverMissing ? "Enter an AVFX path first." : "Looping effect on the growing character.");
 
-            string sourcePath = settings.SourceVfxPath ?? string.Empty;
-            if (ImGui.InputText("Target AVFX", ref sourcePath, 512))
-            { settings.SourceVfxPath = sourcePath; configuration.SaveSizeDrain(settings); }
-            bool source = settings.SourceVfxEnabled;
-            bool sourceMissing = string.IsNullOrWhiteSpace(sourcePath);
-            ImGui.BeginDisabled(sourceMissing && !source);
-            if (ImGui.Checkbox("Target VFX", ref source))
-            { settings.SourceVfxEnabled = source; configuration.SaveSizeDrain(settings); }
-            ImGui.EndDisabled();
-            if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
-                ImGui.SetTooltip(sourceMissing ? "Enter an AVFX path first." : "Effect on each contributing source. Shared sources use Self's settings first.");
+                string sourcePath = settings.SourceVfxPath ?? string.Empty;
+                if (ImGui.InputText("Target AVFX", ref sourcePath, 512))
+                { settings.SourceVfxPath = sourcePath; configuration.SaveSizeDrain(settings); }
+                bool source = settings.SourceVfxEnabled;
+                bool sourceMissing = string.IsNullOrWhiteSpace(sourcePath);
+                ImGui.BeginDisabled(sourceMissing && !source);
+                if (ImGui.Checkbox("Target VFX", ref source))
+                { settings.SourceVfxEnabled = source; configuration.SaveSizeDrain(settings); }
+                ImGui.EndDisabled();
+                if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
+                    ImGui.SetTooltip(sourceMissing ? "Enter an AVFX path first." : "Effect on each contributing source. Shared sources use Self's settings first.");
 
-            float fadeIn = settings.FadeIn, fadeOut = settings.FadeOut;
-            if (ImGui.DragFloat("Fade In", ref fadeIn, 0.05f, 0f, 10f, "%.2fs"))
-            { settings.FadeIn = Math.Clamp(fadeIn, 0f, 10f); configuration.SaveSizeDrain(settings); }
-            if (ImGui.DragFloat("Fade Out", ref fadeOut, 0.05f, 0f, 10f, "%.2fs"))
-            { settings.FadeOut = Math.Clamp(fadeOut, 0f, 10f); configuration.SaveSizeDrain(settings); }
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Visible fading depends on the AVFX asset.");
-            ImGui.TreePop();
+                float fadeIn = settings.FadeIn, fadeOut = settings.FadeOut;
+                if (ImGui.DragFloat("Fade In", ref fadeIn, 0.05f, 0f, 10f, "%.2fs"))
+                { settings.FadeIn = Math.Clamp(fadeIn, 0f, 10f); configuration.SaveSizeDrain(settings); }
+                if (ImGui.DragFloat("Fade Out", ref fadeOut, 0.05f, 0f, 10f, "%.2fs"))
+                { settings.FadeOut = Math.Clamp(fadeOut, 0f, 10f); configuration.SaveSizeDrain(settings); }
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Visible fading depends on the AVFX asset.");
+                ImGui.TreePop();
+            }
         }
         ImGui.PopID();
     }
 
     private void DrawGrowthSettings(GrowthSettings settings, string id)
     {
-        bool onlyActiveInCombat = settings.OnlyActiveInCombat;
-        if (ImGui.Checkbox($"Only Active in Combat##{id}", ref onlyActiveInCombat))
+        if (ImGui.CollapsingHeader($"Growth Mode & Base Size##{id}", ImGuiTreeNodeFlags.DefaultOpen))
         {
-            settings.OnlyActiveInCombat = onlyActiveInCombat;
-            configuration.Save();
-        }
-
-        bool growFromDamage = settings.GrowFromDamage;
-        if (ImGui.Checkbox($"Grow From Damage##{id}", ref growFromDamage))
-        {
-            settings.GrowFromDamage = growFromDamage;
-            if (growFromDamage)
+            bool onlyActiveInCombat = settings.OnlyActiveInCombat;
+            if (ImGui.Checkbox($"Only Active in Combat##{id}", ref onlyActiveInCombat))
             {
-                settings.GrowthFromDelta = false;
-            }
-
-            configuration.Save();
-        }
-
-        bool growthFromDelta = settings.GrowthFromDelta;
-        if (ImGui.Checkbox($"Growth From Delta##{id}", ref growthFromDelta))
-        {
-            settings.GrowthFromDelta = growthFromDelta;
-            if (growthFromDelta)
-            {
-                settings.GrowFromDamage = false;
-            }
-
-            configuration.Save();
-        }
-
-        float speed = settings.Speed;
-        if (ImGui.DragFloat($"Speed##{id}", ref speed, 0.1f, 0.1f, 100.0f))
-        {
-            settings.Speed = Math.Clamp(speed, 0.1f, 100f);
-            configuration.Save();
-        }
-
-        float minScaleMultiplier = settings.MinScaleMultiplier;
-        if (ImGui.DragFloat(
-                $"Minimum Size Multiplier##{id}",
-                ref minScaleMultiplier,
-                0.01f,
-                0.01f,
-                1.00f))
-        {
-            settings.MinScaleMultiplier = Math.Clamp(minScaleMultiplier, 0.01f, 1f);
-            configuration.Save();
-        }
-
-        if (settings.GrowFromDamage)
-        {
-            float maxScaleMultiplier = settings.MaxScaleMultiplier;
-            if (ImGui.DragFloat(
-                    $"Maximum Size Multiplier##{id}",
-                    ref maxScaleMultiplier,
-                    0.1f,
-                    1.00f,
-                    10.00f))
-            {
-                settings.MaxScaleMultiplier = Math.Max(1f, maxScaleMultiplier);
+                settings.OnlyActiveInCombat = onlyActiveInCombat;
                 configuration.Save();
             }
+
+            bool growFromDamage = settings.GrowFromDamage;
+            if (ImGui.Checkbox($"Grow From Damage##{id}", ref growFromDamage))
+            {
+                settings.GrowFromDamage = growFromDamage;
+                if (growFromDamage)
+                {
+                    settings.GrowthFromDelta = false;
+                }
+
+                configuration.Save();
+            }
+
+            bool growthFromDelta = settings.GrowthFromDelta;
+            if (ImGui.Checkbox($"Growth From Delta##{id}", ref growthFromDelta))
+            {
+                settings.GrowthFromDelta = growthFromDelta;
+                if (growthFromDelta)
+                {
+                    settings.GrowFromDamage = false;
+                }
+
+                configuration.Save();
+            }
+
+            float speed = settings.Speed;
+            if (ImGui.DragFloat($"Speed##{id}", ref speed, 0.1f, 0.1f, 100.0f))
+            {
+                settings.Speed = Math.Clamp(speed, 0.1f, 100f);
+                configuration.Save();
+            }
+
+            float minScaleMultiplier = settings.MinScaleMultiplier;
+            if (ImGui.DragFloat(
+                    $"Minimum Size##{id}",
+                    ref minScaleMultiplier,
+                    0.01f,
+                    0.01f,
+                    1.00f))
+            {
+                settings.MinScaleMultiplier = Math.Clamp(minScaleMultiplier, 0.01f, 1f);
+                configuration.Save();
+            }
+
+            if (settings.GrowFromDamage)
+            {
+                float maxScaleMultiplier = settings.MaxScaleMultiplier;
+                if (ImGui.DragFloat(
+                        $"Maximum Size##{id}",
+                        ref maxScaleMultiplier,
+                        0.1f,
+                        1.00f,
+                        10.00f))
+                {
+                    settings.MaxScaleMultiplier = Math.Max(1f, maxScaleMultiplier);
+                    configuration.Save();
+                }
+            }
+
         }
 
         if (!settings.GrowthFromDelta) return;
@@ -995,583 +1016,629 @@ public class ConfigWindow : Window, IDisposable
         DrawDigestion(settings.Digestion, id);
         DrawSizeDrain(settings.SizeDrain, id);
 
-        bool aetherGrowth = settings.AetherProximityGrowth;
-        if (ImGui.Checkbox($"Aetheryte Proximity Growth##{id}", ref aetherGrowth))
-        { settings.AetherProximityGrowth = aetherGrowth; configuration.Save(); }
-        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Each crystal hits once per second. Damage rises smoothly as you approach. Overlaps stack; crystal growth bypasses the size limit, including outside combat.");
-        if (settings.AetherProximityGrowth)
+        if (ImGui.CollapsingHeader($"Aetherytes##{id}"))
         {
-            float range = settings.AetherProximityRange;
-            if (ImGui.DragFloat($"Aetheryte Range##{id}", ref range, 0.1f, 0.1f, 100f, "%.1f"))
-            { settings.AetherProximityRange = Math.Clamp(range, 0.1f, 100f); configuration.Save(); }
-
-            float shardHit = settings.AetherShardHitPercent;
-            if (ImGui.DragFloat($"Shard Peak Hit##{id}", ref shardHit, 0.01f, 0f, 100f, "%.2f%% HP"))
-            { settings.AetherShardHitPercent = Math.Clamp(shardHit, 0f, 100f); configuration.Save(); }
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Maximum at the source; fades to zero at range. Includes housing crystals. Per-hit HP allowance still applies.");
-            float largeHit = settings.AetherLargeHitPercent;
-            if (ImGui.DragFloat($"Large Peak Hit##{id}", ref largeHit, 0.01f, 0f, 100f, "%.2f%% HP"))
-            { settings.AetherLargeHitPercent = Math.Clamp(largeHit, 0f, 100f); configuration.Save(); }
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Peak HP-equivalent damage from a full-size aetheryte. Per-hit HP allowance still applies.");
-
-            ImGui.PushID($"AetherAudio{id}");
-            bool actorSound = settings.AetherActorSound.Enabled;
-            if (ImGui.Checkbox("Proximity Sound", ref actorSound))
-            { settings.AetherActorSound.Enabled = actorSound; configuration.Save(); }
-            if (actorSound) DrawHeartbeatSoundSlot("Proximity Loop", settings.AetherActorSound.Sound);
-            bool sourceSound = settings.AetherSourceSound.Enabled;
-            if (ImGui.Checkbox("Crystal Sound", ref sourceSound))
-            { settings.AetherSourceSound.Enabled = sourceSound; configuration.Save(); }
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("One positional loop at each contributing crystal. Shared crystals use Self's settings first.");
-            if (sourceSound) DrawHeartbeatSoundSlot("Crystal Loop", settings.AetherSourceSound.Sound);
-            ImGui.PopID();
-
-            bool actorVfx = settings.AetherActorVfxEnabled;
-            if (ImGui.Checkbox($"Proximity VFX##{id}", ref actorVfx))
-            { settings.AetherActorVfxEnabled = actorVfx; configuration.Save(); }
-            if (actorVfx)
+            bool aetherGrowth = settings.AetherProximityGrowth;
+            if (ImGui.Checkbox($"Aetheryte Proximity Growth##{id}", ref aetherGrowth))
+            { settings.AetherProximityGrowth = aetherGrowth; configuration.Save(); }
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Each crystal hits once per second. Damage rises smoothly as you approach. Overlaps stack; crystal growth bypasses the size limit, including outside combat.");
+            if (settings.AetherProximityGrowth)
             {
-                float fadeIn = settings.AetherActorVfxFadeIn;
-                if (ImGui.DragFloat($"Proximity Fade In##{id}", ref fadeIn, 0.05f, 0f, 10f, "%.2fs"))
-                { settings.AetherActorVfxFadeIn = Math.Clamp(fadeIn, 0f, 10f); configuration.Save(); }
-                float fadeOut = settings.AetherActorVfxFadeOut;
-                if (ImGui.DragFloat($"Proximity Fade Out##{id}", ref fadeOut, 0.05f, 0f, 10f, "%.2fs"))
-                { settings.AetherActorVfxFadeOut = Math.Clamp(fadeOut, 0f, 10f); configuration.Save(); }
-                string path = settings.AetherActorVfxPath;
-                if (ImGui.InputText($"Proximity AVFX##{id}", ref path, 512))
-                { settings.AetherActorVfxPath = path; configuration.Save(); }
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Character effect while affected. Use a looping game .avfx path. Separate from growth VFX.");
-            }
-            bool sourceVfx = settings.AetherSourceVfxEnabled;
-            if (ImGui.Checkbox($"Crystal VFX##{id}", ref sourceVfx))
-            { settings.AetherSourceVfxEnabled = sourceVfx; configuration.Save(); }
-            if (sourceVfx)
-            {
-                float fadeIn = settings.AetherSourceVfxFadeIn;
-                if (ImGui.DragFloat($"Crystal Fade In##{id}", ref fadeIn, 0.05f, 0f, 10f, "%.2fs"))
-                { settings.AetherSourceVfxFadeIn = Math.Clamp(fadeIn, 0f, 10f); configuration.Save(); }
-                float fadeOut = settings.AetherSourceVfxFadeOut;
-                if (ImGui.DragFloat($"Crystal Fade Out##{id}", ref fadeOut, 0.05f, 0f, 10f, "%.2fs"))
-                { settings.AetherSourceVfxFadeOut = Math.Clamp(fadeOut, 0f, 10f); configuration.Save(); }
-                string path = settings.AetherSourceVfxPath;
-                if (ImGui.InputText($"Crystal AVFX##{id}", ref path, 512))
-                { settings.AetherSourceVfxPath = path; configuration.Save(); }
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Use a looping .avfx. Shared crystals show one effect; Self takes priority.");
-                bool attached = settings.AetherSourceVfxAttached;
-                if (ImGui.Checkbox($"Attach to Crystal##{id}", ref attached))
-                { settings.AetherSourceVfxAttached = attached; configuration.Save(); }
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Target-bound playback. Disable for world-space AVFX. Character-only bone bindings may not work on crystals.");
-                float crystalScale = settings.AetherSourceVfxScale;
-                if (ImGui.DragFloat($"Crystal VFX Scale##{id}", ref crystalScale, 0.05f, 0.01f, 100f, "%.2fx"))
-                { settings.AetherSourceVfxScale = Math.Clamp(crystalScale, 0.01f, 100f); configuration.Save(); }
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Major aetherytes use twice this VFX scale. Shards use this value.");
-                if (!attached)
+                float range = settings.AetherProximityRange;
+                if (ImGui.DragFloat($"Aetheryte Range##{id}", ref range, 0.1f, 0.1f, 100f, "%.1f"))
+                { settings.AetherProximityRange = Math.Clamp(range, 0.1f, 100f); configuration.Save(); }
+
+                float shardHit = settings.AetherShardHitPercent;
+                if (ImGui.DragFloat($"Shard Peak Hit##{id}", ref shardHit, 0.01f, 0f, 100f, "%.2f%% HP"))
+                { settings.AetherShardHitPercent = Math.Clamp(shardHit, 0f, 100f); configuration.Save(); }
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Maximum at the source; fades to zero at range. Includes housing crystals. Per-hit HP allowance still applies.");
+                float largeHit = settings.AetherLargeHitPercent;
+                if (ImGui.DragFloat($"Large Peak Hit##{id}", ref largeHit, 0.01f, 0f, 100f, "%.2f%% HP"))
+                { settings.AetherLargeHitPercent = Math.Clamp(largeHit, 0f, 100f); configuration.Save(); }
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Peak HP-equivalent damage from a full-size aetheryte. Per-hit HP allowance still applies.");
+
+                ImGui.PushID($"AetherAudio{id}");
+                bool actorSound = settings.AetherActorSound.Enabled;
+                if (ImGui.Checkbox("Proximity Sound", ref actorSound))
+                { settings.AetherActorSound.Enabled = actorSound; configuration.Save(); }
+                if (actorSound) DrawHeartbeatSoundSlot("Proximity Loop", settings.AetherActorSound.Sound);
+                bool sourceSound = settings.AetherSourceSound.Enabled;
+                if (ImGui.Checkbox("Crystal Sound", ref sourceSound))
+                { settings.AetherSourceSound.Enabled = sourceSound; configuration.Save(); }
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("One positional loop at each contributing crystal. Shared crystals use Self's settings first.");
+                if (sourceSound) DrawHeartbeatSoundSlot("Crystal Loop", settings.AetherSourceSound.Sound);
+                ImGui.PopID();
+
+                bool actorVfx = settings.AetherActorVfxEnabled;
+                if (ImGui.Checkbox($"Proximity VFX##{id}", ref actorVfx))
+                { settings.AetherActorVfxEnabled = actorVfx; configuration.Save(); }
+                if (actorVfx)
                 {
-                    float height = settings.AetherSourceVfxHeight;
-                    if (ImGui.DragFloat($"Crystal VFX Height##{id}", ref height, 0.1f, -100f, 100f, "%.1f"))
-                    { settings.AetherSourceVfxHeight = Math.Clamp(height, -100f, 100f); configuration.Save(); }
+                    float fadeIn = settings.AetherActorVfxFadeIn;
+                    if (ImGui.DragFloat($"Proximity Fade In##{id}", ref fadeIn, 0.05f, 0f, 10f, "%.2fs"))
+                    { settings.AetherActorVfxFadeIn = Math.Clamp(fadeIn, 0f, 10f); configuration.Save(); }
+                    float fadeOut = settings.AetherActorVfxFadeOut;
+                    if (ImGui.DragFloat($"Proximity Fade Out##{id}", ref fadeOut, 0.05f, 0f, 10f, "%.2fs"))
+                    { settings.AetherActorVfxFadeOut = Math.Clamp(fadeOut, 0f, 10f); configuration.Save(); }
+                    string path = settings.AetherActorVfxPath;
+                    if (ImGui.InputText($"Proximity AVFX##{id}", ref path, 512))
+                    { settings.AetherActorVfxPath = path; configuration.Save(); }
+                    if (ImGui.IsItemHovered()) ImGui.SetTooltip("Character effect while affected. Use a looping game .avfx path. Separate from growth VFX.");
                 }
-                ImGui.TextDisabled(plugin.CrystalVfxStatus(settings));
+                bool sourceVfx = settings.AetherSourceVfxEnabled;
+                if (ImGui.Checkbox($"Crystal VFX##{id}", ref sourceVfx))
+                { settings.AetherSourceVfxEnabled = sourceVfx; configuration.Save(); }
+                if (sourceVfx)
+                {
+                    float fadeIn = settings.AetherSourceVfxFadeIn;
+                    if (ImGui.DragFloat($"Crystal Fade In##{id}", ref fadeIn, 0.05f, 0f, 10f, "%.2fs"))
+                    { settings.AetherSourceVfxFadeIn = Math.Clamp(fadeIn, 0f, 10f); configuration.Save(); }
+                    float fadeOut = settings.AetherSourceVfxFadeOut;
+                    if (ImGui.DragFloat($"Crystal Fade Out##{id}", ref fadeOut, 0.05f, 0f, 10f, "%.2fs"))
+                    { settings.AetherSourceVfxFadeOut = Math.Clamp(fadeOut, 0f, 10f); configuration.Save(); }
+                    string path = settings.AetherSourceVfxPath;
+                    if (ImGui.InputText($"Crystal AVFX##{id}", ref path, 512))
+                    { settings.AetherSourceVfxPath = path; configuration.Save(); }
+                    if (ImGui.IsItemHovered()) ImGui.SetTooltip("Use a looping .avfx. Shared crystals show one effect; Self takes priority.");
+                    bool attached = settings.AetherSourceVfxAttached;
+                    if (ImGui.Checkbox($"Attach to Crystal##{id}", ref attached))
+                    { settings.AetherSourceVfxAttached = attached; configuration.Save(); }
+                    if (ImGui.IsItemHovered()) ImGui.SetTooltip("Target-bound playback. Disable for world-space AVFX. Character-only bone bindings may not work on crystals.");
+                    float crystalScale = settings.AetherSourceVfxScale;
+                    if (ImGui.DragFloat($"Crystal VFX Scale##{id}", ref crystalScale, 0.05f, 0.01f, 100f, "%.2fx"))
+                    { settings.AetherSourceVfxScale = Math.Clamp(crystalScale, 0.01f, 100f); configuration.Save(); }
+                    if (ImGui.IsItemHovered()) ImGui.SetTooltip("Major aetherytes use twice this VFX scale. Shards use this value.");
+                    if (!attached)
+                    {
+                        float height = settings.AetherSourceVfxHeight;
+                        if (ImGui.DragFloat($"Crystal VFX Height##{id}", ref height, 0.1f, -100f, 100f, "%.1f"))
+                        { settings.AetherSourceVfxHeight = Math.Clamp(height, -100f, 100f); configuration.Save(); }
+                    }
+                    ImGui.TextDisabled(plugin.CrystalVfxStatus(settings));
+                }
             }
+
         }
 
-        float deltaGrowthMultiplier = settings.DeltaGrowthMultiplier;
-        if (ImGui.DragFloat(
-                $"Damage Growth Multiplier##{id}",
-                ref deltaGrowthMultiplier,
-                0.1f,
-                0.00f,
-                10.00f))
+        if (ImGui.CollapsingHeader($"Growth Amount & Accumulator##{id}"))
         {
-            settings.DeltaGrowthMultiplier = Math.Max(0f, deltaGrowthMultiplier);
-            configuration.Save();
-        }
-
-        bool scaleGrowthWithSize = settings.ScaleGrowthWithSize;
-        if (ImGui.Checkbox($"Scale Growth With Size##{id}", ref scaleGrowthWithSize))
-        {
-            settings.ScaleGrowthWithSize = scaleGrowthWithSize;
-            configuration.Save();
-        }
-        if (ImGui.IsItemHovered())
-            ImGui.SetTooltip("Compound growth from settled size. Overshoot is excluded.");
-
-        float maximumHealthLossPercent =
-            settings.MaximumHealthLossRatioPerTrigger * 100f;
-        if (ImGui.DragFloat(
-                $"Maximum HP Loss Counted Per Trigger (%)##{id}",
-                ref maximumHealthLossPercent,
-                1.0f,
-                0.00f,
-                100.00f,
-                "%.1f"))
-        {
-            settings.MaximumHealthLossRatioPerTrigger =
-                Math.Clamp(maximumHealthLossPercent / 100f, 0f, 1f);
-            configuration.Save();
-        }
-        ImGui.TextDisabled("Caps counted HP loss only.");
-
-        bool limitDeltaGrowth = settings.LimitDeltaGrowth;
-        if (ImGui.Checkbox($"Limit Delta Growth##{id}", ref limitDeltaGrowth))
-        {
-            settings.LimitDeltaGrowth = limitDeltaGrowth;
-            configuration.Save();
-        }
-
-        if (settings.LimitDeltaGrowth)
-        {
-            float deltaMaxScaleMultiplier = settings.DeltaMaxScaleMultiplier;
+            float deltaGrowthMultiplier = settings.DeltaGrowthMultiplier;
             if (ImGui.DragFloat(
-                    $"Delta Maximum Size Multiplier##{id}",
-                    ref deltaMaxScaleMultiplier,
+                    $"Damage Growth Multiplier##{id}",
+                    ref deltaGrowthMultiplier,
                     0.1f,
+                    0.00f,
+                    10.00f))
+            {
+                settings.DeltaGrowthMultiplier = Math.Max(0f, deltaGrowthMultiplier);
+                configuration.Save();
+            }
+
+            bool scaleGrowthWithSize = settings.ScaleGrowthWithSize;
+            if (ImGui.Checkbox($"Scale Growth With Size##{id}", ref scaleGrowthWithSize))
+            {
+                settings.ScaleGrowthWithSize = scaleGrowthWithSize;
+                configuration.Save();
+            }
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Compound growth from settled size. Overshoot is excluded.");
+
+            float maximumHealthLossPercent =
+                settings.MaximumHealthLossRatioPerTrigger * 100f;
+            if (ImGui.DragFloat(
+                    $"HP Loss Cap (%)##{id}",
+                    ref maximumHealthLossPercent,
+                    1.0f,
+                    0.00f,
+                    100.00f,
+                    "%.1f"))
+            {
+                settings.MaximumHealthLossRatioPerTrigger =
+                    Math.Clamp(maximumHealthLossPercent / 100f, 0f, 1f);
+                configuration.Save();
+            }
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Caps the HP loss counted for each hit.");
+
+            bool limitDeltaGrowth = settings.LimitDeltaGrowth;
+            if (ImGui.Checkbox($"Limit Delta Growth##{id}", ref limitDeltaGrowth))
+            {
+                settings.LimitDeltaGrowth = limitDeltaGrowth;
+                configuration.Save();
+            }
+
+            if (settings.LimitDeltaGrowth)
+            {
+                float deltaMaxScaleMultiplier = settings.DeltaMaxScaleMultiplier;
+                if (ImGui.DragFloat(
+                        $"Size Limit##{id}",
+                        ref deltaMaxScaleMultiplier,
+                        0.1f,
+                        1.00f,
+                        100.00f))
+                {
+                    settings.DeltaMaxScaleMultiplier = Math.Max(1f, deltaMaxScaleMultiplier);
+                    configuration.Save();
+                }
+            }
+
+            float accumulatorDelaySeconds = settings.AccumulatorDelaySeconds;
+            if (ImGui.DragFloat(
+                    $"Release Interval (s)##{id}",
+                    ref accumulatorDelaySeconds,
+                    0.1f,
+                    0.00f,
+                    60.00f,
+                    "%.1f"))
+            {
+                settings.AccumulatorDelaySeconds =
+                    Math.Clamp(accumulatorDelaySeconds, 0f, 60f);
+                configuration.Save();
+            }
+
+        }
+
+        if (ImGui.CollapsingHeader($"Overshoot##{id}"))
+        {
+            float growthOvershootPercent = settings.GrowthOvershootPercent;
+            if (ImGui.DragFloat(
+                    $"Overshoot (%)##{id}",
+                    ref growthOvershootPercent,
+                    1.0f,
+                    0.00f,
+                    500.00f,
+                    "%.1f"))
+            {
+                settings.GrowthOvershootPercent =
+                    Math.Clamp(growthOvershootPercent, 0f, 500f);
+                configuration.Save();
+            }
+
+            if (settings.GrowthOvershootPercent > 0f)
+            {
+                float smallBoost = settings.GrowthOvershootSmallBoost;
+                if (ImGui.DragFloat($"Small Growth Boost##{id}", ref smallBoost, 0.1f, 1f, 100f, "%.1fx"))
+                {
+                    settings.GrowthOvershootSmallBoost = Math.Clamp(smallBoost, 1f, 100f);
+                    configuration.Save();
+                }
+                if (ImGui.IsItemHovered())
+                    ImGui.SetTooltip("Extra overshoot for small releases. 1x disables the boost.");
+                float boostRange = settings.GrowthOvershootBoostRangePercent;
+                if (ImGui.DragFloat($"Boost Range (%)##{id}", ref boostRange, 0.1f, 0.01f, 100f, "%.2f"))
+                {
+                    settings.GrowthOvershootBoostRangePercent = Math.Clamp(boostRange, 0.01f, 100f);
+                    configuration.Save();
+                }
+                if (ImGui.IsItemHovered())
+                    ImGui.SetTooltip("New growth as % of the growth reference size where the extra boost is halved. Higher extends the boost to larger releases.");
+
+                float riseSeconds = settings.GrowthOvershootRiseSeconds;
+                if (ImGui.DragFloat($"Rise Time (s)##{id}",
+                        ref riseSeconds, 0.05f, 0.05f, 10f, "%.2f"))
+                {
+                    settings.GrowthOvershootRiseSeconds = Math.Clamp(riseSeconds, 0.05f, 10f);
+                    configuration.Save();
+                }
+
+                float growthOvershootSettleSeconds =
+                    settings.GrowthOvershootSettleSeconds;
+                if (ImGui.DragFloat(
+                        $"Settle Time (s)##{id}",
+                        ref growthOvershootSettleSeconds,
+                        0.05f,
+                        0.05f,
+                        10.00f,
+                        "%.2f"))
+                {
+                    settings.GrowthOvershootSettleSeconds =
+                        Math.Clamp(growthOvershootSettleSeconds, 0.05f, 10f);
+                    configuration.Save();
+                }
+
+                float riseCurve = settings.GrowthOvershootRiseCurve;
+                if (ImGui.SliderFloat($"Rise Curve##{id}", ref riseCurve, -2f, 2f, "%.2f"))
+                {
+                    settings.GrowthOvershootRiseCurve = riseCurve;
+                    configuration.Save();
+                }
+                float returnCurve = settings.GrowthOvershootReturnCurve;
+                if (ImGui.SliderFloat($"Return Curve##{id}", ref returnCurve, -2f, 2f, "%.2f"))
+                {
+                    settings.GrowthOvershootReturnCurve = returnCurve;
+                    configuration.Save();
+                }
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Negative shifts the curve earlier; positive shifts it later. The peak may exceed the size limit.");
+
+
+            }
+
+
+        }
+
+        if (ImGui.CollapsingHeader($"Shrink & Height##{id}"))
+        {
+            float ambientShrinkRate = settings.AmbientShrinkRate;
+            if (ImGui.DragFloat(
+                    $"Ambient Shrink Per Second##{id}",
+                    ref ambientShrinkRate,
+                    0.01f,
+                    0.00f,
+                    10.00f))
+            {
+                settings.AmbientShrinkRate = Math.Max(0f, ambientShrinkRate);
+                configuration.Save();
+            }
+
+            float outOfCombatDecayMultiplier = settings.OutOfCombatDecayMultiplier;
+            if (ImGui.DragFloat(
+                    $"Out-of-Combat Shrink##{id}",
+                    ref outOfCombatDecayMultiplier,
+                    0.5f,
                     1.00f,
                     100.00f))
             {
-                settings.DeltaMaxScaleMultiplier = Math.Max(1f, deltaMaxScaleMultiplier);
+                settings.OutOfCombatDecayMultiplier = Math.Max(1f, outOfCombatDecayMultiplier);
                 configuration.Save();
             }
+
+            bool enableDeltaHeightOffset = settings.EnableDeltaHeightOffset;
+            if (ImGui.Checkbox($"Enable Growth Height Offset##{id}", ref enableDeltaHeightOffset))
+            {
+                settings.EnableDeltaHeightOffset = enableDeltaHeightOffset;
+                configuration.Save();
+            }
+
+            if (settings.EnableDeltaHeightOffset)
+            {
+                float deltaHeightOffsetPerScale = settings.DeltaHeightOffsetPerScale;
+                if (ImGui.DragFloat(
+                        $"Height Offset Per Extra 1x##{id}",
+                        ref deltaHeightOffsetPerScale,
+                        0.01f,
+                        0.00f,
+                        5.00f))
+                {
+                    settings.DeltaHeightOffsetPerScale = Math.Max(0f, deltaHeightOffsetPerScale);
+                    configuration.Save();
+                }
+            }
+
         }
 
-        float accumulatorDelaySeconds = settings.AccumulatorDelaySeconds;
-        if (ImGui.DragFloat(
-                $"Accumulator Delay (Seconds)##{id}",
-                ref accumulatorDelaySeconds,
-                0.1f,
-                0.00f,
-                60.00f,
-                "%.1f"))
+        if (ImGui.CollapsingHeader($"Growth Sound##{id}"))
         {
-            settings.AccumulatorDelaySeconds =
-                Math.Clamp(accumulatorDelaySeconds, 0f, 60f);
-            configuration.Save();
+            bool enableDeltaGrowthSound = settings.EnableDeltaGrowthSound;
+            if (ImGui.Checkbox($"Enable Growth Sound##{id}", ref enableDeltaGrowthSound))
+            {
+                settings.EnableDeltaGrowthSound = enableDeltaGrowthSound;
+                configuration.Save();
+            }
+
+            if (settings.EnableDeltaGrowthSound)
+            {
+
+                string deltaGrowthSoundPath = settings.DeltaGrowthSoundPath;
+                if (ImGui.InputText(
+                        $"Growth SCD Path##{id}",
+                        ref deltaGrowthSoundPath,
+                        256))
+                {
+                    settings.DeltaGrowthSoundPath = deltaGrowthSoundPath;
+                    growthSoundTestResult = string.Empty;
+                    configuration.Save();
+                }
+
+                float deltaGrowthSoundVolume = settings.DeltaGrowthSoundVolume;
+                if (ImGui.DragFloat(
+                        $"Growth Sound Volume##{id}",
+                        ref deltaGrowthSoundVolume,
+                        0.01f,
+                        0.00f,
+                        20.00f))
+                {
+                    settings.DeltaGrowthSoundVolume =
+                        Math.Clamp(deltaGrowthSoundVolume, 0f, 20f);
+                    growthSoundTestResult = string.Empty;
+                    configuration.Save();
+                }
+
+                bool sizeVolume = settings.DeltaGrowthSoundSizeDrivenVolume;
+                if (ImGui.Checkbox($"Louder With Size##growth-sound-{id}", ref sizeVolume))
+                { settings.DeltaGrowthSoundSizeDrivenVolume = sizeVolume; configuration.Save(); }
+                if (settings.DeltaGrowthSoundSizeDrivenVolume)
+                {
+                    float gain = settings.DeltaGrowthSoundVolumeGainPerScale;
+                    if (ImGui.SliderFloat($"Volume Gain per 1x##growth-sound-{id}", ref gain, 0f, 20f, "%.2fx"))
+                    { settings.DeltaGrowthSoundVolumeGainPerScale = gain; configuration.Save(); }
+                    if (ImGui.IsItemHovered()) ImGui.SetTooltip("Fraction of base volume added per extra 1x size. 0.25 adds 25%.");
+                    float maximum = settings.DeltaGrowthSoundMaximumVolume;
+                    if (ImGui.SliderFloat($"Maximum Volume##growth-sound-{id}", ref maximum, 0f, 20f, "%.2fx"))
+                    { settings.DeltaGrowthSoundMaximumVolume = maximum; configuration.Save(); }
+                }
+                bool sizeRate = settings.DeltaGrowthSoundSizeDrivenRate;
+                if (ImGui.Checkbox($"Lower Pitch With Size##growth-sound-{id}", ref sizeRate))
+                { settings.DeltaGrowthSoundSizeDrivenRate = sizeRate; configuration.Save(); }
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Slows the growth SCD at its starting settled size. Also lengthens the sound.");
+                if (settings.DeltaGrowthSoundSizeDrivenRate)
+                {
+                    float drop = settings.DeltaGrowthSoundRateDropPerScale;
+                    if (ImGui.SliderFloat($"Rate Drop per 1x##growth-sound-{id}", ref drop, 0f, 1f, "%.2f"))
+                    { settings.DeltaGrowthSoundRateDropPerScale = drop; configuration.Save(); }
+                    float minimum = settings.DeltaGrowthSoundMinimumRate;
+                    if (ImGui.SliderFloat($"Minimum Rate##growth-sound-{id}", ref minimum, 0.1f, 1f, "%.2fx"))
+                    { settings.DeltaGrowthSoundMinimumRate = minimum; configuration.Save(); }
+                }
+                int deltaGrowthSoundIndex = settings.DeltaGrowthSoundIndex;
+                if (ImGui.DragInt(
+                        $"SCD Sound Index##{id}",
+                        ref deltaGrowthSoundIndex,
+                        1f,
+                        0,
+                        255))
+                {
+                    settings.DeltaGrowthSoundIndex = Math.Max(0, deltaGrowthSoundIndex);
+                    growthSoundTestResult = string.Empty;
+                    configuration.Save();
+                }
+
+                float deltaGrowthSoundCooldown =
+                    settings.DeltaGrowthSoundCooldownSeconds;
+                if (ImGui.DragFloat(
+                        $"Cooldown (s)##sound-{id}",
+                        ref deltaGrowthSoundCooldown,
+                        0.05f,
+                        0.00f,
+                        10.00f,
+                        "%.2f"))
+                {
+                    settings.DeltaGrowthSoundCooldownSeconds =
+                        Math.Clamp(deltaGrowthSoundCooldown, 0f, 60f);
+                    configuration.Save();
+                }
+
+
+                if (ImGui.Button($"Test Sound at Yourself##{id}"))
+                {
+                    growthSoundTestResult = plugin.TestDeltaGrowthSound(settings);
+                    growthSoundTestSucceeded =
+                        growthSoundTestResult.StartsWith("Playback request accepted", StringComparison.Ordinal);
+                }
+
+                if (growthSoundTestResult.Length > 0)
+                {
+                    ImGui.TextColored(
+                        growthSoundTestSucceeded
+                            ? new Vector4(0.35f, 1f, 0.45f, 1f)
+                            : new Vector4(1f, 0.35f, 0.35f, 1f),
+                        growthSoundTestResult);
+                }
+            }
+
         }
 
-        float growthOvershootPercent = settings.GrowthOvershootPercent;
-        if (ImGui.DragFloat(
-                $"Growth Overshoot (% of New Growth)##{id}",
-                ref growthOvershootPercent,
-                1.0f,
-                0.00f,
-                500.00f,
-                "%.1f"))
+        if (ImGui.CollapsingHeader($"Growth Pulse VFX##{id}"))
         {
-            settings.GrowthOvershootPercent =
-                Math.Clamp(growthOvershootPercent, 0f, 500f);
-            configuration.Save();
-        }
-
-        if (settings.GrowthOvershootPercent > 0f)
-        {
-            float smallBoost = settings.GrowthOvershootSmallBoost;
-            if (ImGui.DragFloat($"Small Growth Boost##{id}", ref smallBoost, 0.1f, 1f, 100f, "%.1fx"))
-            {
-                settings.GrowthOvershootSmallBoost = Math.Clamp(smallBoost, 1f, 100f);
-                configuration.Save();
-            }
-            if (ImGui.IsItemHovered())
-                ImGui.SetTooltip("Extra overshoot for small releases. 1x disables the boost.");
-            float boostRange = settings.GrowthOvershootBoostRangePercent;
-            if (ImGui.DragFloat($"Boost Range (%)##{id}", ref boostRange, 0.1f, 0.01f, 100f, "%.2f"))
-            {
-                settings.GrowthOvershootBoostRangePercent = Math.Clamp(boostRange, 0.01f, 100f);
-                configuration.Save();
-            }
-            if (ImGui.IsItemHovered())
-                ImGui.SetTooltip("New growth as % of the growth reference size where the extra boost is halved. Higher extends the boost to larger releases.");
-
-            float riseSeconds = settings.GrowthOvershootRiseSeconds;
-            if (ImGui.DragFloat($"Overshoot Rise Time (Seconds)##{id}",
-                    ref riseSeconds, 0.05f, 0.05f, 10f, "%.2f"))
-            {
-                settings.GrowthOvershootRiseSeconds = Math.Clamp(riseSeconds, 0.05f, 10f);
-                configuration.Save();
-            }
-
-            float growthOvershootSettleSeconds =
-                settings.GrowthOvershootSettleSeconds;
-            if (ImGui.DragFloat(
-                    $"Overshoot Settle Time (Seconds)##{id}",
-                    ref growthOvershootSettleSeconds,
-                    0.05f,
-                    0.05f,
-                    10.00f,
-                    "%.2f"))
-            {
-                settings.GrowthOvershootSettleSeconds =
-                    Math.Clamp(growthOvershootSettleSeconds, 0.05f, 10f);
-                configuration.Save();
-            }
-
-            float riseCurve = settings.GrowthOvershootRiseCurve;
-            if (ImGui.SliderFloat($"Rise Curve##{id}", ref riseCurve, -2f, 2f, "%.2f"))
-            {
-                settings.GrowthOvershootRiseCurve = riseCurve;
-                configuration.Save();
-            }
-            float returnCurve = settings.GrowthOvershootReturnCurve;
-            if (ImGui.SliderFloat($"Return Curve##{id}", ref returnCurve, -2f, 2f, "%.2f"))
-            {
-                settings.GrowthOvershootReturnCurve = returnCurve;
-                configuration.Save();
-            }
-            ImGui.TextDisabled("Curve: negative earlier; positive later.");
-
-            ImGui.TextDisabled("Peak can exceed cap.");
-        }
-
-
-        float ambientShrinkRate = settings.AmbientShrinkRate;
-        if (ImGui.DragFloat(
-                $"Ambient Shrink Per Second##{id}",
-                ref ambientShrinkRate,
-                0.01f,
-                0.00f,
-                10.00f))
-        {
-            settings.AmbientShrinkRate = Math.Max(0f, ambientShrinkRate);
-            configuration.Save();
-        }
-
-        float outOfCombatDecayMultiplier = settings.OutOfCombatDecayMultiplier;
-        if (ImGui.DragFloat(
-                $"Out of Combat Decay Multiplier##{id}",
-                ref outOfCombatDecayMultiplier,
-                0.5f,
-                1.00f,
-                100.00f))
-        {
-            settings.OutOfCombatDecayMultiplier = Math.Max(1f, outOfCombatDecayMultiplier);
-            configuration.Save();
-        }
-
-        bool enableDeltaHeightOffset = settings.EnableDeltaHeightOffset;
-        if (ImGui.Checkbox($"Enable Growth Height Offset##{id}", ref enableDeltaHeightOffset))
-        {
-            settings.EnableDeltaHeightOffset = enableDeltaHeightOffset;
-            configuration.Save();
-        }
-
-        if (settings.EnableDeltaHeightOffset)
-        {
-            float deltaHeightOffsetPerScale = settings.DeltaHeightOffsetPerScale;
-            if (ImGui.DragFloat(
-                    $"Height Offset Per Extra 1x##{id}",
-                    ref deltaHeightOffsetPerScale,
-                    0.01f,
-                    0.00f,
-                    5.00f))
-            {
-                settings.DeltaHeightOffsetPerScale = Math.Max(0f, deltaHeightOffsetPerScale);
-                configuration.Save();
-            }
-        }
-
-        bool enableDeltaGrowthSound = settings.EnableDeltaGrowthSound;
-        if (ImGui.Checkbox($"Play Sound When Delta Growth Triggers##{id}", ref enableDeltaGrowthSound))
-        {
-            settings.EnableDeltaGrowthSound = enableDeltaGrowthSound;
-            configuration.Save();
-        }
-
-        if (settings.EnableDeltaGrowthSound)
-        {
-
-            string deltaGrowthSoundPath = settings.DeltaGrowthSoundPath;
-            if (ImGui.InputText(
-                    $"Growth SCD Path##{id}",
-                    ref deltaGrowthSoundPath,
-                    256))
-            {
-                settings.DeltaGrowthSoundPath = deltaGrowthSoundPath;
-                growthSoundTestResult = string.Empty;
-                configuration.Save();
-            }
-
-            float deltaGrowthSoundVolume = settings.DeltaGrowthSoundVolume;
-            if (ImGui.DragFloat(
-                    $"Growth Sound Volume##{id}",
-                    ref deltaGrowthSoundVolume,
-                    0.01f,
-                    0.00f,
-                    20.00f))
-            {
-                settings.DeltaGrowthSoundVolume =
-                    Math.Clamp(deltaGrowthSoundVolume, 0f, 20f);
-                growthSoundTestResult = string.Empty;
-                configuration.Save();
-            }
-
-            bool sizeVolume = settings.DeltaGrowthSoundSizeDrivenVolume;
-            if (ImGui.Checkbox($"Louder With Size##growth-sound-{id}", ref sizeVolume))
-            { settings.DeltaGrowthSoundSizeDrivenVolume = sizeVolume; configuration.Save(); }
-            if (settings.DeltaGrowthSoundSizeDrivenVolume)
-            {
-                float gain = settings.DeltaGrowthSoundVolumeGainPerScale;
-                if (ImGui.SliderFloat($"Volume Gain per 1x##growth-sound-{id}", ref gain, 0f, 20f, "%.2fx"))
-                { settings.DeltaGrowthSoundVolumeGainPerScale = gain; configuration.Save(); }
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Fraction of base volume added per extra 1x size. 0.25 adds 25%.");
-                float maximum = settings.DeltaGrowthSoundMaximumVolume;
-                if (ImGui.SliderFloat($"Maximum Volume##growth-sound-{id}", ref maximum, 0f, 20f, "%.2fx"))
-                { settings.DeltaGrowthSoundMaximumVolume = maximum; configuration.Save(); }
-            }
-            bool sizeRate = settings.DeltaGrowthSoundSizeDrivenRate;
-            if (ImGui.Checkbox($"Lower Pitch With Size##growth-sound-{id}", ref sizeRate))
-            { settings.DeltaGrowthSoundSizeDrivenRate = sizeRate; configuration.Save(); }
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Slows the growth SCD at its starting settled size. Also lengthens the sound.");
-            if (settings.DeltaGrowthSoundSizeDrivenRate)
-            {
-                float drop = settings.DeltaGrowthSoundRateDropPerScale;
-                if (ImGui.SliderFloat($"Rate Drop per 1x##growth-sound-{id}", ref drop, 0f, 1f, "%.2f"))
-                { settings.DeltaGrowthSoundRateDropPerScale = drop; configuration.Save(); }
-                float minimum = settings.DeltaGrowthSoundMinimumRate;
-                if (ImGui.SliderFloat($"Minimum Rate##growth-sound-{id}", ref minimum, 0.1f, 1f, "%.2fx"))
-                { settings.DeltaGrowthSoundMinimumRate = minimum; configuration.Save(); }
-            }
-            int deltaGrowthSoundIndex = settings.DeltaGrowthSoundIndex;
-            if (ImGui.DragInt(
-                    $"SCD Sound Index##{id}",
-                    ref deltaGrowthSoundIndex,
-                    1f,
-                    0,
-                    255))
-            {
-                settings.DeltaGrowthSoundIndex = Math.Max(0, deltaGrowthSoundIndex);
-                growthSoundTestResult = string.Empty;
-                configuration.Save();
-            }
-
-            float deltaGrowthSoundCooldown =
-                settings.DeltaGrowthSoundCooldownSeconds;
-            if (ImGui.DragFloat(
-                    $"Minimum Seconds Between Sounds##{id}",
-                    ref deltaGrowthSoundCooldown,
-                    0.05f,
-                    0.00f,
-                    10.00f,
-                    "%.2f"))
-            {
-                settings.DeltaGrowthSoundCooldownSeconds =
-                    Math.Clamp(deltaGrowthSoundCooldown, 0f, 60f);
-                configuration.Save();
-            }
-
-
-            if (ImGui.Button($"Test Sound at Yourself##{id}"))
-            {
-                growthSoundTestResult = plugin.TestDeltaGrowthSound(settings);
-                growthSoundTestSucceeded =
-                    growthSoundTestResult.StartsWith("Playback request accepted", StringComparison.Ordinal);
-            }
-
-            if (growthSoundTestResult.Length > 0)
-            {
-                ImGui.TextColored(
-                    growthSoundTestSucceeded
-                        ? new Vector4(0.35f, 1f, 0.45f, 1f)
-                        : new Vector4(1f, 0.35f, 0.35f, 1f),
-                    growthSoundTestResult);
-            }
-        }
-
-        bool enableDeltaGrowthVfx = settings.EnableDeltaGrowthVfx;
-        if (ImGui.Checkbox(
-                $"Play Actor VFX When Delta Growth Triggers##{id}",
-                ref enableDeltaGrowthVfx))
-        {
-            settings.EnableDeltaGrowthVfx = enableDeltaGrowthVfx;
-            configuration.Save();
-        }
-
-        if (settings.EnableDeltaGrowthVfx)
-        {
-
-            string deltaGrowthVfxPath = settings.DeltaGrowthVfxPath;
-            if (ImGui.InputText(
-                    $"Growth AVFX Path##{id}",
-                    ref deltaGrowthVfxPath,
-                    256))
-            {
-                settings.DeltaGrowthVfxPath = deltaGrowthVfxPath;
-                growthVfxTestResult = string.Empty;
-                configuration.Save();
-            }
-
-            ImGui.PushID($"GrowthLayers-{id}");
-            for (int i = 0; i < settings.AdditionalGrowthVfxPaths.Count; i++)
-            {
-                ImGui.PushID(i);
-                string layer = settings.AdditionalGrowthVfxPaths[i];
-                if (ImGui.InputText("Layer AVFX", ref layer, 512))
-                { settings.AdditionalGrowthVfxPaths[i] = layer; configuration.Save(); }
-                ImGui.SameLine();
-                if (ImGui.SmallButton("Remove"))
-                { settings.AdditionalGrowthVfxPaths.RemoveAt(i--); configuration.Save(); }
-                ImGui.PopID();
-            }
-            ImGui.BeginDisabled(settings.AdditionalGrowthVfxPaths.Count >= 15);
-            if (ImGui.Button("+ Layer"))
-            { settings.AdditionalGrowthVfxPaths.Add(string.Empty); configuration.Save(); }
-            ImGui.EndDisabled();
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("All filled layers play together per growth pulse. Up to 16 effects including the main path; shared scale, lifetime and cooldown.");
-            ImGui.PopID();
-
-            float deltaGrowthVfxDuration =
-                settings.DeltaGrowthVfxDurationSeconds;
-            if (ImGui.DragFloat(
-                    $"VFX Removal Time (Seconds)##{id}",
-                    ref deltaGrowthVfxDuration,
-                    0.05f,
-                    0.05f,
-                    300.00f,
-                    "%.2f"))
-            {
-                settings.DeltaGrowthVfxDurationSeconds =
-                    Math.Clamp(deltaGrowthVfxDuration, 0.05f, 300f);
-                configuration.Save();
-            }
-
-            float deltaGrowthVfxCooldown =
-                settings.DeltaGrowthVfxCooldownSeconds;
-            if (ImGui.DragFloat(
-                    $"Minimum Seconds Between VFX##{id}",
-                    ref deltaGrowthVfxCooldown,
-                    0.05f,
-                    0.00f,
-                    60.00f,
-                    "%.2f"))
-            {
-                settings.DeltaGrowthVfxCooldownSeconds =
-                    Math.Clamp(deltaGrowthVfxCooldown, 0f, 60f);
-                configuration.Save();
-            }
-
-            float deltaGrowthVfxScale = settings.DeltaGrowthVfxScale;
-            if (ImGui.DragFloat(
-                    $"VFX Scale##{id}",
-                    ref deltaGrowthVfxScale,
-                    0.05f,
-                    0.01f,
-                    100.00f,
-                    "%.2f"))
-            {
-                settings.DeltaGrowthVfxScale =
-                    Math.Clamp(deltaGrowthVfxScale, 0.01f, 100f);
-                configuration.Save();
-            }
-
-            bool deltaGrowthVfxScaleWithActor =
-                settings.DeltaGrowthVfxScaleWithActor;
+            bool enableDeltaGrowthVfx = settings.EnableDeltaGrowthVfx;
             if (ImGui.Checkbox(
-                    $"Scale VFX With Actor Growth##{id}",
-                    ref deltaGrowthVfxScaleWithActor))
+                    $"Enable Pulse VFX##{id}",
+                    ref enableDeltaGrowthVfx))
             {
-                settings.DeltaGrowthVfxScaleWithActor =
-                    deltaGrowthVfxScaleWithActor;
+                settings.EnableDeltaGrowthVfx = enableDeltaGrowthVfx;
                 configuration.Save();
             }
 
-
-            if (ImGui.Button($"Test VFX at Yourself##{id}"))
+            if (settings.EnableDeltaGrowthVfx)
             {
-                growthVfxTestResult = plugin.TestDeltaGrowthVfx(settings);
-                growthVfxTestSucceeded =
-                    growthVfxTestResult.StartsWith(
-                        "Actor-root VFX created",
-                        StringComparison.Ordinal);
+
+                string deltaGrowthVfxPath = settings.DeltaGrowthVfxPath;
+                if (ImGui.InputText(
+                        $"Growth AVFX Path##{id}",
+                        ref deltaGrowthVfxPath,
+                        256))
+                {
+                    settings.DeltaGrowthVfxPath = deltaGrowthVfxPath;
+                    growthVfxTestResult = string.Empty;
+                    configuration.Save();
+                }
+
+                float deltaGrowthVfxDuration =
+                    settings.DeltaGrowthVfxDurationSeconds;
+                if (ImGui.DragFloat(
+                        $"Duration (s)##{id}",
+                        ref deltaGrowthVfxDuration,
+                        0.05f,
+                        0.05f,
+                        300.00f,
+                        "%.2f"))
+                {
+                    settings.DeltaGrowthVfxDurationSeconds =
+                        Math.Clamp(deltaGrowthVfxDuration, 0.05f, 300f);
+                    configuration.Save();
+                }
+
+                bool restartMain = settings.DeltaGrowthVfxRestart;
+                if (ImGui.Checkbox($"Restart on Pulse##main-{id}", ref restartMain))
+                { settings.DeltaGrowthVfxRestart = restartMain; configuration.Save(); }
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Disable to let this layer finish before a later pulse can play it again.");
+                settings.ValidateGrowthLayers();
+                ImGui.PushID($"GrowthLayers-{id}");
+                for (int i = 0; i < settings.AdditionalGrowthVfxPaths.Count; i++)
+                {
+                    ImGui.PushID(i);
+                    string layer = settings.AdditionalGrowthVfxPaths[i];
+                    if (ImGui.InputText("Layer AVFX", ref layer, 512))
+                    { settings.AdditionalGrowthVfxPaths[i] = layer; configuration.Save(); }
+                    ImGui.SameLine();
+                    bool remove = ImGui.SmallButton("Remove");
+                    float seconds = settings.AdditionalGrowthVfxDurations[i];
+                    if (ImGui.DragFloat("Duration (s)", ref seconds, 0.05f, 0.05f, 300f, "%.2f"))
+                    { settings.AdditionalGrowthVfxDurations[i] = Math.Clamp(seconds, 0.05f, 300f); configuration.Save(); }
+                    bool restart = settings.AdditionalGrowthVfxRestart[i];
+                    if (ImGui.Checkbox("Restart on Pulse", ref restart))
+                    { settings.AdditionalGrowthVfxRestart[i] = restart; configuration.Save(); }
+                    if (ImGui.IsItemHovered()) ImGui.SetTooltip("Disable to let this layer finish before a later pulse can play it again.");
+                    if (remove)
+                    {
+                        settings.AdditionalGrowthVfxPaths.RemoveAt(i);
+                        settings.AdditionalGrowthVfxDurations.RemoveAt(i);
+                        settings.AdditionalGrowthVfxRestart.RemoveAt(i--);
+                        configuration.Save();
+                    }
+                    ImGui.Separator();
+                    ImGui.PopID();
+                }
+                ImGui.BeginDisabled(settings.AdditionalGrowthVfxPaths.Count >= 15);
+                if (ImGui.Button("+ Layer"))
+                { settings.AdditionalGrowthVfxPaths.Add(string.Empty); settings.ValidateGrowthLayers(); configuration.Save(); }
+                ImGui.EndDisabled();
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("All filled layers play together per growth pulse. Up to 16 effects including the main path; independent durations; shared scale and cooldown. An AVFX can finish naturally before its removal time.");
+                ImGui.PopID();
+
+                float deltaGrowthVfxCooldown =
+                    settings.DeltaGrowthVfxCooldownSeconds;
+                if (ImGui.DragFloat(
+                        $"Cooldown (s)##vfx-{id}",
+                        ref deltaGrowthVfxCooldown,
+                        0.05f,
+                        0.00f,
+                        60.00f,
+                        "%.2f"))
+                {
+                    settings.DeltaGrowthVfxCooldownSeconds =
+                        Math.Clamp(deltaGrowthVfxCooldown, 0f, 60f);
+                    configuration.Save();
+                }
+
+                float deltaGrowthVfxScale = settings.DeltaGrowthVfxScale;
+                if (ImGui.DragFloat(
+                        $"VFX Scale##{id}",
+                        ref deltaGrowthVfxScale,
+                        0.05f,
+                        0.01f,
+                        100.00f,
+                        "%.2f"))
+                {
+                    settings.DeltaGrowthVfxScale =
+                        Math.Clamp(deltaGrowthVfxScale, 0.01f, 100f);
+                    configuration.Save();
+                }
+
+                bool deltaGrowthVfxScaleWithActor =
+                    settings.DeltaGrowthVfxScaleWithActor;
+                if (ImGui.Checkbox(
+                        $"Scale VFX With Actor Growth##{id}",
+                        ref deltaGrowthVfxScaleWithActor))
+                {
+                    settings.DeltaGrowthVfxScaleWithActor =
+                        deltaGrowthVfxScaleWithActor;
+                    configuration.Save();
+                }
+
+
+                if (ImGui.Button($"Test VFX at Yourself##{id}"))
+                {
+                    growthVfxTestResult = plugin.TestDeltaGrowthVfx(settings);
+                    growthVfxTestSucceeded =
+                        growthVfxTestResult.StartsWith(
+                            "Actor-root VFX created",
+                            StringComparison.Ordinal);
+                }
+
+                if (growthVfxTestResult.Length > 0)
+                {
+                    ImGui.TextColored(
+                        growthVfxTestSucceeded
+                            ? new Vector4(0.35f, 1f, 0.45f, 1f)
+                            : new Vector4(1f, 0.35f, 0.35f, 1f),
+                        growthVfxTestResult);
+                }
             }
 
-            if (growthVfxTestResult.Length > 0)
-            {
-                ImGui.TextColored(
-                    growthVfxTestSucceeded
-                        ? new Vector4(0.35f, 1f, 0.45f, 1f)
-                        : new Vector4(1f, 0.35f, 0.35f, 1f),
-                    growthVfxTestResult);
-            }
         }
 
         if (!string.Equals(id, "self", StringComparison.Ordinal)) return;
 
-        bool enableDeltaGrowthAnimation = settings.EnableDeltaGrowthAnimation;
-        if (ImGui.Checkbox(
-                "Play Local Animation When Delta Growth Triggers##self",
-                ref enableDeltaGrowthAnimation))
+        if (ImGui.CollapsingHeader("Growth Animation##self"))
         {
-            settings.EnableDeltaGrowthAnimation = enableDeltaGrowthAnimation;
-            configuration.Save();
-        }
-
-        if (settings.EnableDeltaGrowthAnimation)
-        {
-            ImGui.TextDisabled("Local animation. One-shot TMB only.");
-
-            var choices = settings.GetGrowthAnimationChoices();
-            ImGui.PushID($"GrowthAnimationPool-{id}");
-            for (int i = 0; i < choices.Count; i++)
+            bool enableDeltaGrowthAnimation = settings.EnableDeltaGrowthAnimation;
+            if (ImGui.Checkbox(
+                    "Enable Animation##self",
+                    ref enableDeltaGrowthAnimation))
             {
-                ImGui.PushID(i);
-                var choice = choices[i];
-                string path = choice.Path;
-                if (ImGui.InputText("TMB Path", ref path, 512))
-                { choice.Path = path; configuration.Save(); }
-                float available = 100f;
-                for (int j = 0; j < choices.Count; j++)
-                    if (j != i) available -= choices[j].ChancePercent;
-                float chance = choice.ChancePercent;
-                if (ImGui.DragFloat("Chance", ref chance, 0.5f, 0f, Math.Max(0f, available), "%.1f%%"))
-                { choice.ChancePercent = Math.Clamp(chance, 0f, Math.Max(0f, available)); configuration.Save(); }
-                if (ImGui.SmallButton("Test"))
-                {
-                    growthAnimationTestResult = plugin.TestDeltaGrowthAnimation(settings, choice.Path);
-                    growthAnimationTestSucceeded = growthAnimationTestResult.StartsWith("Animation timeline", StringComparison.Ordinal);
-                }
-                ImGui.SameLine();
-                if (ImGui.SmallButton("Remove"))
-                { choices.RemoveAt(i--); configuration.Save(); }
-                ImGui.PopID();
-            }
-            float remaining = 100f;
-            foreach (var choice in choices) remaining -= choice.ChancePercent;
-            if (ImGui.Button("+"))
-            { choices.Add(new GrowthAnimationChoice { ChancePercent = Math.Max(0f, remaining) }); configuration.Save(); }
-            ImGui.SameLine();
-            ImGui.TextUnformatted($"None: {Math.Max(0f, remaining):0.0}%");
-            ImGui.PopID();
-
-            float deltaGrowthAnimationCooldown =
-                settings.DeltaGrowthAnimationCooldownSeconds;
-            if (ImGui.DragFloat(
-                    "Minimum Seconds Between Animations##self",
-                    ref deltaGrowthAnimationCooldown,
-                    0.05f,
-                    0.00f,
-                    60.00f,
-                    "%.2f"))
-            {
-                settings.DeltaGrowthAnimationCooldownSeconds =
-                    Math.Clamp(deltaGrowthAnimationCooldown, 0f, 60f);
+                settings.EnableDeltaGrowthAnimation = enableDeltaGrowthAnimation;
                 configuration.Save();
             }
 
-            if (ImGui.Button("Test Animation on Yourself##self"))
+            if (settings.EnableDeltaGrowthAnimation)
             {
-                growthAnimationTestResult =
-                    plugin.TestDeltaGrowthAnimation(settings);
-                growthAnimationTestSucceeded =
-                    growthAnimationTestResult.StartsWith(
-                        "Animation timeline",
-                        StringComparison.Ordinal);
-            }
 
-            if (growthAnimationTestResult.Length > 0)
-            {
-                ImGui.TextColored(
-                    growthAnimationTestSucceeded
-                        ? new Vector4(0.35f, 1f, 0.45f, 1f)
-                        : new Vector4(1f, 0.35f, 0.35f, 1f),
-                    growthAnimationTestResult);
+
+                var choices = settings.GetGrowthAnimationChoices();
+                ImGui.PushID($"GrowthAnimationPool-{id}");
+                for (int i = 0; i < choices.Count; i++)
+                {
+                    ImGui.PushID(i);
+                    var choice = choices[i];
+                    string path = choice.Path;
+                    if (ImGui.InputText("TMB Path", ref path, 512))
+                    { choice.Path = path; configuration.Save(); }
+                    float available = 100f;
+                    for (int j = 0; j < choices.Count; j++)
+                        if (j != i) available -= choices[j].ChancePercent;
+                    float chance = choice.ChancePercent;
+                    if (ImGui.DragFloat("Chance", ref chance, 0.5f, 0f, Math.Max(0f, available), "%.1f%%"))
+                    { choice.ChancePercent = Math.Clamp(chance, 0f, Math.Max(0f, available)); configuration.Save(); }
+                    if (ImGui.SmallButton("Test"))
+                    {
+                        growthAnimationTestResult = plugin.TestDeltaGrowthAnimation(settings, choice.Path);
+                        growthAnimationTestSucceeded = growthAnimationTestResult.StartsWith("Animation timeline", StringComparison.Ordinal);
+                    }
+                    ImGui.SameLine();
+                    if (ImGui.SmallButton("Remove"))
+                    { choices.RemoveAt(i--); configuration.Save(); }
+                    ImGui.PopID();
+                }
+                float remaining = 100f;
+                foreach (var choice in choices) remaining -= choice.ChancePercent;
+                if (ImGui.Button("+"))
+                { choices.Add(new GrowthAnimationChoice { ChancePercent = Math.Max(0f, remaining) }); configuration.Save(); }
+                ImGui.SameLine();
+                ImGui.TextUnformatted($"None: {Math.Max(0f, remaining):0.0}%");
+                ImGui.PopID();
+
+                float deltaGrowthAnimationCooldown =
+                    settings.DeltaGrowthAnimationCooldownSeconds;
+                if (ImGui.DragFloat(
+                        "Cooldown (s)##animation-self",
+                        ref deltaGrowthAnimationCooldown,
+                        0.05f,
+                        0.00f,
+                        60.00f,
+                        "%.2f"))
+                {
+                    settings.DeltaGrowthAnimationCooldownSeconds =
+                        Math.Clamp(deltaGrowthAnimationCooldown, 0f, 60f);
+                    configuration.Save();
+                }
+
+                if (ImGui.Button("Test Animation on Yourself##self"))
+                {
+                    growthAnimationTestResult =
+                        plugin.TestDeltaGrowthAnimation(settings);
+                    growthAnimationTestSucceeded =
+                        growthAnimationTestResult.StartsWith(
+                            "Animation timeline",
+                            StringComparison.Ordinal);
+                }
+
+                if (growthAnimationTestResult.Length > 0)
+                {
+                    ImGui.TextColored(
+                        growthAnimationTestSucceeded
+                            ? new Vector4(0.35f, 1f, 0.45f, 1f)
+                            : new Vector4(1f, 0.35f, 0.35f, 1f),
+                        growthAnimationTestResult);
+                }
             }
         }
     }

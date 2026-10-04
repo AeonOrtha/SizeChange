@@ -9,9 +9,10 @@ namespace SizeChange;
 
 internal sealed class AetherSources
 {
-    internal readonly record struct Source(nint Address, uint EntityId, Vector3 Position, bool Large);
+    internal readonly record struct Source(nint Address, uint EntityId, Vector3 Position, bool Large, nint ModelAddress);
     internal readonly record struct Hit(Source Crystal, float Ratio);
     private readonly List<Source> sources = new();
+    public IReadOnlyList<Source> Current => sources;
     private readonly HashSet<uint> largeIds = new();
     private bool loadedTypes;
     private readonly HashSet<nint> seen = new();
@@ -54,7 +55,7 @@ internal sealed class AetherSources
         var p = native->Position;
         if (float.IsFinite(p.X) && float.IsFinite(p.Y) && float.IsFinite(p.Z))
             sources.Add(new Source((nint)native, native->EntityId, new Vector3(p.X, p.Y, p.Z),
-                native->ObjectKind == ObjectKind.Aetheryte && largeIds.Contains(native->BaseId)));
+                native->ObjectKind == ObjectKind.Aetheryte && largeIds.Contains(native->BaseId), (nint)native->DrawObject));
     }
 
     // The destination belongs to one character; never share mutable exposure

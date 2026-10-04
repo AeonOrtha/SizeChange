@@ -66,6 +66,25 @@ public class GrowthSettings
     public bool EnableDeltaGrowthVfx { get; set; }
     public string DeltaGrowthVfxPath { get; set; } = string.Empty;
     public List<string> AdditionalGrowthVfxPaths { get; set; } = new();
+    public List<float> AdditionalGrowthVfxDurations { get; set; } = new();
+    public List<bool> AdditionalGrowthVfxRestart { get; set; } = new();
+    public bool DeltaGrowthVfxRestart { get; set; } = true;
+
+    public void ValidateGrowthLayers()
+    {
+        AdditionalGrowthVfxDurations ??= new();
+        AdditionalGrowthVfxRestart ??= new();
+        while (AdditionalGrowthVfxDurations.Count < AdditionalGrowthVfxPaths.Count)
+            AdditionalGrowthVfxDurations.Add(DeltaGrowthVfxDurationSeconds);
+        while (AdditionalGrowthVfxRestart.Count < AdditionalGrowthVfxPaths.Count)
+            AdditionalGrowthVfxRestart.Add(true);
+        if (AdditionalGrowthVfxDurations.Count > AdditionalGrowthVfxPaths.Count)
+            AdditionalGrowthVfxDurations.RemoveRange(AdditionalGrowthVfxPaths.Count, AdditionalGrowthVfxDurations.Count - AdditionalGrowthVfxPaths.Count);
+        if (AdditionalGrowthVfxRestart.Count > AdditionalGrowthVfxPaths.Count)
+            AdditionalGrowthVfxRestart.RemoveRange(AdditionalGrowthVfxPaths.Count, AdditionalGrowthVfxRestart.Count - AdditionalGrowthVfxPaths.Count);
+        for (int i = 0; i < AdditionalGrowthVfxDurations.Count; i++)
+            AdditionalGrowthVfxDurations[i] = float.IsFinite(AdditionalGrowthVfxDurations[i]) ? Math.Clamp(AdditionalGrowthVfxDurations[i], 0.05f, 300f) : 2f;
+    }
     public float DeltaGrowthVfxDurationSeconds { get; set; } = 2.0f;
     public float DeltaGrowthVfxCooldownSeconds { get; set; } = 1.0f;
     public float DeltaGrowthVfxScale { get; set; } = 1.0f;
@@ -150,7 +169,8 @@ public class GrowthSettings
         for (int i = 0; i < AdditionalGrowthVfxPaths.Count; i++)
             AdditionalGrowthVfxPaths[i] = AdditionalGrowthVfxPaths[i]?.Trim().Replace('\\', '/') ?? string.Empty;
         DeltaGrowthVfxDurationSeconds =
-            Math.Clamp(DeltaGrowthVfxDurationSeconds, 0.05f, 300f);
+            float.IsFinite(DeltaGrowthVfxDurationSeconds) ? Math.Clamp(DeltaGrowthVfxDurationSeconds, 0.05f, 300f) : 2f;
+        ValidateGrowthLayers();
         DeltaGrowthVfxCooldownSeconds =
             Math.Clamp(DeltaGrowthVfxCooldownSeconds, 0f, 60f);
         DeltaGrowthVfxScale = Math.Clamp(DeltaGrowthVfxScale, 0.01f, 100f);
@@ -227,6 +247,9 @@ public class GrowthSettings
             EnableDeltaGrowthVfx = settings.EnableDeltaGrowthVfx,
             DeltaGrowthVfxPath = settings.DeltaGrowthVfxPath,
             AdditionalGrowthVfxPaths = new(settings.AdditionalGrowthVfxPaths),
+            AdditionalGrowthVfxDurations = new(settings.AdditionalGrowthVfxDurations),
+            AdditionalGrowthVfxRestart = new(settings.AdditionalGrowthVfxRestart),
+            DeltaGrowthVfxRestart = settings.DeltaGrowthVfxRestart,
             AccumulatingEffects = AccumulatingEffectSettings.CopyOf(settings.AccumulatingEffects),
             DeltaGrowthVfxDurationSeconds = settings.DeltaGrowthVfxDurationSeconds,
             DeltaGrowthVfxCooldownSeconds = settings.DeltaGrowthVfxCooldownSeconds,

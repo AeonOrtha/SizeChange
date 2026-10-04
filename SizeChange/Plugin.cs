@@ -271,6 +271,14 @@ public sealed class Plugin : IDalamudPlugin
                     var raw = (FFXIVClientStructs.FFXIV.Client.Game.Object.GameObject*)obj.Address;
                     vfxActorModels[obj.Address] = (nint)raw->DrawObject;
                 }
+        aetherSources.Refresh(ObjectTable, DataManager, ClientState.IsLoggedIn && !ClientState.IsPvP && Configuration.Enable && ObjectTable.LocalPlayer is { CurrentHp: > 0 } &&
+            !Condition[ConditionFlag.BetweenAreas] && !Condition[ConditionFlag.BetweenAreas51] &&
+            (Configuration.SelfSettings.AetherProximityGrowth || Configuration.PlayerSettings.AetherProximityGrowth || Configuration.MonsterSettings.AetherProximityGrowth));
+        foreach (var crystal in aetherSources.Current)
+        {
+            vfxActorIdentities[crystal.Address] = crystal.EntityId;
+            vfxActorModels[crystal.Address] = crystal.ModelAddress;
+        }
         GrowthVfxPlayer.BeginProximityFrame((float)Framework.UpdateDelta.TotalSeconds);
         aetherSound.BeginFrame((float)Framework.UpdateDelta.TotalSeconds);
         GrowthVfxPlayer.Update();
@@ -307,9 +315,6 @@ public sealed class Plugin : IDalamudPlugin
         }
 
         float deltaSeconds = (float)Framework.UpdateDelta.TotalSeconds;
-        aetherSources.Refresh(ObjectTable, DataManager, !globallyDisabled && localPlayer.CurrentHp > 0 &&
-            !Condition[ConditionFlag.BetweenAreas] && !Condition[ConditionFlag.BetweenAreas51] &&
-            (Configuration.SelfSettings.AetherProximityGrowth || Configuration.PlayerSettings.AetherProximityGrowth || Configuration.MonsterSettings.AetherProximityGrowth));
         RefreshDrainSources(!globallyDisabled && localPlayer.CurrentHp > 0 &&
             !Condition[ConditionFlag.BetweenAreas] && !Condition[ConditionFlag.BetweenAreas51] &&
             (Configuration.SelfSettings.SizeDrain.Enabled || Configuration.PlayerSettings.SizeDrain.Enabled || Configuration.MonsterSettings.SizeDrain.Enabled));
@@ -756,7 +761,7 @@ public sealed class Plugin : IDalamudPlugin
         if (feedbackAllowed && accumulationFx.Enabled && (charState.PendingGrowth > 0f || charState.AfterglowActive))
             for (int layer = 0; layer < Math.Min(16, accumulationFx.Paths.Count); layer++)
                 GrowthVfxPlayer.KeepProximity((nint)actor, actor->EntityId, accumulationFx.Paths[layer], false,
-                    position, fadeIn: accumulationFx.FadeIn, fadeOut: accumulationFx.FadeOut, accumulatorLayer: layer);
+                    position, fadeIn: accumulationFx.FadeIn, fadeOut: accumulationFx.FadeOut, accumulatorLayer: layer, durationSeconds: layer < accumulationFx.Durations.Count ? accumulationFx.Durations[layer] : 0f);
 
         // Measure the damage-driven release before capping earned growth so a
         // character already at the cap can still display a temporary pulse.
@@ -1092,26 +1097,28 @@ public sealed class Plugin : IDalamudPlugin
             return "Growth VFX is disabled.";
         }
 
-        var paths = new List<string>();
-        if (!string.IsNullOrWhiteSpace(settings.DeltaGrowthVfxPath)) paths.Add(settings.DeltaGrowthVfxPath);
-        foreach (var extra in settings.AdditionalGrowthVfxPaths)
-            if (!string.IsNullOrWhiteSpace(extra) && paths.Count < 16) paths.Add(extra);
+        settings.ValidateGrowthLayers();
+        var paths = new List<(string Path, float Duration, bool Restart, int Layer)>();
+        if (!string.IsNullOrWhiteSpace(settings.DeltaGrowthVfxPath))
+            paths.Add((settings.DeltaGrowthVfxPath, settings.DeltaGrowthVfxDurationSeconds, settings.DeltaGrowthVfxRestart, 0));
+        for (int i = 0; i < settings.AdditionalGrowthVfxPaths.Count && i < 15; i++)
+            if (!string.IsNullOrWhiteSpace(settings.AdditionalGrowthVfxPaths[i]))
+                paths.Add((settings.AdditionalGrowthVfxPaths[i], settings.AdditionalGrowthVfxDurations[i], settings.AdditionalGrowthVfxRestart[i], i + 1));
         if (paths.Count == 0) return "Enter an AVFX path.";
-        for (int i = 0; i < paths.Count; i++)
+        foreach (var layer in paths)
         {
-            string path = paths[i].Trim().Replace('\\', '/');
+            string path = layer.Path.Trim().Replace('\\', '/');
             if (path.StartsWith('/') || path.Contains("..", StringComparison.Ordinal) ||
                 !path.EndsWith(".avfx", StringComparison.OrdinalIgnoreCase))
-                return $"Layer {i + 1}: invalid AVFX path.";
-            if (!DataManager.FileExists(path)) return $"Layer {i + 1}: AVFX not found: {path}";
-            paths[i] = path;
+                return $"Layer {layer.Layer + 1}: invalid AVFX path.";
+            if (!DataManager.FileExists(path)) return $"Layer {layer.Layer + 1}: AVFX not found: {path}";
         }
         string? firstError = null;
-        for (int i = 0; i < paths.Count; i++)
+        foreach (var layer in paths)
         {
-            string? error = GrowthVfxPlayer.TryPlay((nint)actor, paths[i],
-                settings.DeltaGrowthVfxDurationSeconds, settings.DeltaGrowthVfxScale,
-                settings.DeltaGrowthVfxScaleWithActor, actorGrowthMultiplier, i, actor->EntityId);
+            string? error = GrowthVfxPlayer.TryPlay((nint)actor, layer.Path,
+                layer.Duration, settings.DeltaGrowthVfxScale,
+                settings.DeltaGrowthVfxScaleWithActor, actorGrowthMultiplier, layer.Layer, actor->EntityId, layer.Restart);
             firstError ??= error;
         }
         return firstError;
