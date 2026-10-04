@@ -81,6 +81,7 @@ public sealed class Plugin : IDalamudPlugin
     public readonly WindowSystem WindowSystem = new("SizeChange");
     private ConfigWindow ConfigWindow { get; init; }
     private readonly Dictionary<uint, SCCharacterState> CharacterIdToLastScaleMap = new();
+    private readonly Dictionary<nint, uint> vfxActorIdentities = new();
     private readonly Dictionary<string, uint> TrackedPlayerEntityIds =
         new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<uint> TrackedMonsterEntityIds = new();
@@ -116,7 +117,7 @@ public sealed class Plugin : IDalamudPlugin
         }
 
         GrowthSoundPlayer = new GrowthSoundPlayer();
-        GrowthVfxPlayer = new GrowthVfxPlayer();
+        GrowthVfxPlayer = new GrowthVfxPlayer((address, id) => vfxActorIdentities.TryGetValue(address, out var current) && current == id);
         BoneHeartbeat = new BoneHeartbeatPlayer(new CustomizeHeartbeatApi(PluginInterface));
 
         ConfigWindow = new ConfigWindow(this);
@@ -255,6 +256,10 @@ public sealed class Plugin : IDalamudPlugin
 
     private unsafe void OnFrameworkUpdate(IFramework framework)
     {
+        vfxActorIdentities.Clear();
+        if (ClientState.IsLoggedIn && !Condition[ConditionFlag.BetweenAreas] && !Condition[ConditionFlag.BetweenAreas51])
+            foreach (var obj in ObjectTable)
+                if (obj.Address != 0) vfxActorIdentities[obj.Address] = obj.EntityId;
         GrowthVfxPlayer.BeginProximityFrame((float)Framework.UpdateDelta.TotalSeconds);
         aetherSound.BeginFrame((float)Framework.UpdateDelta.TotalSeconds);
         GrowthVfxPlayer.Update();
@@ -1092,7 +1097,7 @@ public sealed class Plugin : IDalamudPlugin
         {
             string? error = GrowthVfxPlayer.TryPlay((nint)actor, paths[i],
                 settings.DeltaGrowthVfxDurationSeconds, settings.DeltaGrowthVfxScale,
-                settings.DeltaGrowthVfxScaleWithActor, actorGrowthMultiplier, i);
+                settings.DeltaGrowthVfxScaleWithActor, actorGrowthMultiplier, i, actor->EntityId);
             firstError ??= error;
         }
         return firstError;

@@ -48,6 +48,8 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable
         DetourName = nameof(StaticVfxRemoveDetour))]
     private readonly Hook<StaticVfxRemoveDelegate>? staticVfxRemoveHook = null;
     private float proximityDelta;
+    private readonly Func<nint, uint, bool> actorIsCurrent;
+    private bool disposed;
     private readonly HashSet<(nint Actor, int Channel)> proximityRequested = new();
     private readonly Dictionary<(nint Actor, int Channel), (string Path, long At)> retryAfter = new();
     private readonly Dictionary<string, string> sourceErrors = new(StringComparer.Ordinal);
@@ -76,11 +78,14 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable
         public required bool ScaleWithActor { get; init; }
         public float ActorGrowthMultiplier { get; set; } = 1f;
         public float LastAppliedScale { get; set; } = float.NaN;
-        public bool CanApplyScale { get; set; }
+        // Eligibility never changes. Initial application is separate state.
+        public bool ManualScaleAllowed => IsStatic || IsGrowth;
+        public bool ScaleInitialized { get; set; }
     }
 
-    public GrowthVfxPlayer()
+    public GrowthVfxPlayer(Func<nint, uint, bool> actorIsCurrent)
     {
+        this.actorIsCurrent = actorIsCurrent;
         Plugin.GameInteropProvider.InitializeFromAttributes(this);
         staticVfxRemoveHook?.Enable();
 
@@ -112,6 +117,8 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable
 
     public void Dispose()
     {
+        if (disposed) return;
+        disposed = true;
         var activeAddresses = new List<nint>(activeByVfx.Keys);
         foreach (nint vfxAddress in activeAddresses)
         {
@@ -129,8 +136,13 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable
         float durationSeconds,
         float baseScale,
         bool scaleWithActor,
-        float actorGrowthMultiplier, int layer = 0)
+        float actorGrowthMultiplier, int layer = 0, uint entityId = 0)
     {
+        if (disposed || actorAddress == 0 || !actorIsCurrent(actorAddress, entityId)) return "VFX actor is no longer available.";
+        if (layer < 0 || layer >= 16 || !float.IsFinite(durationSeconds) || durationSeconds <= 0f ||
+            !float.IsFinite(baseScale) || baseScale <= 0f || !float.IsFinite(actorGrowthMultiplier)) return "Invalid VFX settings.";
+        path = path?.Trim().Replace('\\', '/') ?? string.Empty;
+        if (!IsValidProximityPath(path)) return "AVFX invalid or not found.";
         if (actorVfxCreate == null || actorVfxRemoveHook == null)
         {
             return "The native actor-VFX functions could not be located.";
@@ -157,12 +169,14 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable
         nint vfxAddress = (nint)vfx;
         long durationMilliseconds = Math.Max(
             1L,
-            (long)(durationSeconds * 1000f));
+            (long)(Math.Clamp(durationSeconds, 0.001f, 3600f) * 1000f));
         var activeVfx = new ActiveGrowthVfx
         {
             VfxAddress = vfxAddress,
             ActorAddress = actorAddress,
             Channel = channel,
+            EntityId = entityId,
+            Path = path,
             RemoveAtTick = Environment.TickCount64 + durationMilliseconds,
             BaseScale = baseScale,
             ScaleWithActor = scaleWithActor,
@@ -187,8 +201,14 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable
         bool attachToSource = false, float sourceScale = 1f, float sourceHeight = 0f,
         float fadeIn = 0f, float fadeOut = 0f, bool sizeDrain = false, int accumulatorLayer = -1)
     {
-        string path = configuredPath.Trim().Replace('\\', '/');
-        if (!IsValidProximityPath(path)) return;
+        string path = configuredPath?.Trim().Replace('\\', '/') ?? string.Empty;
+        if (disposed || address == 0 || !actorIsCurrent(address, entityId) ||
+            !float.IsFinite(position.X) || !float.IsFinite(position.Y) || !float.IsFinite(position.Z) ||
+            !float.IsFinite(sourceScale) || !float.IsFinite(sourceHeight) ||
+            !float.IsFinite(fadeIn) || !float.IsFinite(fadeOut) || !IsValidProximityPath(path)) return;
+        sourceScale = Math.Clamp(sourceScale, 0.01f, 200f);
+        fadeIn = Math.Clamp(fadeIn, 0f, 10f);
+        fadeOut = Math.Clamp(fadeOut, 0f, 10f);
         bool isStatic = source && !attachToSource;
         if (isStatic) position.Y += sourceHeight;
         if (accumulatorLayer < -1 || accumulatorLayer >= 16) return;
@@ -206,7 +226,7 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable
                 if (source)
                 {
                     old.BaseScale = sourceScale;
-                    if (old.CanApplyScale) ApplyScale(old);
+                    if (old.ManualScaleAllowed) ApplyScale(old);
                 }
                 return;
             }
@@ -224,12 +244,12 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable
             { sourceErrors[path] = "World VFX unavailable."; return; }
             vfx = VfxObject.Create(path, "Client.System.Scheduler.Instance.VfxObject");
             if (vfx == null) { sourceErrors[path] = "VFX creation failed."; return; }
+            staticVfxRun(vfx, 0f, 0xFFFFFFFF);
             vfx->Rotation = FFXIVClientStructs.FFXIV.Common.Math.Quaternion.Identity;
             vfx->Scale = new Vector3(sourceScale, sourceScale, sourceScale);
             SetSourcePosition(vfx, position);
             originalAlpha = CaptureAlpha(vfx);
             if (fadeIn > 0f) vfx->Color.W = 0f;
-            staticVfxRun(vfx, 0f, 0xFFFFFFFF);
         }
         else
         {
@@ -249,8 +269,7 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable
             FadeIn = fadeIn, FadeOut = fadeOut, OriginalAlpha = originalAlpha,
             Fade = new VfxFade { Level = fadeIn > 0f ? 0f : 1f },
             BaseScale = source ? sourceScale : 1f, ScaleWithActor = false,
-            // Character proximity effects keep their own scale; crystal scale is configurable.
-            CanApplyScale = !source || isStatic,
+            ScaleInitialized = isStatic,
         };
         activeVfxByActor[key] = vfxAddress;
     }
@@ -260,13 +279,13 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable
 
     public string SourceStatus(string configuredPath, bool attached)
     {
-        string path = configuredPath.Trim().Replace('\\', '/');
+        string path = configuredPath?.Trim().Replace('\\', '/') ?? string.Empty;
         if (path.Length == 0) return "Choose an AVFX.";
         if (!IsValidProximityPath(path)) return "AVFX invalid or not found.";
         if (attached ? actorVfxCreate == null || actorVfxRemoveHook == null : staticVfxRun == null || staticVfxRemoveHook == null)
             return "VFX functions unavailable.";
         int count = 0;
-        foreach (var active in activeByVfx.Values)
+        foreach (var active in new List<ActiveGrowthVfx>(activeByVfx.Values))
             if (active.Channel == 2 && active.Path == path) count++;
         if (count > 0) return $"Active instances: {count}";
         return sourceErrors.TryGetValue(path, out var error) ? error : "Waiting for exposure.";
@@ -290,12 +309,14 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable
     public void EndProximityFrame(bool immediate = false)
     {
         var expired = new List<nint>();
-        foreach (var pair in activeByVfx)
+        foreach (var pair in new List<KeyValuePair<nint, ActiveGrowthVfx>>(activeByVfx))
         {
             var active = pair.Value;
+            if (!activeByVfx.TryGetValue(pair.Key, out var owned) || !ReferenceEquals(owned, active)) continue;
             if (!(active.Channel is >= 1 and <= 4 or >= 10 and <= 25)) continue;
-            if (immediate) { expired.Add(pair.Key); continue; }
-            if (active.IsProximitySource && active.CanApplyScale) ApplyScale(active);
+            if (immediate || !actorIsCurrent(active.ActorAddress, active.EntityId)) { expired.Add(pair.Key); continue; }
+            if (active.IsStatic) ApplyScale(active);
+            if (!activeByVfx.TryGetValue(pair.Key, out owned) || !ReferenceEquals(owned, active)) continue;
             bool visible = proximityRequested.Contains((active.ActorAddress, active.Channel));
             float opacity = active.Fade.Advance(visible, proximityDelta, active.FadeIn, active.FadeOut);
             ((VfxObject*)pair.Key)->Color.W = active.OriginalAlpha * opacity;
@@ -310,7 +331,7 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable
     {
         if (activeByVfx.Remove((nint)vfx, out var active))
         {
-            activeVfxByActor.Remove((active.ActorAddress, active.Channel));
+            ForgetActorMapping(active);
         }
         return staticVfxRemoveHook!.Original(vfx);
     }
@@ -319,22 +340,22 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable
     {
         long currentTick = Environment.TickCount64;
         var expiredAddresses = new List<nint>();
-        foreach (var activeEntry in activeByVfx)
+        foreach (var activeEntry in new List<KeyValuePair<nint, ActiveGrowthVfx>>(activeByVfx))
         {
+            if (!activeByVfx.TryGetValue(activeEntry.Key, out var owned) || !ReferenceEquals(owned, activeEntry.Value)) continue;
             if (currentTick >= activeEntry.Value.RemoveAtTick)
             {
                 expiredAddresses.Add(activeEntry.Key);
                 continue;
             }
 
-            // Actor VFX creation returns before every internal graphics object is
-            // guaranteed to be ready for transform changes. Defer the first scale
-            // write until the following framework update.
-            if (!activeEntry.Value.CanApplyScale)
+            if (!actorIsCurrent(activeEntry.Value.ActorAddress, activeEntry.Value.EntityId))
             {
-                activeEntry.Value.CanApplyScale = true;
-                ApplyScale(activeEntry.Value);
+                expiredAddresses.Add(activeEntry.Key);
+                continue;
             }
+            if (activeEntry.Value.ManualScaleAllowed && !activeEntry.Value.ScaleInitialized)
+                ApplyScale(activeEntry.Value);
         }
 
         foreach (nint vfxAddress in expiredAddresses)
@@ -345,18 +366,22 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable
 
     public void UpdateActorScale(nint actorAddress, float actorGrowthMultiplier)
     {
-        foreach (var active in activeByVfx.Values)
+        foreach (var active in new List<ActiveGrowthVfx>(activeByVfx.Values))
         {
             if (!active.IsGrowth || active.ActorAddress != actorAddress) continue;
             active.ActorGrowthMultiplier = actorGrowthMultiplier;
-            if (active.CanApplyScale) ApplyScale(active);
+            if (active.ScaleInitialized) ApplyScale(active);
         }
     }
 
-    private static void ApplyScale(ActiveGrowthVfx activeVfx)
+    private void ApplyScale(ActiveGrowthVfx activeVfx)
     {
+        if (disposed || !activeVfx.ManualScaleAllowed ||
+            !activeByVfx.TryGetValue(activeVfx.VfxAddress, out var owned) || !ReferenceEquals(owned, activeVfx) ||
+            !actorIsCurrent(activeVfx.ActorAddress, activeVfx.EntityId) ||
+            !float.IsFinite(activeVfx.BaseScale) || !float.IsFinite(activeVfx.ActorGrowthMultiplier)) return;
         var vfx = (VfxObject*)activeVfx.VfxAddress;
-        if (vfx == null)
+        if (vfx == null || vfx->VfxResourceInstance == null)
         {
             return;
         }
@@ -369,6 +394,7 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable
                 activeVfx.ActorGrowthMultiplier);
         }
 
+        if (!float.IsFinite(effectiveScale)) return;
         effectiveScale = Math.Clamp(effectiveScale, 0.01f, activeVfx.IsProximitySource ? 200f : 100f);
         // Native target attachment can overwrite transforms even with an
         // unchanged setting; refresh source transforms every active frame.
@@ -379,16 +405,26 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable
         }
 
         vfx->Scale = new Vector3(effectiveScale, effectiveScale, effectiveScale);
-        vfx->UpdateTransforms(true);
+        // Actor VFX transforms belong to the game's attachment update. Forcing
+        // DrawObject.vf7 here is the native call seen in the crash stack.
+        if (activeVfx.IsStatic) vfx->UpdateTransforms(true);
+        activeVfx.ScaleInitialized = true;
         activeVfx.LastAppliedScale = effectiveScale;
     }
 
     private void RemoveForActor(nint actorAddress)
     {
         var addresses = new List<nint>();
-        foreach (var active in activeByVfx.Values)
+        foreach (var active in new List<ActiveGrowthVfx>(activeByVfx.Values))
             if (active.ActorAddress == actorAddress && active.IsGrowth) addresses.Add(active.VfxAddress);
         foreach (var address in addresses) RemoveTrackedVfx(address);
+    }
+
+    private void ForgetActorMapping(ActiveGrowthVfx active)
+    {
+        var key = (active.ActorAddress, active.Channel);
+        if (activeVfxByActor.TryGetValue(key, out var mapped) && mapped == active.VfxAddress)
+            activeVfxByActor.Remove(key);
     }
 
     private void RemoveTrackedVfx(nint vfxAddress)
@@ -398,7 +434,7 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable
             return;
         }
 
-        activeVfxByActor.Remove((activeVfx.ActorAddress, activeVfx.Channel));
+        ForgetActorMapping(activeVfx);
         if (activeVfx.IsStatic)
             staticVfxRemoveHook?.Original((VfxObject*)vfxAddress);
         else if (actorVfxRemoveHook != null)
@@ -410,7 +446,7 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable
         nint vfxAddress = (nint)vfx;
         if (activeByVfx.Remove(vfxAddress, out var activeVfx))
         {
-            activeVfxByActor.Remove((activeVfx.ActorAddress, activeVfx.Channel));
+            ForgetActorMapping(activeVfx);
         }
 
         return actorVfxRemoveHook!.Original(vfx, a2);
