@@ -40,14 +40,22 @@ internal sealed class BoneHeartbeatProfile
             float wave = phase.HasValue ? (delayed < 0 ? 0 : BoneHeartbeatMath.Sample(delayed)) : 1f;
             float offset = bone.Strength * strength * pulse * wave;
             if (!float.IsFinite(offset) || offset < 0f) offset = 0f;
-            offset += float.IsFinite(bone.GrowthOffset) ? Math.Max(0f, bone.GrowthOffset) : 0f;
-            target.Scale["X"] = Math.Clamp(target.X + offset, -512f, 512f);
-            target.Scale["Y"] = Math.Clamp(target.Y + offset, -512f, 512f);
-            target.Scale["Z"] = Math.Clamp(target.Z + offset, -512f, 512f);
+            float growth = float.IsFinite(bone.GrowthOffset) ? bone.GrowthOffset : 0f;
+            target.Scale["X"] = ApplyScale(target.X, growth, offset);
+            target.Scale["Y"] = ApplyScale(target.Y, growth, offset);
+            target.Scale["Z"] = ApplyScale(target.Z, growth, offset);
         }
         ApplyJaw(jawAngle, jawAxis);
         ApplyRootHeight(rootHeightOffset);
         return working!.ToJsonString();
+    }
+
+    private static float ApplyScale(float baseline, float growth, float pulse)
+    {
+        // Inverse growth subtracts from the saved scale, never the last frame.
+        // Preserve unusual zero/negative baselines; positive axes cannot invert.
+        if (growth < 0f) growth = Math.Max(growth, -Math.Max(0f, baseline - 0.01f));
+        return Math.Clamp(baseline + growth + pulse, -512f, 512f);
     }
 
     private void ApplyRootHeight(float offset)

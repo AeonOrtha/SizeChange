@@ -8,6 +8,7 @@ public sealed class HeartbeatChainSettings
     public string Id { get; set; } = string.Empty;
     public bool Enabled { get; set; }
     public bool GrowthEnabled { get; set; }
+    public bool InverseGrowth { get; set; }
     public bool FullGrowthChain { get; set; }
     public float GrowthPerScale { get; set; } = 0.1f;
     public float GrowthLimit { get; set; } = 0.4f;

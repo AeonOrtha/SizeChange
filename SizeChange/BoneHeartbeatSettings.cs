@@ -54,7 +54,7 @@ public sealed class BoneHeartbeatSettings
                 if (targets[i].Name == name)
                 {
                     targets[i].Strength = amount;
-                    targets[i].GrowthOffset = replaceGrowth ? growth : Math.Max(targets[i].GrowthOffset, growth);
+                    targets[i].GrowthOffset = replaceGrowth || Math.Abs(growth) > Math.Abs(targets[i].GrowthOffset) ? growth : targets[i].GrowthOffset;
                     return;
                 }
             if (count == targets.Count) targets.Add(new HeartbeatBone());
@@ -71,6 +71,7 @@ public sealed class BoneHeartbeatSettings
             double step = chain.Stagger ? Math.Clamp(chain.DelayPercent, 0f, 10f) / 100.0 : 0;
             float growth = chain.GrowthEnabled
                 ? BoneHeartbeatMath.GrowthOffset(settledScale, chain.GrowthPerScale, chain.GrowthLimit) : 0f;
+            if (definition.Id == "neck" && chain.InverseGrowth) growth = -growth;
             foreach (var bone in definition.Bones)
                 Add(bone.Name, chain.Enabled ? chain.Strength : 0f, bone.Depth * step, growth);
             if (chain.GrowthEnabled && chain.FullGrowthChain)

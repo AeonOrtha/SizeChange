@@ -230,24 +230,29 @@ public class ConfigWindow : Window, IDisposable
             for (int i = 0; i < settings.Bones.Count; i++)
             {
                 var bone = settings.Bones[i];
-                ImGui.PushID($"heartbeat-{i}");
-                float amount = bone.Strength;
-                if (ImGui.DragFloat($"{bone.Name} — Additive Scale", ref amount, 0.005f, 0f, 5f, "%.3f"))
-                {
-                    bone.Strength = Math.Clamp(amount, 0f, 5f);
-                    configuration.Save();
-                }
+                ImGui.PushID(bone.Name);
+                bool open = ImGui.TreeNode(bone.Name);
                 ImGui.SameLine();
-                bool remove = ImGui.Button("Remove");
-                if (settings.CustomGrowthEnabled)
+                bool remove = ImGui.SmallButton("Remove");
+                if (open)
                 {
+                    ImGui.TextDisabled("Heartbeat pulse");
+                    float amount = bone.Strength;
+                    if (ImGui.DragFloat("Pulse Amount", ref amount, 0.005f, 0f, 5f, "%.3f"))
+                    { bone.Strength = Math.Clamp(amount, 0f, 5f); configuration.Save(); }
+                    if (ImGui.IsItemHovered()) ImGui.SetTooltip("Extra scale during each heartbeat, for this bone only.");
+                    ImGui.Separator();
+                    ImGui.TextDisabled("Size-driven growth");
+                    ImGui.BeginDisabled(!settings.CustomGrowthEnabled);
                     float rate = bone.GrowthPerScale ?? settings.CustomGrowthPerScale;
                     if (ImGui.DragFloat("Growth per 1x", ref rate, 0.005f, 0f, 5f, "%.3f"))
                     { bone.GrowthPerScale = Math.Clamp(rate, 0f, 5f); configuration.Save(); }
                     float limit = bone.GrowthLimit ?? settings.CustomGrowthLimit;
                     if (ImGui.DragFloat("Maximum Growth", ref limit, 0.005f, 0f, 5f, "%.3f"))
                     { bone.GrowthLimit = Math.Clamp(limit, 0f, 5f); configuration.Save(); }
-                    if (ImGui.IsItemHovered()) ImGui.SetTooltip("Maximum extra scale on this bone. Pulse is added on top.");
+                    if (ImGui.IsItemHovered()) ImGui.SetTooltip("Maximum extra scale for this bone. Overrides its chain's size-driven change; pulse stays additive.");
+                    ImGui.EndDisabled();
+                    ImGui.TreePop();
                 }
                 ImGui.PopID();
                 if (remove)
@@ -413,20 +418,27 @@ public class ConfigWindow : Window, IDisposable
                         ? "Also grows wrists, hands and fingers. Pulse membership stays unchanged."
                         : "Also grows the pelvis, through all three spine bones. Pulse membership stays unchanged.");
                 }
+                bool inverse = definition.Id == "neck" && chain.InverseGrowth;
+                if (definition.Id == "neck")
+                {
+                    if (ImGui.Checkbox("Shrink With Size", ref inverse))
+                    { chain.InverseGrowth = inverse; configuration.Save(); }
+                    if (ImGui.IsItemHovered()) ImGui.SetTooltip("Subtracts scale from neck and head as settled size increases. Returns to the saved profile at normal size. Heartbeat remains additive.");
+                }
                 float rate = chain.GrowthPerScale;
-                if (ImGui.DragFloat("Growth per 1x", ref rate, 0.005f, 0f, 5f, "%.3f"))
+                if (ImGui.DragFloat(inverse ? "Shrink per 1x" : "Growth per 1x", ref rate, 0.005f, 0f, 5f, "%.3f"))
                 {
                     chain.GrowthPerScale = Math.Clamp(rate, 0f, 5f);
                     configuration.Save();
                 }
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Added bone scale per extra 1x settled size. Excludes overshoot.");
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip(inverse ? "Scale subtracted per extra 1x settled size. Excludes overshoot." : "Added bone scale per extra 1x settled size. Excludes overshoot.");
                 float limit = chain.GrowthLimit;
-                if (ImGui.DragFloat("Growth Limit", ref limit, 0.005f, 0f, 5f, "%.3f"))
+                if (ImGui.DragFloat(inverse ? "Maximum Shrink" : "Growth Limit", ref limit, 0.005f, 0f, 5f, "%.3f"))
                 {
                     chain.GrowthLimit = Math.Clamp(limit, 0f, 5f);
                     configuration.Save();
                 }
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Maximum added scale per bone. Heartbeat pulses are added on top.");
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip(inverse ? "Maximum scale subtraction per bone. Positive axes stop at 0.01; heartbeat is added on top." : "Maximum added scale per bone. Heartbeat pulses are added on top.");
             }
             ImGui.PopID();
         }

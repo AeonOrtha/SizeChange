@@ -96,7 +96,7 @@ internal sealed class BoneHeartbeatPlayer : IDisposable
         }
 
         settings.ResolveBones(resolvedBones, settledScale, reserveBone, reserveAddition);
-        bool growthRun = resolvedBones.Exists(bone => bone.GrowthOffset > 0f);
+        bool growthRun = resolvedBones.Exists(bone => bone.GrowthOffset != 0f);
         bool bonesEnabled = settings.Enabled && settings.Strength > 0f && resolvedBones.Exists(bone => bone.Strength > 0f);
         bool jawEnabled = settings.Jaw.Enabled && settings.Jaw.OpeningDegrees > 0f;
         if (!allowed || address == 0 || (!bonesEnabled && !jawEnabled && !growthRun && !heightEnabled))
