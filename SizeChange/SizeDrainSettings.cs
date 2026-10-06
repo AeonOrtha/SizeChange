@@ -10,6 +10,10 @@ public sealed class SizeDrainSettings
     public bool Enabled { get; set; }
     public bool EnableInDuties { get; set; }
     internal bool AllowsLocation(bool inDuty) => !inDuty || EnableInDuties;
+    public bool UseDutyOverrides { get; set; }
+    public SizeDrainSettings? DutyOverrides { get; set; }
+    internal SizeDrainSettings ForLocation(bool inDuty) =>
+        inDuty && EnableInDuties && UseDutyOverrides && DutyOverrides != null ? DutyOverrides : this;
     public bool Everyone { get; set; }
     public int MaximumTargets { get; set; } = 8;
     public bool RandomContributors { get; set; }
@@ -38,6 +42,14 @@ public sealed class SizeDrainSettings
 
     public void Validate()
     {
+        // Only one override level; old configurations retain their normal settings.
+        if (DutyOverrides != null)
+        {
+            DutyOverrides.DutyOverrides = null;
+            DutyOverrides.UseDutyOverrides = false;
+            DutyOverrides.Enabled = true;
+            DutyOverrides.Validate();
+        }
         Names = (Names ?? new()).Where(n => !string.IsNullOrWhiteSpace(n))
             .Select(n => n.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         Range = float.IsFinite(Range) ? Math.Clamp(Range, 0.1f, 100f) : 10f;
@@ -61,6 +73,15 @@ public sealed class SizeDrainSettings
     {
         var copy = (SizeDrainSettings)settings.MemberwiseClone();
         copy.Names = new(settings.Names);
+        copy.DutyOverrides = null;
+        if (settings.DutyOverrides != null)
+        {
+            var duty = (SizeDrainSettings)settings.DutyOverrides.MemberwiseClone();
+            duty.Names = new(settings.DutyOverrides.Names);
+            duty.DutyOverrides = null;
+            duty.UseDutyOverrides = false;
+            copy.DutyOverrides = duty;
+        }
         return copy;
     }
 }

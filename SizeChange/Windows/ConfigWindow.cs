@@ -844,140 +844,169 @@ public class ConfigWindow : Window, IDisposable
             if (ImGui.Checkbox("Enable in Duties", ref inDuties))
             { settings.EnableInDuties = inDuties; configuration.SaveSizeDrain(settings); }
             if (ImGui.IsItemHovered()) ImGui.SetTooltip("Off: Size Drain only outside duties; entering clears contributor timers. Aetherytes, stored digestion and already accumulated growth are unaffected.");
-            bool everyone = settings.Everyone;
-            if (ImGui.Checkbox("Everyone Near Me", ref everyone))
-            { settings.Everyone = everyone; configuration.SaveSizeDrain(settings); }
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("All loaded, living players and NPCs in range of each receiving character, excluding itself. Includes companions and retainers. Overrides the name list while enabled.");
-            if (!everyone)
+            if (ImGui.TreeNode("Normal Settings"))
             {
-                string input = drainNameInputs.TryGetValue(id, out var saved) ? saved : string.Empty;
-                if (ImGui.InputText("Monster / NPC Name", ref input, 128)) drainNameInputs[id] = input;
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Part of an NPC name, ignoring case. Behemoth matches any name containing behemoth.");
-                ImGui.SameLine();
-                if (ImGui.Button("Add") && !string.IsNullOrWhiteSpace(input))
+                DrawSizeDrainMode(settings, id + "Normal");
+                ImGui.TreePop();
+            }
+            if (inDuties && ImGui.TreeNode("Duty Overrides"))
+            {
+                bool useOverrides = settings.UseDutyOverrides;
+                if (ImGui.Checkbox("Use Duty Overrides", ref useOverrides))
                 {
-                    string name = input.Trim();
-                    if (!settings.Names.Exists(n => string.Equals(n, name, StringComparison.OrdinalIgnoreCase))) settings.Names.Add(name);
-                    drainNameInputs[id] = string.Empty;
+                    settings.UseDutyOverrides = useOverrides;
+                    if (useOverrides && settings.DutyOverrides == null)
+                    {
+                        settings.DutyOverrides = SizeDrainSettings.CopyOf(settings);
+                        settings.DutyOverrides.UseDutyOverrides = false;
+                    }
                     configuration.SaveSizeDrain(settings);
                 }
-                for (int i = 0; i < settings.Names.Count; i++)
-                {
-                    ImGui.PushID(i);
-                    if (ImGui.SmallButton("Remove"))
-                    { settings.Names.RemoveAt(i--); configuration.SaveSizeDrain(settings); ImGui.PopID(); continue; }
-                    ImGui.SameLine();
-                    ImGui.TextUnformatted(settings.Names[i]);
-                    ImGui.PopID();
-                }
-            }
-            int maximumTargets = settings.MaximumTargets;
-            if (ImGui.SliderInt("Maximum Targets", ref maximumTargets, 1, 64))
-            { settings.MaximumTargets = maximumTargets; configuration.SaveSizeDrain(settings); }
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Per receiving character. Keeps active targets until expiry or range exit; limits both growth sources and their effects.");
-            if (ImGui.TreeNode("Random Contributors"))
-            {
-                bool randomContributors = settings.RandomContributors;
-                if (ImGui.Checkbox("Random Contributors", ref randomContributors))
-                { settings.RandomContributors = randomContributors; configuration.SaveSizeDrain(settings); }
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Each nearby source rolls independently for a temporary contribution. Works with Everyone or the name list.");
-                if (randomContributors)
-                {
-                    float chance = settings.ContributorChancePercent;
-                    if (ImGui.SliderFloat("Chance per Check", ref chance, 0f, 100f, "%.1f%%"))
-                    { settings.ContributorChancePercent = chance; configuration.SaveSizeDrain(settings); }
-                    float retry = settings.ContributorRetrySeconds;
-                    if (ImGui.DragFloat("Retry Delay (s)", ref retry, 0.1f, 0.1f, 300f, "%.1f"))
-                    { settings.ContributorRetrySeconds = retry; configuration.SaveSizeDrain(settings); }
-                    if (ImGui.IsItemHovered()) ImGui.SetTooltip("Wait after a failed roll or an expired contribution. One roll on entering range; no rolls while active.");
-                    float minimum = settings.ContributorMinimumSeconds;
-                    if (ImGui.DragFloat("Minimum Duration (s)", ref minimum, 0.1f, 0.1f, 300f, "%.1f"))
-                    { settings.ContributorMinimumSeconds = minimum; configuration.SaveSizeDrain(settings); }
-                    float maximum = settings.ContributorMaximumSeconds;
-                    if (ImGui.DragFloat("Maximum Duration (s)", ref maximum, 0.1f, settings.ContributorMinimumSeconds, 300f, "%.1f"))
-                    { settings.ContributorMaximumSeconds = maximum; configuration.SaveSizeDrain(settings); }
-                    if (ImGui.IsItemHovered()) ImGui.SetTooltip("Duration is chosen on activation. Leaving range ends contribution unless lingering is enabled. Multiple sources can overlap.");
-                }
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Separate duty settings. First enable copies normal settings; disabling uses normal settings in duties.");
+                if (useOverrides && settings.DutyOverrides != null)
+                    DrawSizeDrainMode(settings.DutyOverrides, id + "Duty");
                 ImGui.TreePop();
             }
-            float range = settings.Range;
-            if (ImGui.DragFloat("Range", ref range, 0.1f, 0.1f, 100f, "%.1f"))
-            { settings.Range = Math.Clamp(range, 0.1f, 100f); configuration.SaveSizeDrain(settings); }
-            bool sizeRange = settings.SizeDrivenRange;
-            if (ImGui.Checkbox("Range Grows With Size", ref sizeRange))
-            { settings.SizeDrivenRange = sizeRange; configuration.SaveSizeDrain(settings); }
-            if (sizeRange)
-            {
-                float gain = settings.RangePerScale, maximum = settings.MaximumRange;
-                if (ImGui.DragFloat("Range per 1x", ref gain, 0.1f, 0f, 100f, "%.1f"))
-                { settings.RangePerScale = gain; configuration.SaveSizeDrain(settings); }
-                if (ImGui.DragFloat("Maximum Range", ref maximum, 0.1f, settings.Range, 100f, "%.1f"))
-                { settings.MaximumRange = maximum; configuration.SaveSizeDrain(settings); }
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Based on settled size, excluding overshoot. Limited to loaded entities.");
-            }
-            if (ImGui.TreeNode("Exposure & Lingering"))
-            {
-                bool exposure = settings.ExposureBuildup;
-                if (ImGui.Checkbox("Exposure Buildup", ref exposure))
-                { settings.ExposureBuildup = exposure; configuration.SaveSizeDrain(settings); }
-                if (exposure)
-                {
-                    float seconds = settings.ExposureSeconds;
-                    if (ImGui.DragFloat("Exposure Time (s)", ref seconds, 0.1f, 0.1f, 300f, "%.1f"))
-                    { settings.ExposureSeconds = seconds; configuration.SaveSizeDrain(settings); }
-                    if (ImGui.IsItemHovered()) ImGui.SetTooltip("Time at the source before contribution can begin. Up to 4x longer at range edge. Random rolls start after exposure. Leaving range resets buildup.");
-                }
-                bool linger = settings.LingeringCorruption;
-                if (ImGui.Checkbox("Lingering Corruption", ref linger))
-                { settings.LingeringCorruption = linger; configuration.SaveSizeDrain(settings); }
-                if (linger)
-                {
-                    float seconds = settings.LingerSeconds;
-                    if (ImGui.DragFloat("Linger Time (s)", ref seconds, 0.1f, 0.1f, 300f, "%.1f"))
-                    { settings.LingerSeconds = seconds; configuration.SaveSizeDrain(settings); }
-                    if (ImGui.IsItemHovered()) ImGui.SetTooltip("Contribution fades after leaving range. Ends on expiry, death or despawn. Still occupies a target slot.");
-                }
-                ImGui.TreePop();
-            }
-            float peak = settings.PeakHitPercent;
-            if (ImGui.DragFloat("Peak Hit", ref peak, 0.01f, 0f, 100f, "%.2f%% HP"))
-            { settings.PeakHitPercent = Math.Clamp(peak, 0f, 100f); configuration.SaveSizeDrain(settings); }
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Per-source maximum at zero distance, falling smoothly to zero at range. Sources stack. Uses the profile's damage multiplier, HP allowance and accumulator delay.");
-            if (ImGui.TreeNode("Drain VFX"))
-            {
-                // Keep these controls in a stable layout before and after enabling.
-                string receiverPath = settings.ReceiverVfxPath ?? string.Empty;
-                if (ImGui.InputText("Receiver AVFX", ref receiverPath, 512))
-                { settings.ReceiverVfxPath = receiverPath; configuration.SaveSizeDrain(settings); }
-                bool receiver = settings.ReceiverVfxEnabled;
-                bool receiverMissing = string.IsNullOrWhiteSpace(receiverPath);
-                ImGui.BeginDisabled(receiverMissing && !receiver);
-                if (ImGui.Checkbox("Receiver VFX", ref receiver))
-                { settings.ReceiverVfxEnabled = receiver; configuration.SaveSizeDrain(settings); }
-                ImGui.EndDisabled();
-                if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
-                    ImGui.SetTooltip(receiverMissing ? "Enter an AVFX path first." : "Looping effect on the growing character.");
+        }
+        ImGui.PopID();
+    }
 
-                string sourcePath = settings.SourceVfxPath ?? string.Empty;
-                if (ImGui.InputText("Target AVFX", ref sourcePath, 512))
-                { settings.SourceVfxPath = sourcePath; configuration.SaveSizeDrain(settings); }
-                bool source = settings.SourceVfxEnabled;
-                bool sourceMissing = string.IsNullOrWhiteSpace(sourcePath);
-                ImGui.BeginDisabled(sourceMissing && !source);
-                if (ImGui.Checkbox("Target VFX", ref source))
-                { settings.SourceVfxEnabled = source; configuration.SaveSizeDrain(settings); }
-                ImGui.EndDisabled();
-                if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
-                    ImGui.SetTooltip(sourceMissing ? "Enter an AVFX path first." : "Effect on each contributing source. Shared sources use Self's settings first.");
-
-                float fadeIn = settings.FadeIn, fadeOut = settings.FadeOut;
-                if (ImGui.DragFloat("Fade In", ref fadeIn, 0.05f, 0f, 10f, "%.2fs"))
-                { settings.FadeIn = Math.Clamp(fadeIn, 0f, 10f); configuration.SaveSizeDrain(settings); }
-                if (ImGui.DragFloat("Fade Out", ref fadeOut, 0.05f, 0f, 10f, "%.2fs"))
-                { settings.FadeOut = Math.Clamp(fadeOut, 0f, 10f); configuration.SaveSizeDrain(settings); }
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Visible fading depends on the AVFX asset.");
-                ImGui.TreePop();
+    private void DrawSizeDrainMode(SizeDrainSettings settings, string id)
+    {
+        ImGui.PushID(id);
+        bool everyone = settings.Everyone;
+        if (ImGui.Checkbox("Everyone Near Me", ref everyone))
+        { settings.Everyone = everyone; configuration.SaveSizeDrain(settings); }
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("All loaded, living players and NPCs in range of each receiving character, excluding itself. Includes companions and retainers. Overrides the name list while enabled.");
+        if (!everyone)
+        {
+            string input = drainNameInputs.TryGetValue(id, out var saved) ? saved : string.Empty;
+            if (ImGui.InputText("Monster / NPC Name", ref input, 128)) drainNameInputs[id] = input;
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Part of an NPC name, ignoring case. Behemoth matches any name containing behemoth.");
+            ImGui.SameLine();
+            if (ImGui.Button("Add") && !string.IsNullOrWhiteSpace(input))
+            {
+                string name = input.Trim();
+                if (!settings.Names.Exists(n => string.Equals(n, name, StringComparison.OrdinalIgnoreCase))) settings.Names.Add(name);
+                drainNameInputs[id] = string.Empty;
+                configuration.SaveSizeDrain(settings);
             }
+            for (int i = 0; i < settings.Names.Count; i++)
+            {
+                ImGui.PushID(i);
+                if (ImGui.SmallButton("Remove"))
+                { settings.Names.RemoveAt(i--); configuration.SaveSizeDrain(settings); ImGui.PopID(); continue; }
+                ImGui.SameLine();
+                ImGui.TextUnformatted(settings.Names[i]);
+                ImGui.PopID();
+            }
+        }
+        int maximumTargets = settings.MaximumTargets;
+        if (ImGui.SliderInt("Maximum Targets", ref maximumTargets, 1, 64))
+        { settings.MaximumTargets = maximumTargets; configuration.SaveSizeDrain(settings); }
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Per receiving character. Keeps active targets until expiry or range exit; limits both growth sources and their effects.");
+        if (ImGui.TreeNode("Random Contributors"))
+        {
+            bool randomContributors = settings.RandomContributors;
+            if (ImGui.Checkbox("Random Contributors", ref randomContributors))
+            { settings.RandomContributors = randomContributors; configuration.SaveSizeDrain(settings); }
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Each nearby source rolls independently for a temporary contribution. Works with Everyone or the name list.");
+            if (randomContributors)
+            {
+                float chance = settings.ContributorChancePercent;
+                if (ImGui.SliderFloat("Chance per Check", ref chance, 0f, 100f, "%.1f%%"))
+                { settings.ContributorChancePercent = chance; configuration.SaveSizeDrain(settings); }
+                float retry = settings.ContributorRetrySeconds;
+                if (ImGui.DragFloat("Retry Delay (s)", ref retry, 0.1f, 0.1f, 300f, "%.1f"))
+                { settings.ContributorRetrySeconds = retry; configuration.SaveSizeDrain(settings); }
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Wait after a failed roll or an expired contribution. One roll on entering range; no rolls while active.");
+                float minimum = settings.ContributorMinimumSeconds;
+                if (ImGui.DragFloat("Minimum Duration (s)", ref minimum, 0.1f, 0.1f, 300f, "%.1f"))
+                { settings.ContributorMinimumSeconds = minimum; configuration.SaveSizeDrain(settings); }
+                float maximum = settings.ContributorMaximumSeconds;
+                if (ImGui.DragFloat("Maximum Duration (s)", ref maximum, 0.1f, settings.ContributorMinimumSeconds, 300f, "%.1f"))
+                { settings.ContributorMaximumSeconds = maximum; configuration.SaveSizeDrain(settings); }
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Duration is chosen on activation. Leaving range ends contribution unless lingering is enabled. Multiple sources can overlap.");
+            }
+            ImGui.TreePop();
+        }
+        float range = settings.Range;
+        if (ImGui.DragFloat("Range", ref range, 0.1f, 0.1f, 100f, "%.1f"))
+        { settings.Range = Math.Clamp(range, 0.1f, 100f); configuration.SaveSizeDrain(settings); }
+        bool sizeRange = settings.SizeDrivenRange;
+        if (ImGui.Checkbox("Range Grows With Size", ref sizeRange))
+        { settings.SizeDrivenRange = sizeRange; configuration.SaveSizeDrain(settings); }
+        if (sizeRange)
+        {
+            float gain = settings.RangePerScale, maximum = settings.MaximumRange;
+            if (ImGui.DragFloat("Range per 1x", ref gain, 0.1f, 0f, 100f, "%.1f"))
+            { settings.RangePerScale = gain; configuration.SaveSizeDrain(settings); }
+            if (ImGui.DragFloat("Maximum Range", ref maximum, 0.1f, settings.Range, 100f, "%.1f"))
+            { settings.MaximumRange = maximum; configuration.SaveSizeDrain(settings); }
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Based on settled size, excluding overshoot. Limited to loaded entities.");
+        }
+        if (ImGui.TreeNode("Exposure & Lingering"))
+        {
+            bool exposure = settings.ExposureBuildup;
+            if (ImGui.Checkbox("Exposure Buildup", ref exposure))
+            { settings.ExposureBuildup = exposure; configuration.SaveSizeDrain(settings); }
+            if (exposure)
+            {
+                float seconds = settings.ExposureSeconds;
+                if (ImGui.DragFloat("Exposure Time (s)", ref seconds, 0.1f, 0.1f, 300f, "%.1f"))
+                { settings.ExposureSeconds = seconds; configuration.SaveSizeDrain(settings); }
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Time at the source before contribution can begin. Up to 4x longer at range edge. Random rolls start after exposure. Leaving range resets buildup.");
+            }
+            bool linger = settings.LingeringCorruption;
+            if (ImGui.Checkbox("Lingering Corruption", ref linger))
+            { settings.LingeringCorruption = linger; configuration.SaveSizeDrain(settings); }
+            if (linger)
+            {
+                float seconds = settings.LingerSeconds;
+                if (ImGui.DragFloat("Linger Time (s)", ref seconds, 0.1f, 0.1f, 300f, "%.1f"))
+                { settings.LingerSeconds = seconds; configuration.SaveSizeDrain(settings); }
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Contribution fades after leaving range. Ends on expiry, death or despawn. Still occupies a target slot.");
+            }
+            ImGui.TreePop();
+        }
+        float peak = settings.PeakHitPercent;
+        if (ImGui.DragFloat("Peak Hit", ref peak, 0.01f, 0f, 100f, "%.2f%% HP"))
+        { settings.PeakHitPercent = Math.Clamp(peak, 0f, 100f); configuration.SaveSizeDrain(settings); }
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Per-source maximum at zero distance, falling smoothly to zero at range. Sources stack. Uses the profile's damage multiplier, HP allowance and accumulator delay.");
+        if (ImGui.TreeNode("Drain VFX"))
+        {
+            // Keep these controls in a stable layout before and after enabling.
+            string receiverPath = settings.ReceiverVfxPath ?? string.Empty;
+            if (ImGui.InputText("Receiver AVFX", ref receiverPath, 512))
+            { settings.ReceiverVfxPath = receiverPath; configuration.SaveSizeDrain(settings); }
+            bool receiver = settings.ReceiverVfxEnabled;
+            bool receiverMissing = string.IsNullOrWhiteSpace(receiverPath);
+            ImGui.BeginDisabled(receiverMissing && !receiver);
+            if (ImGui.Checkbox("Receiver VFX", ref receiver))
+            { settings.ReceiverVfxEnabled = receiver; configuration.SaveSizeDrain(settings); }
+            ImGui.EndDisabled();
+            if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
+                ImGui.SetTooltip(receiverMissing ? "Enter an AVFX path first." : "Looping effect on the growing character.");
+
+            string sourcePath = settings.SourceVfxPath ?? string.Empty;
+            if (ImGui.InputText("Target AVFX", ref sourcePath, 512))
+            { settings.SourceVfxPath = sourcePath; configuration.SaveSizeDrain(settings); }
+            bool source = settings.SourceVfxEnabled;
+            bool sourceMissing = string.IsNullOrWhiteSpace(sourcePath);
+            ImGui.BeginDisabled(sourceMissing && !source);
+            if (ImGui.Checkbox("Target VFX", ref source))
+            { settings.SourceVfxEnabled = source; configuration.SaveSizeDrain(settings); }
+            ImGui.EndDisabled();
+            if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
+                ImGui.SetTooltip(sourceMissing ? "Enter an AVFX path first." : "Effect on each contributing source. Shared sources use Self's settings first.");
+
+            float fadeIn = settings.FadeIn, fadeOut = settings.FadeOut;
+            if (ImGui.DragFloat("Fade In", ref fadeIn, 0.05f, 0f, 10f, "%.2fs"))
+            { settings.FadeIn = Math.Clamp(fadeIn, 0f, 10f); configuration.SaveSizeDrain(settings); }
+            if (ImGui.DragFloat("Fade Out", ref fadeOut, 0.05f, 0f, 10f, "%.2fs"))
+            { settings.FadeOut = Math.Clamp(fadeOut, 0f, 10f); configuration.SaveSizeDrain(settings); }
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Visible fading depends on the AVFX asset.");
+            ImGui.TreePop();
         }
         ImGui.PopID();
     }
@@ -1129,10 +1158,6 @@ public class ConfigWindow : Window, IDisposable
                     if (ImGui.Checkbox($"Attach to Crystal##{id}", ref attached))
                     { settings.AetherSourceVfxAttached = attached; configuration.Save(); }
                     if (ImGui.IsItemHovered()) ImGui.SetTooltip("Target-bound playback. Disable for world-space AVFX. Character-only bone bindings may not work on crystals.");
-                    float crystalScale = settings.AetherSourceVfxScale;
-                    if (ImGui.DragFloat($"Crystal VFX Scale##{id}", ref crystalScale, 0.05f, 0.01f, 100f, "%.2fx"))
-                    { settings.AetherSourceVfxScale = Math.Clamp(crystalScale, 0.01f, 100f); configuration.Save(); }
-                    if (ImGui.IsItemHovered()) ImGui.SetTooltip("Major aetherytes use twice this VFX scale. Shards use this value.");
                     if (!attached)
                     {
                         float height = settings.AetherSourceVfxHeight;
@@ -1553,32 +1578,6 @@ public class ConfigWindow : Window, IDisposable
                         Math.Clamp(deltaGrowthVfxCooldown, 0f, 60f);
                     configuration.Save();
                 }
-
-                float deltaGrowthVfxScale = settings.DeltaGrowthVfxScale;
-                if (ImGui.DragFloat(
-                        $"VFX Scale##{id}",
-                        ref deltaGrowthVfxScale,
-                        0.05f,
-                        0.01f,
-                        100.00f,
-                        "%.2f"))
-                {
-                    settings.DeltaGrowthVfxScale =
-                        Math.Clamp(deltaGrowthVfxScale, 0.01f, 100f);
-                    configuration.Save();
-                }
-
-                bool deltaGrowthVfxScaleWithActor =
-                    settings.DeltaGrowthVfxScaleWithActor;
-                if (ImGui.Checkbox(
-                        $"Scale VFX With Actor Growth##{id}",
-                        ref deltaGrowthVfxScaleWithActor))
-                {
-                    settings.DeltaGrowthVfxScaleWithActor =
-                        deltaGrowthVfxScaleWithActor;
-                    configuration.Save();
-                }
-
 
                 if (ImGui.Button($"Test VFX at Yourself##{id}"))
                 {

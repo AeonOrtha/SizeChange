@@ -45,6 +45,7 @@ struct SCCharacterState
     public bool AfterglowActive;
     public List<SizeDrainSources.Hit>? DrainHits;
     public RandomDrainContributors? DrainContributors;
+    public SizeDrainSettings? ActiveDrainMode;
     public List<AetherSources.Hit>? AetherHits;
     public float AccumulatorRemainingSeconds;
     public GrowthOvershootPulse OvershootPulse;
@@ -675,19 +676,26 @@ public sealed class Plugin : IDalamudPlugin
                     GrowthVfxPlayer.KeepProximity(hit.Crystal.Address, hit.Crystal.EntityId,
                         settings.AetherSourceVfxPath, true,
                         new Vector3(hit.Crystal.Position.X, hit.Crystal.Position.Y, hit.Crystal.Position.Z),
-                        settings.AetherSourceVfxAttached, settings.AetherSourceVfxScale * (hit.Crystal.Large ? 2f : 1f), settings.AetherSourceVfxHeight,
+                        settings.AetherSourceVfxAttached, settings.AetherSourceVfxHeight,
                         settings.AetherSourceVfxFadeIn, settings.AetherSourceVfxFadeOut);
         }
         charState.DrainHits ??= new List<SizeDrainSources.Hit>();
 
+        var drain = settings.SizeDrain.ForLocation(drainInDuty);
+        if (!ReferenceEquals(charState.ActiveDrainMode, drain))
+        {
+            charState.DrainContributors?.Clear();
+            charState.DrainHits.Clear();
+            charState.ActiveDrainMode = drain;
+        }
         var nearbyTargets = settings.GrowthFromDelta && settings.SizeDrain.Enabled &&
             settings.SizeDrain.AllowsLocation(drainInDuty) && !drainTransition && !disable &&
             (actor->Health > 0 || aetherWithoutHp) && settings.MaximumHealthLossRatioPerTrigger > 0f && settings.DeltaGrowthMultiplier > 0f
             ? drainSources.GetHits((nint)actor, new System.Numerics.Vector3(position.X, position.Y, position.Z),
-                settings.SizeDrain, charState.DrainHits, charState.GrowthMultiplier) : null;
+                drain, charState.DrainHits, charState.GrowthMultiplier) : null;
         charState.DrainContributors ??= new RandomDrainContributors();
         if (nearbyTargets != null)
-            charState.DrainContributors.Filter(charState.DrainHits, settings.SizeDrain,
+            charState.DrainContributors.Filter(charState.DrainHits, drain,
                 Environment.TickCount64 / 1000.0, Random.Shared.NextDouble);
         else
         {
@@ -698,7 +706,6 @@ public sealed class Plugin : IDalamudPlugin
         charState.NearbyDrainSources = drainCount;
         if (drainCount > 0)
         {
-            var drain = settings.SizeDrain;
             if (drain.ReceiverVfxEnabled && !string.IsNullOrWhiteSpace(drain.ReceiverVfxPath))
                 GrowthVfxPlayer.KeepProximity((nint)actor, actor->EntityId, drain.ReceiverVfxPath, false, position,
                     fadeIn: drain.FadeIn, fadeOut: drain.FadeOut, sizeDrain: true);
@@ -862,16 +869,11 @@ public sealed class Plugin : IDalamudPlugin
                 charState.LastDeltaGrowthVfxTick == 0 ||
                 currentTick - charState.LastDeltaGrowthVfxTick >= vfxCooldownMilliseconds;
 
-            float currentVisibleGrowthMultiplier =
-                charState.PlayerScale > 0f
-                    ? scale / charState.PlayerScale
-                    : 1f;
             if (vfxCooldownElapsed &&
                 TryPlayDeltaGrowthVfx(
                     actor,
                     settings,
-                    false,
-                    currentVisibleGrowthMultiplier) == null)
+                    false) == null)
             {
                 charState.LastDeltaGrowthVfxTick = currentTick;
             }
@@ -987,9 +989,6 @@ public sealed class Plugin : IDalamudPlugin
             charState.PlayerScale > 0f
                 ? scale / charState.PlayerScale
                 : 1f;
-        GrowthVfxPlayer.UpdateActorScale(
-            (nint)actor,
-            visibleScaleMultiplier);
 
         // Persistent self-only lift. Combat/accumulator state does not gate it.
         // Self uses Customize+ root translation; other actors use DrawOffset.
@@ -1125,28 +1124,17 @@ public sealed class Plugin : IDalamudPlugin
         }
 
         var actor = (Character*)localPlayer.Address;
-        float visibleGrowthMultiplier = 1f;
-        var draw = (CharacterBase*)actor->DrawObject;
-        if (draw != null &&
-            TryGetCharacterState(actor, out var charState) &&
-            charState.PlayerScale > 0f)
-        {
-            visibleGrowthMultiplier = draw->Scale.Y / charState.PlayerScale;
-        }
-
         string? error = TryPlayDeltaGrowthVfx(
             actor,
             settings,
-            true,
-            visibleGrowthMultiplier);
+            true);
         return error ?? "Actor-root VFX created. It will be removed after the configured duration.";
     }
 
     private unsafe string? TryPlayDeltaGrowthVfx(
         Character* actor,
         GrowthSettings settings,
-        bool ignoreEnabled,
-        float actorGrowthMultiplier)
+        bool ignoreEnabled)
     {
         if (!ignoreEnabled && !settings.EnableDeltaGrowthVfx)
         {
@@ -1173,8 +1161,7 @@ public sealed class Plugin : IDalamudPlugin
         foreach (var layer in paths)
         {
             string? error = GrowthVfxPlayer.TryPlay((nint)actor, layer.Path,
-                layer.Duration, settings.DeltaGrowthVfxScale,
-                settings.DeltaGrowthVfxScaleWithActor, actorGrowthMultiplier, layer.Layer, actor->EntityId, layer.Restart);
+                layer.Duration, layer.Layer, actor->EntityId, layer.Restart);
             firstError ??= error;
         }
         return firstError;

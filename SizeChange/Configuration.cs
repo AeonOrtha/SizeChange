@@ -24,7 +24,6 @@ public class GrowthSettings
     public float AetherSourceVfxFadeIn { get; set; } = 0.5f;
     public float AetherSourceVfxFadeOut { get; set; } = 0.5f;
     public bool AetherSourceVfxAttached { get; set; } = true;
-    public float AetherSourceVfxScale { get; set; } = 1f;
     public float AetherSourceVfxHeight { get; set; } = 0f;
     public string AetherSourceVfxPath { get; set; } = string.Empty;
     public AetherSoundSettings AetherActorSound { get; set; } = new();
@@ -87,8 +86,6 @@ public class GrowthSettings
     }
     public float DeltaGrowthVfxDurationSeconds { get; set; } = 2.0f;
     public float DeltaGrowthVfxCooldownSeconds { get; set; } = 1.0f;
-    public float DeltaGrowthVfxScale { get; set; } = 1.0f;
-    public bool DeltaGrowthVfxScaleWithActor { get; set; } = true;
     public List<GrowthAnimationChoice>? DeltaGrowthAnimationChoices { get; set; }
     internal List<GrowthAnimationChoice> GetGrowthAnimationChoices()
     {
@@ -122,7 +119,6 @@ public class GrowthSettings
         AetherActorVfxFadeOut = float.IsFinite(AetherActorVfxFadeOut) ? Math.Clamp(AetherActorVfxFadeOut, 0f, 10f) : 0.5f;
         AetherSourceVfxFadeIn = float.IsFinite(AetherSourceVfxFadeIn) ? Math.Clamp(AetherSourceVfxFadeIn, 0f, 10f) : 0.5f;
         AetherSourceVfxFadeOut = float.IsFinite(AetherSourceVfxFadeOut) ? Math.Clamp(AetherSourceVfxFadeOut, 0f, 10f) : 0.5f;
-        AetherSourceVfxScale = float.IsFinite(AetherSourceVfxScale) ? Math.Clamp(AetherSourceVfxScale, 0.01f, 100f) : 1f;
         AetherSourceVfxHeight = float.IsFinite(AetherSourceVfxHeight) ? Math.Clamp(AetherSourceVfxHeight, -100f, 100f) : 0f;
         AetherActorSound ??= new(); AetherActorSound.Validate();
         AetherSourceSound ??= new(); AetherSourceSound.Validate();
@@ -173,7 +169,6 @@ public class GrowthSettings
         ValidateGrowthLayers();
         DeltaGrowthVfxCooldownSeconds =
             Math.Clamp(DeltaGrowthVfxCooldownSeconds, 0f, 60f);
-        DeltaGrowthVfxScale = Math.Clamp(DeltaGrowthVfxScale, 0.01f, 100f);
         DeltaGrowthAnimationTmbPath =
             DeltaGrowthAnimationTmbPath?.Trim().Replace('\\', '/') ?? string.Empty;
         GrowthAnimationChoice.Validate(GetGrowthAnimationChoices());
@@ -204,7 +199,6 @@ public class GrowthSettings
             AetherSourceVfxFadeIn = settings.AetherSourceVfxFadeIn,
             AetherSourceVfxFadeOut = settings.AetherSourceVfxFadeOut,
             AetherSourceVfxAttached = settings.AetherSourceVfxAttached,
-            AetherSourceVfxScale = settings.AetherSourceVfxScale,
             AetherSourceVfxHeight = settings.AetherSourceVfxHeight,
             AetherSourceVfxEnabled = settings.AetherSourceVfxEnabled,
             AetherSourceVfxPath = settings.AetherSourceVfxPath,
@@ -253,8 +247,6 @@ public class GrowthSettings
             AccumulatingEffects = AccumulatingEffectSettings.CopyOf(settings.AccumulatingEffects),
             DeltaGrowthVfxDurationSeconds = settings.DeltaGrowthVfxDurationSeconds,
             DeltaGrowthVfxCooldownSeconds = settings.DeltaGrowthVfxCooldownSeconds,
-            DeltaGrowthVfxScale = settings.DeltaGrowthVfxScale,
-            DeltaGrowthVfxScaleWithActor = settings.DeltaGrowthVfxScaleWithActor,
             DeltaGrowthAnimationChancePercent = settings.DeltaGrowthAnimationChancePercent,
             EnableDeltaGrowthAnimation = settings.EnableDeltaGrowthAnimation,
             DeltaGrowthAnimationTmbPath = settings.DeltaGrowthAnimationTmbPath,
