@@ -514,12 +514,44 @@ public class ConfigWindow : Window, IDisposable
         }
     }
 
+    private void DrawPlayerProfileHeight()
+    {
+        if (!ImGui.CollapsingHeader("Local Profile Height##players")) return;
+        var settings = configuration.PlayerProfileHeight;
+        bool enabled = settings.Enabled;
+        if (ImGui.Checkbox("Intercept Incoming Profiles", ref enabled))
+        { settings.Enabled = enabled; configuration.Save(); }
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Experimental local Customize+ interception for selected Added Players. Keeps Lightless syncing. Applies to incoming temporary profiles from any local caller for these players.");
+        if (enabled)
+        {
+            float offset = settings.Offset;
+            if (ImGui.DragFloat("Root Y Addition", ref offset, 0.01f, 0f, 100f, "%.3f"))
+            { settings.Offset = Math.Clamp(offset, 0f, 100f); configuration.Save(); }
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Fixed addition to incoming root Y, in Customize+ units. Not a size-driven world-space lift. Existing growth scaling continues separately.");
+            foreach (string name in configuration.TrackedPlayerNames)
+            {
+                bool selected = settings.Players.Exists(x => string.Equals(x, name, StringComparison.OrdinalIgnoreCase));
+                if (ImGui.Checkbox(name + "##profile-height", ref selected))
+                {
+                    if (selected) settings.Players.Add(name);
+                    else settings.Players.RemoveAll(x => string.Equals(x, name, StringComparison.OrdinalIgnoreCase));
+                    configuration.Save();
+                }
+            }
+            if (ImGui.Button("Retry##profile-height")) plugin.PlayerProfileHeight.Retry();
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Retry patch installation. For a profile already applied before enabling, request a Lightless reapply/resync. SizeChange never replaces an unknown existing profile.");
+        }
+        ImGui.TextWrapped(plugin.PlayerProfileHeight.Status);
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Only newly received profiles are captured. Offset edits and disabling restore/reapply the captured original locally while preserving its ID. Unsupported Customize+ versions leave syncing untouched.");
+    }
+
     private void DrawPlayerTab()
     {
         if (!ImGui.BeginTabItem("Added Players")) return;
 
         DrawGrowthPreview(configuration.PlayerSettings, SCActorGroup.Player);
         DrawTrackedPlayers();
+        DrawPlayerProfileHeight();
         ImGui.Separator();
         DrawGrowthSettings(configuration.PlayerSettings, "players");
         if (ImGui.TreeNode("Transform Values##players"))
@@ -533,6 +565,7 @@ public class ConfigWindow : Window, IDisposable
         {
             plugin.GetPreview(SCActorGroup.Player).Enabled = false;
             configuration.PlayerSettings = GrowthSettings.Defaults();
+            configuration.PlayerProfileHeight = new();
             configuration.Save();
         }
 

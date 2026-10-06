@@ -64,3 +64,10 @@ public sealed class SizeDrainSettings
         return copy;
     }
 }
+
+// Shared by all receiver profiles. Loading always suspends source collection.
+internal static class SizeDrainLocation
+{
+    public static bool IsDuty(bool bound, uint contentId, bool territoryDuty) => bound || contentId != 0 || territoryDuty;
+    public static bool Blocked(SizeDrainSettings settings, bool inDuty, bool transitioning) => transitioning || !settings.AllowsLocation(inDuty);
+}

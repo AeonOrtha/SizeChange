@@ -206,6 +206,14 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable
     // Channel 0: timed growth; 1/2: crystal receiver/source;
     // 3/4: size-drain receiver/source; 10..25: accumulator layers.
     // Each lifecycle is independent from timed growth layers (0 and 100+).
+    public void ClearSizeDrainEffects()
+    {
+        foreach (var entry in new List<KeyValuePair<nint, ActiveGrowthVfx>>(activeByVfx))
+            if (entry.Value.Channel is 3 or 4) RemoveTrackedVfx(entry.Key);
+        foreach (var key in new List<(nint Actor, int Channel)>(retryAfter.Keys))
+            if (key.Channel is 3 or 4) retryAfter.Remove(key);
+    }
+
     public void BeginProximityFrame(float seconds = 0f)
     {
         proximityRequested.Clear();

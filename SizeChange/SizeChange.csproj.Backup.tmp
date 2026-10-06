@@ -9,6 +9,9 @@
     <RootNamespace>SizeChange</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="Lib.Harmony" Version="2.4.2" />
+    <Content Include="packages.lock.json" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="SizeChange.csproj" />
   </ItemGroup>
 </Project>

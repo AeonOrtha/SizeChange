@@ -66,6 +66,7 @@ public sealed class Plugin : IDalamudPlugin
     [PluginService] internal static IObjectTable ObjectTable { get; private set; } = null!;
     [PluginService] internal static IFramework Framework { get; private set; } = null!;
     [PluginService] internal static IClientState ClientState { get; private set; } = null!;
+    [PluginService] internal static IDutyState DutyState { get; private set; } = null!;
     [PluginService] internal static ICondition Condition { get; private set; } = null!;
     [PluginService] internal static IDataManager DataManager { get; private set; } = null!;
     [PluginService] internal static IGameInteropProvider GameInteropProvider { get; private set; } = null!;
@@ -107,6 +108,11 @@ public sealed class Plugin : IDalamudPlugin
     internal readonly HeartbeatSoundPlayer HeartbeatSound = new(new HeartbeatScdVoice(), new HeartbeatScdVoice(), new HeartbeatScdVoice());
     private readonly GrowthVfxPlayer GrowthVfxPlayer;
     internal BoneHeartbeatPlayer BoneHeartbeat { get; }
+    internal PlayerProfileHeightCompatibility PlayerProfileHeight { get; }
+    private bool drainInDuty;
+    private bool drainTransition;
+    private uint drainTerritory = uint.MaxValue;
+    private bool drainTerritoryIsDuty;
     private float TrackedActorRefreshElapsed = TrackedActorRefreshIntervalSeconds;
     private bool TrackedActorRefreshRequested = true;
 
@@ -124,6 +130,12 @@ public sealed class Plugin : IDalamudPlugin
             address => vfxActorModels.TryGetValue(address, out var model) ? model : 0,
             message => Log.Debug("VFX: {Event}", message));
         BoneHeartbeat = new BoneHeartbeatPlayer(new CustomizeHeartbeatApi(PluginInterface));
+        PlayerProfileHeight = new PlayerProfileHeightCompatibility(
+            () => Configuration.PlayerProfileHeight,
+            ResolveHeightActor,
+            actor => Configuration.Enable && !ClientState.IsPvP && ClientState.IsLoggedIn &&
+                Configuration.TrackedPlayerNames.Exists(n => string.Equals(n, actor.Name, StringComparison.OrdinalIgnoreCase)),
+            PluginInterface, message => Log.Warning("Player height: {Message}", message));
 
         ConfigWindow = new ConfigWindow(this);
         WindowSystem.AddWindow(ConfigWindow);
@@ -147,6 +159,7 @@ public sealed class Plugin : IDalamudPlugin
     public unsafe void Dispose()
     {
         Framework.Update -= OnFrameworkUpdate;
+        PlayerProfileHeight.Dispose();
         HeartbeatSound.Dispose();
         aetherSound.Dispose();
         BoneHeartbeat.Dispose();
@@ -259,8 +272,48 @@ public sealed class Plugin : IDalamudPlugin
         return true;
     }
 
+    private PlayerProfileHeightHook.Actor? ResolveHeightActor(ushort index)
+    {
+        // Never inspect game objects from a foreign IPC thread.
+        if (!Framework.IsInFrameworkUpdateThread || !ClientState.IsLoggedIn) return null;
+        var obj = ObjectTable[index];
+        if (obj is not IPlayerCharacter player || player.Address == ObjectTable.LocalPlayer?.Address) return null;
+        return new(index, player.Address, player.EntityId, GetPlayerIdentity(player));
+    }
+
+    private void UpdateDrainLocation()
+    {
+        drainTransition = !ClientState.IsLoggedIn || Condition[ConditionFlag.BetweenAreas] || Condition[ConditionFlag.BetweenAreas51];
+        if (drainTerritory != ClientState.TerritoryType)
+        {
+            drainTerritory = ClientState.TerritoryType;
+            drainTerritoryIsDuty = DataManager.GetExcelSheet<TerritoryType>().GetRowOrDefault(drainTerritory)?.ContentFinderCondition.RowId > 0;
+            // No contributor lease or exposure may cross a territory boundary.
+            foreach (var key in new List<uint>(CharacterIdToLastScaleMap.Keys))
+            {
+                var state = CharacterIdToLastScaleMap[key];
+                state.DrainContributors?.Clear(); state.DrainHits?.Clear(); state.NearbyDrainSources = 0;
+                CharacterIdToLastScaleMap[key] = state;
+            }
+            GrowthVfxPlayer.ClearSizeDrainEffects();
+        }
+        drainInDuty = SizeDrainLocation.IsDuty(
+            Condition[ConditionFlag.BoundByDuty] || Condition[ConditionFlag.BoundByDuty56] || Condition[ConditionFlag.BoundByDuty95],
+            DutyState.ContentFinderCondition.RowId, drainTerritoryIsDuty);
+        foreach (var key in new List<uint>(CharacterIdToLastScaleMap.Keys))
+        {
+            var state = CharacterIdToLastScaleMap[key];
+            if (!SizeDrainLocation.Blocked(GetSettings(state.ActorGroup).SizeDrain, drainInDuty, drainTransition)) continue;
+            state.DrainContributors?.Clear(); state.DrainHits?.Clear(); state.NearbyDrainSources = 0;
+            CharacterIdToLastScaleMap[key] = state;
+        }
+        if (drainTransition) { drainSources.BeginFrame(); GrowthVfxPlayer.ClearSizeDrainEffects(); }
+    }
+
     private unsafe void OnFrameworkUpdate(IFramework framework)
     {
+        UpdateDrainLocation();
+        PlayerProfileHeight.Tick();
         vfxActorIdentities.Clear();
         vfxActorModels.Clear();
         if (ClientState.IsLoggedIn && !Condition[ConditionFlag.BetweenAreas] && !Condition[ConditionFlag.BetweenAreas51])
@@ -626,10 +679,9 @@ public sealed class Plugin : IDalamudPlugin
                         settings.AetherSourceVfxFadeIn, settings.AetherSourceVfxFadeOut);
         }
         charState.DrainHits ??= new List<SizeDrainSources.Hit>();
-        bool inDuty = Condition[ConditionFlag.BoundByDuty] || Condition[ConditionFlag.BoundByDuty56] ||
-            Condition[ConditionFlag.BoundByDuty95];
+
         var nearbyTargets = settings.GrowthFromDelta && settings.SizeDrain.Enabled &&
-            settings.SizeDrain.AllowsLocation(inDuty) && !disable &&
+            settings.SizeDrain.AllowsLocation(drainInDuty) && !drainTransition && !disable &&
             (actor->Health > 0 || aetherWithoutHp) && settings.MaximumHealthLossRatioPerTrigger > 0f && settings.DeltaGrowthMultiplier > 0f
             ? drainSources.GetHits((nint)actor, new System.Numerics.Vector3(position.X, position.Y, position.Z),
                 settings.SizeDrain, charState.DrainHits, charState.GrowthMultiplier) : null;
@@ -637,7 +689,11 @@ public sealed class Plugin : IDalamudPlugin
         if (nearbyTargets != null)
             charState.DrainContributors.Filter(charState.DrainHits, settings.SizeDrain,
                 Environment.TickCount64 / 1000.0, Random.Shared.NextDouble);
-        else charState.DrainContributors.Clear();
+        else
+        {
+            charState.DrainContributors.Clear();
+            charState.DrainHits.Clear();
+        }
         int drainCount = nearbyTargets?.Count ?? 0;
         charState.NearbyDrainSources = drainCount;
         if (drainCount > 0)
