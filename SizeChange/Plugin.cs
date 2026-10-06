@@ -179,6 +179,28 @@ public sealed class Plugin : IDalamudPlugin
         CommandManager.RemoveHandler(CommandName_Scale);
     }
 
+    internal unsafe void ImportProfile(ProfileSettingsFile imported, SCActorGroup group)
+    {
+        var previous = ProfileSettingsFile.Capture(Configuration, group);
+        imported.Apply(Configuration, group);
+        try { PluginInterface.SavePluginConfig(Configuration); }
+        catch { previous.Apply(Configuration, group); throw; }
+        GetPreview(group).Enabled = false;
+        foreach (var pair in new List<KeyValuePair<uint, SCCharacterState>>(CharacterIdToLastScaleMap))
+        {
+            if (pair.Value.ActorGroup != group) continue;
+            var obj = ObjectTable.SearchByEntityId(pair.Key);
+            var state = pair.Value;
+            if (obj is IBattleChara && obj.Address == state.ActorAddress)
+                RestoreOwnedTransforms((Character*)obj.Address, ref state);
+            GrowthVfxPlayer.ClearActorEffects(state.ActorAddress);
+            CharacterIdToLastScaleMap.Remove(pair.Key);
+        }
+        if (group == SCActorGroup.Self) { BoneHeartbeat.Retry(); HeartbeatSound.Dispose(); }
+        // Proximity sources are shared; the next frame reconciles their ownership.
+        TrackedActorRefreshRequested = true;
+    }
+
     private unsafe void RestoreCharacterTransforms()
     {
         foreach (var stateEntry in CharacterIdToLastScaleMap)

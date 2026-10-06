@@ -191,6 +191,14 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable
     // Channel 0: timed growth; 1/2: crystal receiver/source;
     // 3/4: size-drain receiver/source; 10..25: accumulator layers.
     // Each lifecycle is independent from timed growth layers (0 and 100+).
+    public void ClearActorEffects(nint actor)
+    {
+        foreach (var pair in new List<KeyValuePair<nint, ActiveGrowthVfx>>(activeByVfx))
+            if (pair.Value.ActorAddress == actor && pair.Value.Channel is not (2 or 4)) RemoveTrackedVfx(pair.Key);
+        foreach (var key in new List<(nint Actor, int Channel)>(retryAfter.Keys))
+            if (key.Actor == actor && key.Channel is not (2 or 4)) retryAfter.Remove(key);
+    }
+
     public void ClearSizeDrainEffects()
     {
         foreach (var entry in new List<KeyValuePair<nint, ActiveGrowthVfx>>(activeByVfx))

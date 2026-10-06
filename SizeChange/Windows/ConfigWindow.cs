@@ -2,11 +2,16 @@ using System;
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface.Windowing;
+using Dalamud.Interface.ImGuiFileDialog;
 
 namespace SizeChange.Windows;
 
 public class ConfigWindow : Window, IDisposable
 {
+    private readonly FileDialogManager profileDialogs = new();
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<SCActorGroup, string> profileFileStatus = new();
+    private volatile bool profileFileBusy;
+    private volatile bool disposed;
     private readonly Plugin plugin;
     private readonly Configuration configuration;
     private string trackedPlayerNameInput = string.Empty;
@@ -31,10 +36,11 @@ public class ConfigWindow : Window, IDisposable
         configuration.EnsureValid();
     }
 
-    public void Dispose() { }
+    public void Dispose() { disposed = true; profileDialogs.Reset(); }
 
     public override void Draw()
     {
+        profileDialogs.Draw();
         bool enabled = configuration.Enable;
         if (ImGui.Checkbox("Enable SizeChange", ref enabled))
         {
@@ -54,9 +60,57 @@ public class ConfigWindow : Window, IDisposable
         ImGui.Text("This plugin is disabled in PvP.");
     }
 
+    private void DrawProfileFiles(SCActorGroup group)
+    {
+        ImGui.PushID("profile-files-" + group);
+        ImGui.BeginDisabled(profileFileBusy);
+        if (ImGui.Button("Import JSON"))
+            profileDialogs.OpenFileDialog("Import " + ProfileSettingsFile.Name(group), ".json", (ok, path) =>
+            {
+                if (!ok || disposed) return;
+                try
+                {
+                    var imported = ProfileSettingsFile.Read(path, group);
+                    profileFileBusy = true;
+                    _ = ApplyImportedProfile(imported, group);
+                }
+                catch (Exception ex) { profileFileStatus[group] = "Import failed: " + ex.Message; }
+            });
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Replaces this tab's complete configuration. Resets its live growth and stops preview. Other tabs and the global enable switch stay unchanged.");
+        ImGui.SameLine();
+        if (ImGui.Button("Export JSON"))
+            profileDialogs.SaveFileDialog("Export " + ProfileSettingsFile.Name(group), ".json",
+                "SizeChange-" + ProfileSettingsFile.Name(group), ".json", (ok, path) =>
+                {
+                    if (!ok || disposed) return;
+                    try { ProfileSettingsFile.Capture(configuration, group).Write(path); profileFileStatus[group] = "Exported."; }
+                    catch (Exception ex) { profileFileStatus[group] = "Export failed: " + ex.Message; }
+                });
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("All settings for this tab, including names, duty overrides and effect paths. Does not include game assets or live growth.");
+        ImGui.EndDisabled();
+        if (profileFileStatus.TryGetValue(group, out var status)) ImGui.TextWrapped(status);
+        ImGui.PopID();
+    }
+
+    private async System.Threading.Tasks.Task ApplyImportedProfile(ProfileSettingsFile imported, SCActorGroup group)
+    {
+        try
+        {
+            await Plugin.Framework.RunOnFrameworkThread(() =>
+            {
+                if (disposed) return;
+                plugin.ImportProfile(imported, group);
+            });
+            if (!disposed) profileFileStatus[group] = "Imported.";
+        }
+        catch (Exception ex) { if (!disposed) profileFileStatus[group] = "Import failed: " + ex.Message; }
+        finally { profileFileBusy = false; }
+    }
+
     private void DrawSelfTab()
     {
         if (!ImGui.BeginTabItem("Your Character")) return;
+        DrawProfileFiles(SCActorGroup.Self);
 
         bool affectSelf = configuration.AffectSelf;
         string localPlayerName =
@@ -548,6 +602,7 @@ public class ConfigWindow : Window, IDisposable
     private void DrawPlayerTab()
     {
         if (!ImGui.BeginTabItem("Added Players")) return;
+        DrawProfileFiles(SCActorGroup.Player);
 
         DrawGrowthPreview(configuration.PlayerSettings, SCActorGroup.Player);
         DrawTrackedPlayers();
@@ -575,6 +630,7 @@ public class ConfigWindow : Window, IDisposable
     private void DrawMonsterTab()
     {
         if (!ImGui.BeginTabItem("Added Monsters")) return;
+        DrawProfileFiles(SCActorGroup.Monster);
 
         DrawGrowthPreview(configuration.MonsterSettings, SCActorGroup.Monster);
         DrawTrackedMonsters();
