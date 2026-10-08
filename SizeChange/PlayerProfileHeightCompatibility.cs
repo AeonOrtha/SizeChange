@@ -16,7 +16,10 @@ internal sealed class PlayerProfileHeightCompatibility : IDisposable
     private long nextCheck;
     private bool failed;
     private readonly Action<string> log;
-    public string Status => hook.Status;
+    private string? availabilityStatus;
+    public string Status => availabilityStatus ?? hook.Status;
+    public string CallStatus => $"Incoming: {hook.ReceivedCalls} | Applied: {hook.AppliedCalls}";
+    public string LastCall => hook.LastCall;
     public int AppliedCount => hook.AppliedCount;
     public PlayerProfileHeightCompatibility(Func<PlayerProfileHeightSettings> settings,
         Func<ushort, PlayerProfileHeightHook.Actor?> resolve,
@@ -33,15 +36,31 @@ internal sealed class PlayerProfileHeightCompatibility : IDisposable
     {
         if (!settings().Enabled)
         {
-            hook.Stop(); failed = false; return;
+            hook.Stop(); availabilityStatus = null; failed = false; return;
         }
         if (Environment.TickCount64 >= nextCheck)
         {
             nextCheck = Environment.TickCount64 + 1000;
-            bool available;
-            try { available = version.InvokeFunc().Item1 == 6 && ready.InvokeFunc(); }
-            catch { available = false; }
-            if (!available) { hook.Stop(false); failed = false; return; }
+            try
+            {
+                var api = version.InvokeFunc();
+                if (api.Item1 != 6)
+                {
+                    hook.Stop(false); failed = false;
+                    availabilityStatus = $"Unsupported Customize+ API: {api.Item1}.{api.Item2}"; return;
+                }
+                if (!ready.InvokeFunc())
+                {
+                    hook.Stop(false); failed = false;
+                    availabilityStatus = "Customize+ is not ready"; return;
+                }
+            }
+            catch (Exception ex)
+            {
+                hook.Stop(false); failed = false;
+                availabilityStatus = "Customize+ IPC unavailable: " + ex.GetBaseException().Message; return;
+            }
+            availabilityStatus = null;
             if (!hook.Installed && !failed)
             {
                 var types = AppDomain.CurrentDomain.GetAssemblies()
@@ -49,6 +68,7 @@ internal sealed class PlayerProfileHeightCompatibility : IDisposable
                     .Select(a => a.GetType("CustomizePlus.Api.CustomizePlusIpc"))
                     .Where(t => t != null).ToArray();
                 if (types.Length == 1) failed = !hook.Install(types[0]!);
+                else availabilityStatus = $"Customize+ runtime types found: {types.Length}; expected 1";
             }
         }
         hook.Tick();

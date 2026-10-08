@@ -572,15 +572,16 @@ public class ConfigWindow : Window, IDisposable
     {
         if (!ImGui.CollapsingHeader("Local Profile Height##players")) return;
         var settings = configuration.PlayerProfileHeight;
+        bool changed = false;
         bool enabled = settings.Enabled;
         if (ImGui.Checkbox("Intercept Incoming Profiles", ref enabled))
-        { settings.Enabled = enabled; configuration.Save(); }
+        { settings.Enabled = enabled; changed = true; }
         if (ImGui.IsItemHovered()) ImGui.SetTooltip("Experimental local Customize+ interception for selected Added Players. Keeps Lightless syncing. Applies to incoming temporary profiles from any local caller for these players.");
         if (enabled)
         {
             float offset = settings.Offset;
             if (ImGui.DragFloat("Root Y Addition", ref offset, 0.01f, 0f, 100f, "%.3f"))
-            { settings.Offset = Math.Clamp(offset, 0f, 100f); configuration.Save(); }
+            { settings.Offset = Math.Clamp(offset, 0f, 100f); changed = true; }
             if (ImGui.IsItemHovered()) ImGui.SetTooltip("Fixed addition to incoming root Y, in Customize+ units. Not a size-driven world-space lift. Existing growth scaling continues separately.");
             foreach (string name in configuration.TrackedPlayerNames)
             {
@@ -589,14 +590,21 @@ public class ConfigWindow : Window, IDisposable
                 {
                     if (selected) settings.Players.Add(name);
                     else settings.Players.RemoveAll(x => string.Equals(x, name, StringComparison.OrdinalIgnoreCase));
-                    configuration.Save();
+                    changed = true;
                 }
             }
             if (ImGui.Button("Retry##profile-height")) plugin.PlayerProfileHeight.Retry();
             if (ImGui.IsItemHovered()) ImGui.SetTooltip("Retry patch installation. For a profile already applied before enabling, request a Lightless reapply/resync. SizeChange never replaces an unknown existing profile.");
         }
+        // Save normalizes tracked names in place, so defer it until enumeration ends.
+        if (changed) configuration.Save();
         ImGui.TextWrapped(plugin.PlayerProfileHeight.Status);
         if (ImGui.IsItemHovered()) ImGui.SetTooltip("Only newly received profiles are captured. Offset edits and disabling restore/reapply the captured original locally while preserving its ID. Unsupported Customize+ versions leave syncing untouched.");
+        if (settings.Enabled)
+        {
+            ImGui.TextUnformatted(plugin.PlayerProfileHeight.CallStatus);
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip(plugin.PlayerProfileHeight.LastCall);
+        }
     }
 
     private void DrawPlayerTab()

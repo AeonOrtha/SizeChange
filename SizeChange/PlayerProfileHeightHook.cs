@@ -32,6 +32,11 @@ internal sealed class PlayerProfileHeightHook : IDisposable
     public bool Installed => setMethod != null;
     public string Status { get; private set; } = "Off";
     public int AppliedCount => entries.Count;
+    private long receivedCalls;
+    private long appliedCalls;
+    public long ReceivedCalls => System.Threading.Interlocked.Read(ref receivedCalls);
+    public long AppliedCalls => System.Threading.Interlocked.Read(ref appliedCalls);
+    public string LastCall { get; private set; } = "No incoming calls observed";
 
     public PlayerProfileHeightHook(Func<ushort, Actor?> resolve, Func<Actor, float?> desired, Action<string> log)
     { this.resolve = resolve; this.desired = desired; this.log = log; }
@@ -80,15 +85,19 @@ internal sealed class PlayerProfileHeightHook : IDisposable
         __state = null;
         var owner = active;
         if (owner == null || owner.disposed || !owner.accepting || replay != null) return;
+        System.Threading.Interlocked.Increment(ref owner.receivedCalls);
         try
         {
             var actor = owner.resolve(__0);
-            if (!actor.HasValue) return;
+            if (!actor.HasValue)
+            { owner.LastCall = $"Skipped actor index {__0}: unavailable, Self, non-player or outside framework thread"; return; }
             var offset = owner.desired(actor.Value);
-            if (!offset.HasValue || offset.Value <= 0f) return;
+            if (!offset.HasValue || offset.Value <= 0f)
+            { owner.LastCall = $"Skipped {actor.Value.Name}: not selected/eligible, or offset is zero"; return; }
             string modified = PlayerProfileHeightJson.Add(__1, offset.Value);
             __state = new(actor.Value, __1, offset.Value, __instance);
             __1 = modified;
+            owner.LastCall = $"Intercepted {actor.Value.Name}: root Y +{offset.Value:0.###}";
         }
         catch (Exception ex) { owner.Report(ex); } // Leave the original input untouched.
     }
@@ -96,12 +105,16 @@ internal sealed class PlayerProfileHeightHook : IDisposable
     private static void AfterApply(ValueTuple<int, Guid?> __result, Capture? __state)
     {
         var owner = active;
-        if (owner == null || __state == null || __result.Item1 != 0 || !__result.Item2.HasValue) return;
+        if (owner == null || __state == null) return;
+        if (__result.Item1 != 0 || !__result.Item2.HasValue)
+        { owner.LastCall = $"Customize+ rejected profile: code {__result.Item1}"; return; }
         try
         {
             var profile = owner.FindProfile(__state.Instance, __result.Item2.Value);
             if (profile == null) throw new InvalidOperationException("Applied profile could not be tracked.");
             owner.entries[__state.Actor.Index] = new(__state, __result.Item2.Value, profile);
+            System.Threading.Interlocked.Increment(ref owner.appliedCalls);
+            owner.LastCall = $"Customize+ accepted offset for {__state.Actor.Name}";
             owner.Status = $"Active: {owner.entries.Count} player(s)";
         }
         catch (Exception ex) { owner.Report(ex); }
@@ -197,6 +210,7 @@ internal sealed class PlayerProfileHeightHook : IDisposable
         string message = "Height override: " + ex.GetBaseException().Message;
         if (Status != message) log(message);
         Status = message;
+        LastCall = message;
     }
     public void Dispose() { if (disposed) return; Stop(); disposed = true; }
 }
