@@ -20,10 +20,16 @@ internal sealed class PlayerHeightPatchRuntime
     private readonly object all;
     private readonly string id;
 
-    public PlayerHeightPatchRuntime(string id)
+    public PlayerHeightPatchRuntime(string id, string pluginAssemblyPath)
     {
         this.id = id;
-        string path = Path.Combine(Path.GetDirectoryName(typeof(PlayerHeightPatchRuntime).Assembly.Location)!, "0Harmony.dll");
+        // Dalamud may load the plugin from bytes: Assembly.Location is then empty.
+        // Use its host-supplied on-disk path, never the reflection Location.
+        if (string.IsNullOrWhiteSpace(pluginAssemblyPath) || !Path.IsPathFullyQualified(pluginAssemblyPath))
+            throw new InvalidOperationException("Dalamud did not supply an absolute plugin assembly path.");
+        string directory = Path.GetDirectoryName(pluginAssemblyPath)
+            ?? throw new InvalidOperationException("Plugin assembly directory is unavailable.");
+        string path = Path.Combine(directory, "0Harmony.dll");
         var context = AssemblyLoadContext.All.FirstOrDefault(c => c.Name == ContextName)
             ?? new AssemblyLoadContext(ContextName, isCollectible: false);
         var assembly = context.Assemblies.FirstOrDefault(a => a.GetName().Name == "0Harmony")

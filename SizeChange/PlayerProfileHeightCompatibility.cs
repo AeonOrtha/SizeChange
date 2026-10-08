@@ -28,7 +28,7 @@ internal sealed class PlayerProfileHeightCompatibility : IDisposable
         IDalamudPluginInterface plugin, Action<string> log)
     {
         this.settings = settings; this.log = log;
-        hook = new(resolve, actor => eligible(actor) && settings().Includes(actor.Name) ? settings().Offset : null, log);
+        hook = new(resolve, actor => eligible(actor) && settings().Includes(actor.Name) ? settings().Offset : null, log, plugin.AssemblyLocation.FullName);
         version = plugin.GetIpcSubscriber<(int,int)>("CustomizePlus.General.GetApiVersion");
         ready = plugin.GetIpcSubscriber<bool>("CustomizePlus.General.IsValid");
     }

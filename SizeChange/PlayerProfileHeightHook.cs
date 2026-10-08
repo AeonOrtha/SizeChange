@@ -17,6 +17,7 @@ internal sealed class PlayerProfileHeightHook : IDisposable
     [ThreadStatic] private static Replay? replay;
     private static PlayerProfileHeightHook? active;
     private PlayerHeightPatchRuntime? harmony;
+    private readonly string pluginAssemblyPath;
     private bool installed;
     private readonly Func<ushort, Actor?> resolve;
     private readonly Func<Actor, float?> desired;
@@ -38,8 +39,8 @@ internal sealed class PlayerProfileHeightHook : IDisposable
     public long AppliedCalls => System.Threading.Interlocked.Read(ref appliedCalls);
     public string LastCall { get; private set; } = "No incoming calls observed";
 
-    public PlayerProfileHeightHook(Func<ushort, Actor?> resolve, Func<Actor, float?> desired, Action<string> log)
-    { this.resolve = resolve; this.desired = desired; this.log = log; }
+    public PlayerProfileHeightHook(Func<ushort, Actor?> resolve, Func<Actor, float?> desired, Action<string> log, string pluginAssemblyPath)
+    { this.resolve = resolve; this.desired = desired; this.log = log; this.pluginAssemblyPath = pluginAssemblyPath; }
 
     // Schema checked before patching. Unsupported Customize+ versions fail closed
     // for our feature; their original IPC keeps working unchanged.
@@ -49,7 +50,7 @@ internal sealed class PlayerProfileHeightHook : IDisposable
         try
         {
             RemoveHooks(); // Finish any previously failed cleanup before another attempt.
-            harmony ??= new("SizeChange.AddedPlayers.LocalProfileHeight");
+            harmony ??= new("SizeChange.AddedPlayers.LocalProfileHeight", pluginAssemblyPath);
             if (active != null && active != this) throw new InvalidOperationException("Another height hook is active.");
             var method = ipcType.GetMethod("SetTemporaryProfileOnCharacter", BindingFlags.Instance | BindingFlags.NonPublic,
                 null, new[] { typeof(ushort), typeof(string) }, null);
