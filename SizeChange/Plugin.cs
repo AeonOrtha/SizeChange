@@ -110,6 +110,7 @@ public sealed class Plugin : IDalamudPlugin
     private readonly GrowthVfxPlayer GrowthVfxPlayer;
     internal BoneHeartbeatPlayer BoneHeartbeat { get; }
     internal PlayerProfileHeightCompatibility PlayerProfileHeight { get; }
+    internal AddedPlayerEffects PlayerEffects { get; }
     private bool drainInDuty;
     private bool drainTransition;
     private uint drainTerritory = uint.MaxValue;
@@ -131,12 +132,13 @@ public sealed class Plugin : IDalamudPlugin
             address => vfxActorModels.TryGetValue(address, out var model) ? model : 0,
             message => Log.Debug("VFX: {Event}", message));
         BoneHeartbeat = new BoneHeartbeatPlayer(new CustomizeHeartbeatApi(PluginInterface));
+        PlayerEffects = new(() => Configuration.PlayerBoneHeartbeat, () => Configuration.PlayerProfileHeight.Offset);
         PlayerProfileHeight = new PlayerProfileHeightCompatibility(
             () => Configuration.PlayerProfileHeight,
             ResolveHeightActor,
-            actor => Configuration.Enable && !ClientState.IsPvP && ClientState.IsLoggedIn &&
+            actor => Configuration.Enable && Configuration.AffectPlayers && !ClientState.IsPvP && ClientState.IsLoggedIn &&
                 Configuration.TrackedPlayerNames.Exists(n => string.Equals(n, actor.Name, StringComparison.OrdinalIgnoreCase)),
-            PluginInterface, message => Log.Warning("Player height: {Message}", message));
+            PluginInterface, message => Log.Warning("Player profile: {Message}", message), PlayerEffects.Build);
 
         ConfigWindow = new ConfigWindow(this);
         WindowSystem.AddWindow(ConfigWindow);
@@ -161,6 +163,7 @@ public sealed class Plugin : IDalamudPlugin
     {
         Framework.Update -= OnFrameworkUpdate;
         PlayerProfileHeight.Dispose();
+        PlayerEffects.Dispose();
         HeartbeatSound.Dispose();
         aetherSound.Dispose();
         BoneHeartbeat.Dispose();
@@ -197,6 +200,7 @@ public sealed class Plugin : IDalamudPlugin
             CharacterIdToLastScaleMap.Remove(pair.Key);
         }
         if (group == SCActorGroup.Self) { BoneHeartbeat.Retry(); HeartbeatSound.Dispose(); }
+        if (group == SCActorGroup.Player) { PlayerEffects.Dispose(); PlayerProfileHeight.Retry(); }
         // Proximity sources are shared; the next frame reconciles their ownership.
         TrackedActorRefreshRequested = true;
     }
@@ -333,10 +337,21 @@ public sealed class Plugin : IDalamudPlugin
         if (drainTransition) { drainSources.BeginFrame(); GrowthVfxPlayer.ClearSizeDrainEffects(); }
     }
 
-    private unsafe void OnFrameworkUpdate(IFramework framework)
+    private void OnFrameworkUpdate(IFramework framework)
+    {
+        PlayerEffects.BeginFrame();
+        try { OnFrameworkUpdateCore(framework); }
+        finally
+        {
+            PlayerEffects.EndFrame();
+            PlayerProfileHeight.Tick();
+            PlayerEffects.UpdateSounds(PlayerProfileHeight.IsCaptured);
+        }
+    }
+
+    private unsafe void OnFrameworkUpdateCore(IFramework framework)
     {
         UpdateDrainLocation();
-        PlayerProfileHeight.Tick();
         vfxActorIdentities.Clear();
         vfxActorModels.Clear();
         if (ClientState.IsLoggedIn && !Condition[ConditionFlag.BetweenAreas] && !Condition[ConditionFlag.BetweenAreas51])
@@ -398,7 +413,7 @@ public sealed class Plugin : IDalamudPlugin
             !Condition[ConditionFlag.BetweenAreas] && !Condition[ConditionFlag.BetweenAreas51];
         selfPreview.Advance(deltaSeconds, previewAllowed && Configuration.AffectSelf,
             Configuration.SelfSettings.PreviewHitPercent, Configuration.SelfSettings.PreviewHitIntervalSeconds);
-        playerPreview.Advance(deltaSeconds, previewAllowed,
+        playerPreview.Advance(deltaSeconds, previewAllowed && Configuration.AffectPlayers,
             Configuration.PlayerSettings.PreviewHitPercent, Configuration.PlayerSettings.PreviewHitIntervalSeconds);
         monsterPreview.Advance(deltaSeconds, previewAllowed,
             Configuration.MonsterSettings.PreviewHitPercent, Configuration.MonsterSettings.PreviewHitIntervalSeconds);
@@ -469,14 +484,36 @@ public sealed class Plugin : IDalamudPlugin
             }
 
             var actor = (Character*)playerCharacter.Address;
+            float previous = TryGetCharacterState(actor, out var previousPlayerState) ? previousPlayerState.PreviousScale : 0f;
             ProcessSelectedActor(
                 actor,
-                true,
+                Configuration.AffectPlayers,
                 SCActorGroup.Player,
                 Configuration.PlayerSettings,
                 globallyDisabled,
                 inCombat);
             processedEntityIds.Add(actor->EntityId);
+            var identity = new PlayerProfileHeightHook.Actor(playerCharacter.ObjectIndex,
+                playerCharacter.Address, playerCharacter.EntityId, GetPlayerIdentity(playerCharacter));
+            if (Configuration.PlayerProfileHeight.Includes(identity.Name))
+            {
+                bool hasState = TryGetCharacterState(actor, out var playerState);
+                bool allowed = !globallyDisabled && Configuration.AffectPlayers && actor->Health > 0 && actor->DrawObject != null &&
+                    !Condition[ConditionFlag.BetweenAreas] && !Condition[ConditionFlag.BetweenAreas51];
+                bool accumulatingPlayer = hasState && !playerState.Transform.ScaleConflict && Configuration.PlayerSettings.GrowthFromDelta &&
+                    Configuration.PlayerSettings.AccumulatorDelaySeconds > 0 && playerState.PendingGrowth > 0;
+                float settled = hasState ? Configuration.PlayerSettings.GrowthFromDelta ? playerState.GrowthMultiplier :
+                    playerState.PlayerScale > 0 ? playerState.PreviousScale / playerState.PlayerScale : 1f : 1f;
+                bool growing = accumulatingPlayer || (hasState && !playerState.Transform.ScaleConflict &&
+                    (playerState.OvershootPulse.IsActive || playerState.PreviousScale > previous + 0.00001f));
+                PlayerEffects.Update(identity, allowed,
+                    accumulatingPlayer || (hasState && playerState.AfterglowActive && !playerState.Transform.ScaleConflict), growing,
+                    deltaSeconds, hasState ? playerState.PendingDamageRatio : 0f, Configuration.PlayerSettings.MaximumHealthLossRatioPerTrigger,
+                    settled, hasState ? playerState.SelfRootHeightOffset : Configuration.PlayerProfileHeight.Offset,
+                    Configuration.PlayerSettings.Digestion.BoneName,
+                    hasState ? Configuration.PlayerSettings.Digestion.BoneAddition(playerState.Digestion.Growth) : 0f,
+                    playerCharacter.Position);
+            }
         }
 
         foreach (uint entityId in TrackedMonsterEntityIds)
@@ -900,7 +937,7 @@ public sealed class Plugin : IDalamudPlugin
                 charState.LastDeltaGrowthVfxTick = currentTick;
             }
 
-            if (actorGroup == SCActorGroup.Self)
+            if (actorGroup is SCActorGroup.Self or SCActorGroup.Player)
             {
                 long animationCooldownMilliseconds =
                     (long)(settings.DeltaGrowthAnimationCooldownSeconds * 1000f);
@@ -1012,10 +1049,11 @@ public sealed class Plugin : IDalamudPlugin
                 ? scale / charState.PlayerScale
                 : 1f;
 
-        // Persistent self-only lift. Combat/accumulator state does not gate it.
-        // Self uses Customize+ root translation; other actors use DrawOffset.
-        float desiredHeightOffset = actorGroup == SCActorGroup.Self && !disable
-            ? Configuration.SelfFlatHeightOffset : 0f;
+        bool playerProfileHeight = actorGroup == SCActorGroup.Player &&
+            ObjectTable.SearchByEntityId(actor->EntityId) is IPlayerCharacter heightPlayer &&
+            Configuration.PlayerProfileHeight.Includes(GetPlayerIdentity(heightPlayer));
+        float desiredHeightOffset = actorGroup == SCActorGroup.Self ? Configuration.SelfFlatHeightOffset :
+            playerProfileHeight ? Configuration.PlayerProfileHeight.Offset : 0f;
         if (settings.GrowthFromDelta && !charState.Transform.ScaleConflict &&
             settings.EnableDeltaHeightOffset &&
             charState.PlayerScale > 0f)
@@ -1027,9 +1065,20 @@ public sealed class Plugin : IDalamudPlugin
                 settings.DeltaHeightOffsetPerScale;
         }
 
-        if (actorGroup == SCActorGroup.Self)
+        if (actorGroup == SCActorGroup.Self || playerProfileHeight)
         {
             charState.SelfRootHeightOffset = desiredHeightOffset;
+            // Switching to profile translation must remove our previous DrawOffset
+            // addition, otherwise the same growth height is applied twice.
+            if (playerProfileHeight && (charState.HasDrawOffset || charState.Transform.Height.Owned))
+            {
+                var oldOffset = actor->GameObject.DrawOffset;
+                float restored = charState.Transform.Height.Restore(oldOffset.Y);
+                if (restored != oldOffset.Y) actor->GameObject.SetDrawOffset(oldOffset.X, restored, oldOffset.Z);
+                charState.HasDrawOffset = false;
+                charState.LastAppliedDrawOffsetY = restored;
+                sessionHeights.SaveOwnership(HeightKey(actor), charState.Transform.Height);
+            }
         }
         else if (charState.HasDrawOffset || charState.Transform.Height.Owned || desiredHeightOffset > 0f)
         {
@@ -1221,16 +1270,16 @@ public sealed class Plugin : IDalamudPlugin
         }
 
         var localPlayer = ObjectTable.LocalPlayer;
-        if (actor == null ||
-            localPlayer == null ||
-            localPlayer.Address != (nint)actor)
-        {
-            return "Growth animations can only be played on the local player.";
-        }
+        if (actor == null || localPlayer == null) return "Player unavailable.";
+        if (localPlayer.Address != (nint)actor &&
+            (ObjectTable.SearchByEntityId(actor->EntityId) is not IPlayerCharacter player ||
+             player.Address != (nint)actor || !Configuration.AffectPlayers ||
+             !Configuration.TrackedPlayerNames.Exists(n => string.Equals(n, GetPlayerIdentity(player), StringComparison.OrdinalIgnoreCase))))
+            return "Growth animations require a selected player.";
 
         if (actor->Mode != CharacterModes.Normal)
         {
-            return "The local player is not in a normal animation state. " +
+            return "The player is not in a normal animation state. " +
                    "The growth animation was not allowed to interrupt it.";
         }
 

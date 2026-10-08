@@ -14,6 +14,7 @@ internal sealed class PlayerProfileHeightCompatibility : IDisposable
     private readonly ICallGateSubscriber<(int, int)> version;
     private readonly ICallGateSubscriber<bool> ready;
     private long nextCheck;
+    private long nextFrame;
     private bool failed;
     private bool faulted;
     private readonly Action<string> log;
@@ -21,14 +22,15 @@ internal sealed class PlayerProfileHeightCompatibility : IDisposable
     public string Status => availabilityStatus ?? hook.Status;
     public string CallStatus => $"Incoming: {hook.ReceivedCalls} | Applied: {hook.AppliedCalls}";
     public string LastCall => hook.LastCall;
+    public bool IsCaptured(PlayerProfileHeightHook.Actor actor) => hook.IsCaptured(actor);
     public int AppliedCount => hook.AppliedCount;
     public PlayerProfileHeightCompatibility(Func<PlayerProfileHeightSettings> settings,
         Func<ushort, PlayerProfileHeightHook.Actor?> resolve,
         Func<PlayerProfileHeightHook.Actor, bool> eligible,
-        IDalamudPluginInterface plugin, Action<string> log)
+        IDalamudPluginInterface plugin, Action<string> log, Func<PlayerProfileHeightHook.Actor, string, string?>? transform = null)
     {
         this.settings = settings; this.log = log;
-        hook = new(resolve, actor => eligible(actor) && settings().Includes(actor.Name) ? settings().Offset : null, log, plugin.AssemblyLocation.FullName);
+        hook = new(resolve, actor => eligible(actor) && settings().Includes(actor.Name) ? settings().Offset : null, log, plugin.AssemblyLocation.FullName, transform);
         version = plugin.GetIpcSubscriber<(int,int)>("CustomizePlus.General.GetApiVersion");
         ready = plugin.GetIpcSubscriber<bool>("CustomizePlus.General.IsValid");
     }
@@ -84,7 +86,11 @@ internal sealed class PlayerProfileHeightCompatibility : IDisposable
                 else availabilityStatus = $"Customize+ runtime types found: {types.Length}; expected 1";
             }
         }
-        hook.Tick();
+        if (Environment.TickCount64 >= nextFrame)
+        {
+            nextFrame = Environment.TickCount64 + 16;
+            hook.Tick();
+        }
     }
     public void Dispose()
     {

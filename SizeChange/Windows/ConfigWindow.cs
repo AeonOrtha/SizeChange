@@ -76,7 +76,7 @@ public class ConfigWindow : Window, IDisposable
                 }
                 catch (Exception ex) { profileFileStatus[group] = "Import failed: " + ex.Message; }
             });
-        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Replaces this tab's complete configuration. Resets its live growth and stops preview. Other tabs and the global enable switch stay unchanged.");
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Imports this tab. Self and Added Players files are interchangeable; cross-tab imports keep destination names, enable switches and profile selection. Resets live growth and preview.");
         ImGui.SameLine();
         if (ImGui.Button("Export JSON"))
             profileDialogs.SaveFileDialog("Export " + ProfileSettingsFile.Name(group), ".json",
@@ -124,7 +124,7 @@ public class ConfigWindow : Window, IDisposable
         DrawGrowthPreview(configuration.SelfSettings, SCActorGroup.Self);
 
         float flatHeightOffset = configuration.SelfFlatHeightOffset;
-        if (ImGui.DragFloat("Flat Height Offset##self", ref flatHeightOffset, 0.01f, 0f, 100f, "%.3f"))
+        if (ImGui.DragFloat("Base Height Offset##self", ref flatHeightOffset, 0.01f, 0f, 100f, "%.3f"))
         {
             configuration.SelfFlatHeightOffset = flatHeightOffset;
             configuration.Save();
@@ -177,10 +177,11 @@ public class ConfigWindow : Window, IDisposable
         ImGui.PopID();
     }
 
-    private void DrawBoneHeartbeat()
+    private void DrawBoneHeartbeat(bool addedPlayers = false)
     {
         if (!ImGui.CollapsingHeader("Bones & Heartbeat")) return;
-        var settings = configuration.SelfBoneHeartbeat;
+        ImGui.PushID(addedPlayers ? "player-bones" : "self-bones");
+        var settings = addedPlayers ? configuration.PlayerBoneHeartbeat : configuration.SelfBoneHeartbeat;
         bool enabled = settings.Enabled;
         if (ImGui.Checkbox("Enable Bone Heartbeat", ref enabled))
         {
@@ -194,29 +195,38 @@ public class ConfigWindow : Window, IDisposable
             configuration.Save();
         }
 
-        if (ImGui.Button("Refresh Profiles")) plugin.BoneHeartbeat.RefreshProfiles();
-        ImGui.SameLine();
-        if (ImGui.Button("Reload / Retry")) plugin.BoneHeartbeat.Retry();
-        string profileLabel = settings.BaseProfileId == Guid.Empty
-            ? "Active profile (Auto)" : settings.BaseProfileId.ToString();
-        foreach (var profile in plugin.BoneHeartbeat.Profiles)
-            if (profile.Id == settings.BaseProfileId) profileLabel = profile.Name;
-        if (ImGui.BeginCombo("Base Profile", profileLabel))
+        if (addedPlayers)
         {
-            if (ImGui.Selectable("Active profile (Auto)", settings.BaseProfileId == Guid.Empty))
-            {
-                settings.BaseProfileId = Guid.Empty;
-                configuration.Save();
-            }
+            ImGui.TextDisabled("Base: intercepted profile");
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Enable profile interception and select each player above. Their synced profile stays the baseline.");
+        }
+        else
+        {
+            if (ImGui.Button("Refresh Profiles")) plugin.BoneHeartbeat.RefreshProfiles();
+            ImGui.SameLine();
+            if (ImGui.Button("Reload / Retry")) plugin.BoneHeartbeat.Retry();
+            string profileLabel = settings.BaseProfileId == Guid.Empty
+                ? "Active profile (Auto)" : settings.BaseProfileId.ToString();
             foreach (var profile in plugin.BoneHeartbeat.Profiles)
+                if (profile.Id == settings.BaseProfileId) profileLabel = profile.Name;
+            if (ImGui.BeginCombo("Base Profile", profileLabel))
             {
-                if (ImGui.Selectable($"{profile.Name}##{profile.Id}", settings.BaseProfileId == profile.Id))
+                if (ImGui.Selectable("Active profile (Auto)", settings.BaseProfileId == Guid.Empty))
                 {
-                    settings.BaseProfileId = profile.Id;
+                    settings.BaseProfileId = Guid.Empty;
                     configuration.Save();
                 }
+                foreach (var profile in plugin.BoneHeartbeat.Profiles)
+                {
+                    if (ImGui.Selectable($"{profile.Name}##{profile.Id}", settings.BaseProfileId == profile.Id))
+                    {
+                        settings.BaseProfileId = profile.Id;
+                        configuration.Save();
+                    }
+                }
+                ImGui.EndCombo();
             }
-            ImGui.EndCombo();
+
         }
 
         float bpm = settings.BeatsPerMinute;
@@ -251,7 +261,7 @@ public class ConfigWindow : Window, IDisposable
         }
 
         DrawJawBreathing(settings.Jaw);
-        DrawHeartbeatSound(settings.Sound);
+        DrawHeartbeatSound(settings.Sound, addedPlayers);
         DrawHeartbeatChains(settings);
         DrawBoneGrowthChains(settings);
         if (ImGui.TreeNode("Custom Bones (Overrides)"))
@@ -317,8 +327,8 @@ public class ConfigWindow : Window, IDisposable
             }
             ImGui.TreePop();
         }
-        ImGui.TextDisabled("Customize+ required. Self only.");
-        ImGui.TextWrapped(plugin.BoneHeartbeat.Status);
+        ImGui.TextWrapped(addedPlayers ? plugin.PlayerProfileHeight.Status : plugin.BoneHeartbeat.Status);
+        ImGui.PopID();
         ImGui.Separator();
     }
 
@@ -349,7 +359,7 @@ public class ConfigWindow : Window, IDisposable
         ImGui.TreePop();
     }
 
-    private void DrawHeartbeatSound(HeartbeatSoundSettings settings)
+    private void DrawHeartbeatSound(HeartbeatSoundSettings settings, bool addedPlayers)
     {
         if (!ImGui.TreeNode("Pulse Sound")) return;
         bool enabled = settings.Enabled;
@@ -422,8 +432,10 @@ public class ConfigWindow : Window, IDisposable
                 configuration.Save();
             }
         }
-        if (ImGui.Button("Retry##pulse-sound")) plugin.HeartbeatSound.Retry();
-        if (plugin.HeartbeatSound.Status.Length > 0) ImGui.TextWrapped(plugin.HeartbeatSound.Status);
+        if (ImGui.Button("Retry##pulse-sound"))
+        { if (addedPlayers) plugin.PlayerEffects.RetrySounds(); else plugin.HeartbeatSound.Retry(); }
+        string soundStatus = addedPlayers ? plugin.PlayerEffects.SoundStatus : plugin.HeartbeatSound.Status;
+        if (soundStatus.Length > 0) ImGui.TextWrapped(soundStatus);
         ImGui.TreePop();
     }
 
@@ -570,7 +582,7 @@ public class ConfigWindow : Window, IDisposable
 
     private void DrawPlayerProfileHeight()
     {
-        if (!ImGui.CollapsingHeader("Local Profile Height##players")) return;
+        if (!ImGui.CollapsingHeader("Synced Profile Effects##players")) return;
         var settings = configuration.PlayerProfileHeight;
         bool changed = false;
         bool enabled = settings.Enabled;
@@ -580,9 +592,9 @@ public class ConfigWindow : Window, IDisposable
         if (enabled)
         {
             float offset = settings.Offset;
-            if (ImGui.DragFloat("Root Y Addition", ref offset, 0.01f, 0f, 100f, "%.3f"))
+            if (ImGui.DragFloat("Base Height Offset", ref offset, 0.01f, 0f, 100f, "%.3f"))
             { settings.Offset = Math.Clamp(offset, 0f, 100f); changed = true; }
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Fixed addition to incoming root Y, in Customize+ units. Not a size-driven world-space lift. Existing growth scaling continues separately.");
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Always-added root Y. Growth height is configured under Shrink & Height and follows visible growth, including overshoot.");
             foreach (string name in configuration.TrackedPlayerNames)
             {
                 bool selected = settings.Players.Exists(x => string.Equals(x, name, StringComparison.OrdinalIgnoreCase));
@@ -599,7 +611,7 @@ public class ConfigWindow : Window, IDisposable
         // Save normalizes tracked names in place, so defer it until enumeration ends.
         if (changed) configuration.Save();
         ImGui.TextWrapped(plugin.PlayerProfileHeight.Status);
-        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Only newly received profiles are captured. Offset edits and disabling restore/reapply the captured original locally while preserving its ID. Unsupported Customize+ versions leave syncing untouched.");
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Captures newly received profiles. Height and bone effects use the saved baseline and preserve its ID. Disabling restores it when still owned.");
         if (settings.Enabled)
         {
             ImGui.TextUnformatted(plugin.PlayerProfileHeight.CallStatus);
@@ -611,12 +623,16 @@ public class ConfigWindow : Window, IDisposable
     {
         if (!ImGui.BeginTabItem("Added Players")) return;
         DrawProfileFiles(SCActorGroup.Player);
+        bool affectPlayers = configuration.AffectPlayers;
+        if (ImGui.Checkbox("Enable for Added Players", ref affectPlayers))
+        { configuration.AffectPlayers = affectPlayers; configuration.Save(); }
 
         DrawGrowthPreview(configuration.PlayerSettings, SCActorGroup.Player);
         DrawTrackedPlayers();
         DrawPlayerProfileHeight();
         ImGui.Separator();
         DrawGrowthSettings(configuration.PlayerSettings, "players");
+        DrawBoneHeartbeat(true);
         if (ImGui.TreeNode("Transform Values##players"))
         {
             ImGui.TextWrapped(plugin.TransformDiagnostics(SCActorGroup.Player));
@@ -629,6 +645,7 @@ public class ConfigWindow : Window, IDisposable
             plugin.GetPreview(SCActorGroup.Player).Enabled = false;
             configuration.PlayerSettings = GrowthSettings.Defaults();
             configuration.PlayerProfileHeight = new();
+            configuration.PlayerBoneHeartbeat = new();
             configuration.Save();
         }
 
@@ -840,7 +857,7 @@ public class ConfigWindow : Window, IDisposable
         { settings.FadeOut = fadeOut; configuration.Save(); }
         bool afterglow = settings.Afterglow;
         if (ImGui.Checkbox("Afterglow", ref afterglow)) { settings.Afterglow = afterglow; configuration.Save(); }
-        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Keeps these effects and Self's enabled bone heartbeat active briefly after absorption or growth. Adds no growth.");
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Keeps these effects and enabled bone heartbeat active briefly after absorption or growth. Adds no growth.");
         if (afterglow)
         {
             float seconds = settings.AfterglowSeconds;
@@ -871,12 +888,12 @@ public class ConfigWindow : Window, IDisposable
                 if (ImGui.DragFloat("Reserve Limit", ref maximum, 0.1f, 0.001f, 10000f, "%.3f x"))
                 { settings.MaximumReserve = maximum; configuration.Save(); }
                 if (ImGui.IsItemHovered()) ImGui.SetTooltip("Maximum stored extra size. +5x at 0.05x/s takes 100 seconds to digest. Lowering the limit preserves an existing balance.");
-                if (id == "self")
+                if (id is "self" or "players")
                 {
                     bool boneEnabled = settings.BoneEnabled;
                     if (ImGui.Checkbox("Reserve Bone", ref boneEnabled))
                     { settings.BoneEnabled = boneEnabled; configuration.Save(); }
-                    if (ImGui.IsItemHovered()) ImGui.SetTooltip("Self only. Customize+ required. Independent of the heartbeat enable toggle.");
+                    if (ImGui.IsItemHovered()) ImGui.SetTooltip("Customize+ required. Added Players use intercepted profiles. Independent of heartbeat enable.");
                     if (boneEnabled)
                     {
                         string boneName = settings.BoneName;
@@ -1664,13 +1681,13 @@ public class ConfigWindow : Window, IDisposable
 
         }
 
-        if (!string.Equals(id, "self", StringComparison.Ordinal)) return;
+        if (id is not ("self" or "players")) return;
 
-        if (ImGui.CollapsingHeader("Growth Animation##self"))
+        if (ImGui.CollapsingHeader($"Growth Animation##{id}"))
         {
             bool enableDeltaGrowthAnimation = settings.EnableDeltaGrowthAnimation;
             if (ImGui.Checkbox(
-                    "Enable Animation##self",
+                    $"Enable Animation##{id}",
                     ref enableDeltaGrowthAnimation))
             {
                 settings.EnableDeltaGrowthAnimation = enableDeltaGrowthAnimation;
@@ -1717,7 +1734,7 @@ public class ConfigWindow : Window, IDisposable
                 float deltaGrowthAnimationCooldown =
                     settings.DeltaGrowthAnimationCooldownSeconds;
                 if (ImGui.DragFloat(
-                        "Cooldown (s)##animation-self",
+                        $"Cooldown (s)##animation-{id}",
                         ref deltaGrowthAnimationCooldown,
                         0.05f,
                         0.00f,
@@ -1729,7 +1746,7 @@ public class ConfigWindow : Window, IDisposable
                     configuration.Save();
                 }
 
-                if (ImGui.Button("Test Animation on Yourself##self"))
+                if (ImGui.Button($"Test Animation on Yourself##{id}"))
                 {
                     growthAnimationTestResult =
                         plugin.TestDeltaGrowthAnimation(settings);

@@ -11,7 +11,7 @@ namespace SizeChange;
 internal sealed class PlayerProfileHeightHook : IDisposable
 {
     internal readonly record struct Actor(ushort Index, nint Address, uint EntityId, string Name);
-    private sealed record Capture(Actor Actor, string Original, float Offset, object Instance);
+    private sealed record Capture(Actor Actor, string Original, string Frame, object Instance);
     private sealed record Entry(Capture Capture, Guid Id, object Profile);
     private sealed record Replay(object Manager, Guid Id) { public bool Applied { get; set; } }
     [ThreadStatic] private static Replay? replay;
@@ -21,6 +21,7 @@ internal sealed class PlayerProfileHeightHook : IDisposable
     private bool installed;
     private readonly Func<ushort, Actor?> resolve;
     private readonly Func<Actor, float?> desired;
+    private readonly Func<Actor, string, string?>? transform;
     private readonly Action<string> log;
     private readonly Dictionary<ushort, Entry> entries = new();
     private MethodInfo? setMethod;
@@ -39,8 +40,16 @@ internal sealed class PlayerProfileHeightHook : IDisposable
     public long AppliedCalls => System.Threading.Interlocked.Read(ref appliedCalls);
     public string LastCall { get; private set; } = "No incoming calls observed";
 
-    public PlayerProfileHeightHook(Func<ushort, Actor?> resolve, Func<Actor, float?> desired, Action<string> log, string pluginAssemblyPath)
-    { this.resolve = resolve; this.desired = desired; this.log = log; this.pluginAssemblyPath = pluginAssemblyPath; }
+    public PlayerProfileHeightHook(Func<ushort, Actor?> resolve, Func<Actor, float?> desired, Action<string> log, string pluginAssemblyPath, Func<Actor, string, string?>? transform = null)
+    { this.resolve = resolve; this.desired = desired; this.log = log; this.pluginAssemblyPath = pluginAssemblyPath; this.transform = transform; }
+
+    public bool IsCaptured(Actor actor) => Installed && accepting && entries.TryGetValue(actor.Index, out var entry) && entry.Capture.Actor == actor;
+    private string? Frame(Actor actor, string original)
+    {
+        var offset = desired(actor);
+        if (!offset.HasValue) return null;
+        return transform != null ? transform(actor, original) : PlayerProfileHeightJson.Add(original, offset.Value);
+    }
 
     // Schema checked before patching. Unsupported Customize+ versions fail closed
     // for our feature; their original IPC keeps working unchanged.
@@ -98,13 +107,14 @@ internal sealed class PlayerProfileHeightHook : IDisposable
             var actor = owner.resolve(__0);
             if (!actor.HasValue)
             { owner.LastCall = $"Skipped actor index {__0}: unavailable, Self, non-player or outside framework thread"; return; }
-            var offset = owner.desired(actor.Value);
-            if (!offset.HasValue || offset.Value <= 0f)
-            { owner.LastCall = $"Skipped {actor.Value.Name}: not selected/eligible, or offset is zero"; return; }
-            string modified = PlayerProfileHeightJson.Add(__1, offset.Value);
-            __state = new(actor.Value, __1, offset.Value, __instance);
+            string? modified = owner.Frame(actor.Value, __1);
+            if (modified == null)
+            { owner.LastCall = $"Skipped {actor.Value.Name}: not selected or eligible"; return; }
+            // Capture selected baselines even at zero offset: subsequent growth
+            // must work without waiting for another network profile update.
+            __state = new(actor.Value, __1, modified, __instance);
             __1 = modified;
-            owner.LastCall = $"Intercepted {actor.Value.Name}: root Y +{offset.Value:0.###}";
+            owner.LastCall = $"Intercepted {actor.Value.Name}";
         }
         catch (Exception ex) { owner.Report(ex); } // Leave the original input untouched.
     }
@@ -121,7 +131,7 @@ internal sealed class PlayerProfileHeightHook : IDisposable
             if (profile == null) throw new InvalidOperationException("Applied profile could not be tracked.");
             owner.entries[__state.Actor.Index] = new(__state, __result.Item2.Value, profile);
             System.Threading.Interlocked.Increment(ref owner.appliedCalls);
-            owner.LastCall = $"Customize+ accepted offset for {__state.Actor.Name}";
+            owner.LastCall = $"Customize+ accepted profile effects for {__state.Actor.Name}";
             owner.Status = $"Active: {owner.entries.Count} player(s)";
         }
         catch (Exception ex) { owner.Report(ex); }
@@ -157,17 +167,17 @@ internal sealed class PlayerProfileHeightHook : IDisposable
                 if (resolve(pair.Key) != entry.Capture.Actor ||
                     !ReferenceEquals(FindProfile(entry.Capture.Instance, entry.Id), entry.Profile))
                 { entries.Remove(pair.Key); continue; }
-                float offset = desired(entry.Capture.Actor) ?? 0f;
-                if (offset == entry.Capture.Offset) continue;
-                Reapply(entry, offset);
+                string? frame = Frame(entry.Capture.Actor, entry.Capture.Original);
+                if (frame == entry.Capture.Frame) continue;
+                Reapply(entry, frame);
             }
             catch (Exception ex) { Report(ex); }
         }
     }
 
-    private void Reapply(Entry entry, float offset)
+    private void Reapply(Entry entry, string? frame)
     {
-        string json = PlayerProfileHeightJson.Add(entry.Capture.Original, offset);
+        string json = frame ?? entry.Capture.Original;
         var previous = replay;
         try
         {
@@ -177,8 +187,8 @@ internal sealed class PlayerProfileHeightHook : IDisposable
                 throw new InvalidOperationException("Customize+ did not preserve profile ownership.");
             var profile = FindProfile(entry.Capture.Instance, entry.Id)
                 ?? throw new InvalidOperationException("Updated profile unavailable.");
-            if (offset == 0f) entries.Remove(entry.Capture.Actor.Index);
-            else entries[entry.Capture.Actor.Index] = new(entry.Capture with { Offset = offset }, entry.Id, profile);
+            if (frame == null) entries.Remove(entry.Capture.Actor.Index);
+            else entries[entry.Capture.Actor.Index] = new(entry.Capture with { Frame = frame }, entry.Id, profile);
         }
         finally { replay = previous; }
     }
@@ -196,7 +206,7 @@ internal sealed class PlayerProfileHeightHook : IDisposable
                 try
                 {
                     if (resolve(entry.Capture.Actor.Index) == entry.Capture.Actor &&
-                        ReferenceEquals(FindProfile(entry.Capture.Instance, entry.Id), entry.Profile)) Reapply(entry, 0f);
+                        ReferenceEquals(FindProfile(entry.Capture.Instance, entry.Id), entry.Profile)) Reapply(entry, null);
                 }
                 catch (Exception ex) { Report(ex); }
         entries.Clear();

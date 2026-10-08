@@ -268,6 +268,8 @@ public class Configuration : IPluginConfiguration
     public int Version { get; set; }
     public bool Enable { get; set; } = true;
     public bool AffectSelf { get; set; } = true;
+    public bool AffectPlayers { get; set; } = true;
+    public BoneHeartbeatSettings PlayerBoneHeartbeat { get; set; } = new();
     public PlayerProfileHeightSettings PlayerProfileHeight { get; set; } = new();
     public float SelfFlatHeightOffset { get; set; }
     public BoneHeartbeatSettings SelfBoneHeartbeat { get; set; } = new();
@@ -361,6 +363,8 @@ public class Configuration : IPluginConfiguration
             ? Math.Clamp(SelfFlatHeightOffset, 0f, 100f) : 0f;
         SelfBoneHeartbeat ??= new();
         SelfBoneHeartbeat.Validate();
+        PlayerBoneHeartbeat ??= new();
+        PlayerBoneHeartbeat.Validate();
         SelfSettings ??= GrowthSettings.Defaults();
         PlayerSettings ??= GrowthSettings.Defaults();
         MonsterSettings ??= GrowthSettings.Defaults();
