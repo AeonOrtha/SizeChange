@@ -5,7 +5,7 @@ using Dalamud.Plugin.Ipc;
 
 namespace SizeChange;
 
-// Remove this adapter + Hook + Settings/JSON files and their Plugin/UI wiring
+// Remove this adapter + Hook + PatchRuntime + Settings/JSON files and their Plugin/UI wiring
 // to remove the feature. The growth simulation never depends on this service.
 internal sealed class PlayerProfileHeightCompatibility : IDisposable
 {
@@ -15,6 +15,7 @@ internal sealed class PlayerProfileHeightCompatibility : IDisposable
     private readonly ICallGateSubscriber<bool> ready;
     private long nextCheck;
     private bool failed;
+    private bool faulted;
     private readonly Action<string> log;
     private string? availabilityStatus;
     public string Status => availabilityStatus ?? hook.Status;
@@ -31,8 +32,20 @@ internal sealed class PlayerProfileHeightCompatibility : IDisposable
         version = plugin.GetIpcSubscriber<(int,int)>("CustomizePlus.General.GetApiVersion");
         ready = plugin.GetIpcSubscriber<bool>("CustomizePlus.General.IsValid");
     }
-    public void Retry() { failed = false; nextCheck = 0; }
+    public void Retry() { failed = false; faulted = false; nextCheck = 0; availabilityStatus = "Retry pending"; }
     public void Tick()
+    {
+        if (faulted) return;
+        try { TickCore(); }
+        catch (Exception ex)
+        {
+            hook.StopAccepting();
+            faulted = true;
+            availabilityStatus = "Height hook failed: " + ex.GetBaseException().Message;
+            log(availabilityStatus);
+        }
+    }
+    private void TickCore()
     {
         if (!settings().Enabled)
         {
@@ -84,8 +97,12 @@ internal sealed class PlayerProfileHeightCompatibility : IDisposable
         bool available;
         try { available = version.InvokeFunc().Item1 == 6 && ready.InvokeFunc(); }
         catch { available = false; }
-        if (!available) hook.Stop(false);
-        hook.Dispose();
+        try
+        {
+            if (!available) hook.Stop(false);
+            hook.Dispose();
+        }
+        catch (Exception ex) { log("Height cleanup failed: " + ex.GetBaseException().Message); }
     }
     private async System.Threading.Tasks.Task FinishDispose()
     {

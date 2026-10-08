@@ -3,7 +3,6 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
-using HarmonyLib;
 
 namespace SizeChange;
 
@@ -17,7 +16,8 @@ internal sealed class PlayerProfileHeightHook : IDisposable
     private sealed record Replay(object Manager, Guid Id) { public bool Applied { get; set; } }
     [ThreadStatic] private static Replay? replay;
     private static PlayerProfileHeightHook? active;
-    private readonly Harmony harmony = new("SizeChange.AddedPlayers.LocalProfileHeight");
+    private PlayerHeightPatchRuntime? harmony;
+    private bool installed;
     private readonly Func<ushort, Actor?> resolve;
     private readonly Func<Actor, float?> desired;
     private readonly Action<string> log;
@@ -29,7 +29,7 @@ internal sealed class PlayerProfileHeightHook : IDisposable
     private PropertyInfo? idProperty;
     private bool disposed;
     private bool accepting;
-    public bool Installed => setMethod != null;
+    public bool Installed => installed;
     public string Status { get; private set; } = "Off";
     public int AppliedCount => entries.Count;
     private long receivedCalls;
@@ -48,6 +48,8 @@ internal sealed class PlayerProfileHeightHook : IDisposable
         if (disposed || Installed) return Installed;
         try
         {
+            RemoveHooks(); // Finish any previously failed cleanup before another attempt.
+            harmony ??= new("SizeChange.AddedPlayers.LocalProfileHeight");
             if (active != null && active != this) throw new InvalidOperationException("Another height hook is active.");
             var method = ipcType.GetMethod("SetTemporaryProfileOnCharacter", BindingFlags.Instance | BindingFlags.NonPublic,
                 null, new[] { typeof(ushort), typeof(string) }, null);
@@ -64,17 +66,21 @@ internal sealed class PlayerProfileHeightHook : IDisposable
                 !typeof(IEnumerable).IsAssignableFrom(profiles.FieldType))
                 throw new NotSupportedException("Customize+ profile identity changed.");
             managerField = field; profilesField = profiles; idProperty = id;
-            setMethod = method; addMethod = add; active = this; accepting = true;
-            harmony.Patch(add, prefix: new HarmonyMethod(typeof(PlayerProfileHeightHook), nameof(PreserveIdentity)));
-            harmony.Patch(method, prefix: new HarmonyMethod(typeof(PlayerProfileHeightHook), nameof(BeforeApply)),
-                postfix: new HarmonyMethod(typeof(PlayerProfileHeightHook), nameof(AfterApply)));
+            setMethod = method; addMethod = add; active = this; accepting = false;
+            MethodInfo Callback(string name) => typeof(PlayerProfileHeightHook).GetMethod(name, BindingFlags.Static | BindingFlags.NonPublic)!;
+            harmony.Patch(add, Callback(nameof(PreserveIdentity)));
+            harmony.Patch(method, Callback(nameof(BeforeApply)), Callback(nameof(AfterApply)));
+            installed = true; accepting = true;
             Status = "Waiting for incoming profiles";
             return true;
         }
         catch (Exception ex)
         {
-            RemoveHooks();
-            Status = "Unavailable: " + ex.GetBaseException().Message;
+            string failure = ex.GetBaseException().Message;
+            try { RemoveHooks(); }
+            catch (Exception cleanup) { failure += "; cleanup: " + cleanup.GetBaseException().Message; }
+            Status = "Unavailable: " + failure;
+            LastCall = Status;
             log(Status);
             return false;
         }
@@ -183,8 +189,8 @@ internal sealed class PlayerProfileHeightHook : IDisposable
     public void Stop(bool restore = true)
     {
         accepting = false;
-        if (!Installed) return;
-        if (restore)
+        if (setMethod == null && addMethod == null) return;
+        if (restore && Installed)
             foreach (var entry in entries.Values.ToArray())
                 try
                 {
@@ -199,12 +205,23 @@ internal sealed class PlayerProfileHeightHook : IDisposable
 
     private void RemoveHooks()
     {
-        if (setMethod != null) harmony.Unpatch(setMethod, HarmonyPatchType.All, harmony.Id);
-        if (addMethod != null) harmony.Unpatch(addMethod, HarmonyPatchType.All, harmony.Id);
-        setMethod = addMethod = null;
+        accepting = false;
+        installed = false;
+        var failures = new List<Exception>();
+        void Remove(ref MethodInfo? method)
+        {
+            if (method == null) return;
+            try { harmony!.Unpatch(method); method = null; }
+            catch (Exception ex) { failures.Add(new InvalidOperationException(ex.GetBaseException().Message, ex)); }
+        }
+        Remove(ref setMethod);
+        Remove(ref addMethod);
+        // Keep failed handles for an explicit Retry; never claim they were removed.
+        if (failures.Count > 0) throw new AggregateException("Height hook cleanup failed", failures);
         managerField = null; profilesField = null; idProperty = null;
         if (active == this) active = null;
     }
+
     private void Report(Exception ex)
     {
         string message = "Height override: " + ex.GetBaseException().Message;
