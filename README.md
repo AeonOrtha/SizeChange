@@ -25,6 +25,14 @@ Configure **Self**, **Added Players** or **Monsters** separately. Use **Growth P
 
 The **HP Loss Cap** limits how much damage a trigger counts. **Limit Delta Growth** caps settled damage-driven growth. **Scale Growth With Size** makes gains proportional to the character's existing settled size, so equivalent hits remain noticeable at larger sizes. Combat-only operation is configurable.
 
+## Immediate growth commands and skills
+
+Use `/deltapulse 0.1` to immediately add **+0.1×** to Self's intended size. It starts the normal lerp, overshoot and configured growth feedback, bypassing the accumulator wait for this input. Existing pending damage remains separate. Self and delta growth must be enabled; the command also works outside combat and can be placed in a skill macro. A macro command is manual: it runs even if the skill beside it fails to cast.
+
+For automatic confirmed triggers, open **Skills & Actions** in any profile, enable it, click **+**, and enter an exact skill name with its decimal growth amount. Names use your game language and ignore case. Each successfully affected, configured recipient receives one immediate contribution per cast, including AoE recipients. Misses, fully resisted/immune effects and interrupted casts do not trigger growth. Healing and buffs can trigger without HP loss. Normal damage growth may contribute alongside this skill bonus. Normal limits, effect cooldowns and shrinking still apply; direct amounts do not use the damage multiplier or feed the digestion reserve.
+
+Multiple action IDs can share a name; those all match that name. Duplicate rule names use the first matching row. This observes action-effect events; periodic status/ground-effect ticks are not separate skill casts. Skill rules are included in profile exports and Self ↔ Added Players imports.
+
 ## Other growth and effects
 
 - **Aetherytes and size drain:** nearby crystals or configured players/NPCs can contribute simulated damage, including outside combat. Proximity growth can exceed the normal damage-growth limit. Size drain has separate duty controls.

@@ -1092,6 +1092,51 @@ public class ConfigWindow : Window, IDisposable
         ImGui.PopID();
     }
 
+    private void DrawActionGrowth(ActionGrowthSettings settings, string id)
+    {
+        if (!ImGui.CollapsingHeader($"Skills & Actions##{id}")) return;
+        ImGui.PushID("action-growth-" + id);
+        bool enabled = settings.Enabled;
+        if (ImGui.Checkbox("Enabled", ref enabled)) { settings.Enabled = enabled; configuration.Save(); }
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Successful action effects on this profile add growth immediately. Existing pulse, limits and feedback apply. Does not release pending damage.");
+        bool changed = false;
+        for (int i = 0; i < settings.Rules.Count; i++)
+        {
+            var rule = settings.Rules[i];
+            ImGui.PushID(i);
+            ImGui.SetNextItemWidth(Math.Max(140f, ImGui.GetContentRegionAvail().X - 150f));
+            string name = rule.Name;
+            if (ImGui.InputTextWithHint("##skill", "Skill name", ref name, 128))
+            { rule.Name = name; changed = true; }
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Exact skill name in your game language. Case ignored. Identical names match all action IDs with that name; the first matching row is used.");
+            ImGui.SameLine(); ImGui.SetNextItemWidth(90f);
+            float growth = rule.Growth;
+            if (ImGui.InputFloat("##growth", ref growth, 0, 0, "%.3f"))
+            { rule.Growth = float.IsFinite(growth) ? Math.Clamp(growth, 0, ImmediateGrowth.Maximum) : 0; changed = true; }
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Extra base-size multiplier per successful cast. 0.1 adds +0.1x. 0 disables this row.");
+            ImGui.SameLine(); bool remove = ImGui.SmallButton("X");
+            ImGui.PopID();
+            if (remove) { settings.Rules.RemoveAt(i--); changed = true; }
+        }
+        ImGui.BeginDisabled(settings.Rules.Count >= 128);
+        if (ImGui.Button("+")) { settings.Rules.Add(new()); changed = true; }
+        ImGui.EndDisabled();
+        if (changed) configuration.Save();
+        if (enabled)
+        {
+            ImGui.TextUnformatted(plugin.ActionObserver.Status);
+            if (ImGui.IsItemHovered() && plugin.ActionObserver.LastAction.Length > 0)
+                ImGui.SetTooltip("Last received: " + plugin.ActionObserver.LastAction);
+            if (ImGui.Button("Retry##action-observer")) plugin.ActionObserver.Retry();
+        }
+        if (id == "self")
+        {
+            ImGui.TextDisabled("/deltapulse 0.1");
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Immediately add Self growth from a command or macro. The skills toggle is not required.");
+        }
+        ImGui.PopID();
+    }
+
     private void DrawGrowthSettings(GrowthSettings settings, string id)
     {
         if (ImGui.CollapsingHeader($"Growth Mode & Base Size##{id}", ImGuiTreeNodeFlags.DefaultOpen))
@@ -1164,6 +1209,7 @@ public class ConfigWindow : Window, IDisposable
         }
 
         if (!settings.GrowthFromDelta) return;
+        DrawActionGrowth(settings.ActionGrowth, id);
 
         ImGui.PushID("accumulation-" + id);
         DrawAccumulatingEffects(settings.AccumulatingEffects);

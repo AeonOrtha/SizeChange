@@ -12,6 +12,8 @@
     <RootNamespace>SizeChange</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
+    <Content Include="images/icon.png" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="SizeChange.json" />
     <PackageReference Include="Lib.Harmony" Version="2.4.2" />
   </ItemGroup>
 </Project>

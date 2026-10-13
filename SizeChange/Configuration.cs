@@ -10,6 +10,7 @@ public class GrowthSettings
     public const string DefaultDeltaGrowthSoundPath =
         "sound/vfx/monster5/se_vfx_monster_inferno_lpowerrise_c.scd";
 
+    public ActionGrowthSettings ActionGrowth { get; set; } = new();
     public SizeDrainSettings SizeDrain { get; set; } = new();
     public DigestionSettings Digestion { get; set; } = new();
     public bool AetherProximityGrowth { get; set; }
@@ -104,6 +105,8 @@ public class GrowthSettings
 
     public void Validate()
     {
+        ActionGrowth ??= new();
+        ActionGrowth.Validate();
         SizeDrain ??= new();
         SizeDrain.Validate();
         Digestion ??= new();
@@ -186,6 +189,7 @@ public class GrowthSettings
     public static GrowthSettings CopyOf(GrowthSettings settings)
         => new()
         {
+            ActionGrowth = ActionGrowthSettings.CopyOf(settings.ActionGrowth),
             SizeDrain = SizeDrainSettings.CopyOf(settings.SizeDrain),
             Digestion = DigestionSettings.CopyOf(settings.Digestion),
             AetherActorSound = AetherSoundSettings.CopyOf(settings.AetherActorSound),

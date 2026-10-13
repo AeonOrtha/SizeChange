@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using Dalamud.Game.ClientState.Conditions;
 using Dalamud.Game.ClientState.Objects.SubKinds;
 using Dalamud.Game.ClientState.Objects.Types;
@@ -63,6 +64,7 @@ public sealed class Plugin : IDalamudPlugin
 {
     [PluginService] internal static IDalamudPluginInterface PluginInterface { get; private set; } = null!;
     [PluginService] internal static IPluginLog Log { get; private set; } = null!;
+    [PluginService] internal static IChatGui Chat { get; private set; } = null!;
     [PluginService] internal static ICommandManager CommandManager { get; private set; } = null!;
     [PluginService] internal static IObjectTable ObjectTable { get; private set; } = null!;
     [PluginService] internal static IFramework Framework { get; private set; } = null!;
@@ -74,6 +76,7 @@ public sealed class Plugin : IDalamudPlugin
     [PluginService] internal static ISigScanner SigScanner { get; private set; } = null!;
 
     private const string CommandName_SizeChange = "/sizechange";
+    private const string CommandName_DeltaPulse = "/deltapulse";
     private const string CommandName_Scale = "/scale";
     private const string Parameter_Enable = "enable";
     private const string Parameter_Disable = "disable";
@@ -105,6 +108,11 @@ public sealed class Plugin : IDalamudPlugin
         _ => throw new ArgumentOutOfRangeException(nameof(group)),
     };
 
+    private readonly ImmediateGrowth immediateGrowth = new();
+    private readonly ActionGrowthDeduplication actionDeduplication = new();
+    internal ActionGrowthObserver ActionObserver { get; }
+    private uint actionTerritory = uint.MaxValue;
+    private bool disposed;
     private readonly GrowthSoundPlayer GrowthSoundPlayer;
     internal readonly HeartbeatSoundPlayer HeartbeatSound = new(new HeartbeatScdVoice(), new HeartbeatScdVoice(), new HeartbeatScdVoice());
     private readonly GrowthVfxPlayer GrowthVfxPlayer;
@@ -140,6 +148,7 @@ public sealed class Plugin : IDalamudPlugin
                 Configuration.TrackedPlayerNames.Exists(n => string.Equals(n, actor.Name, StringComparison.OrdinalIgnoreCase)),
             PluginInterface, message => Log.Warning("Player profile: {Message}", message), PlayerEffects.Build);
 
+        ActionObserver = new(GameInteropProvider, message => Log.Warning("Action growth: {Message}", message));
         ConfigWindow = new ConfigWindow(this);
         WindowSystem.AddWindow(ConfigWindow);
 
@@ -153,6 +162,9 @@ public sealed class Plugin : IDalamudPlugin
             HelpMessage = "sets character's scale"
         });
 
+        CommandManager.AddHandler(CommandName_DeltaPulse, new CommandInfo(OnDeltaPulse)
+        { HelpMessage = "Immediately trigger Self delta growth: /deltapulse 0.1 adds +0.1x. Requires enabled Self delta growth." });
+
         PluginInterface.UiBuilder.Draw += WindowSystem.Draw;
         PluginInterface.UiBuilder.OpenConfigUi += ToggleConfigUi;
         PluginInterface.UiBuilder.OpenMainUi += ToggleConfigUi;
@@ -161,7 +173,10 @@ public sealed class Plugin : IDalamudPlugin
 
     public unsafe void Dispose()
     {
+        disposed = true;
         Framework.Update -= OnFrameworkUpdate;
+        ActionObserver.Dispose();
+        immediateGrowth.Clear();
         PlayerProfileHeight.Dispose();
         PlayerEffects.Dispose();
         HeartbeatSound.Dispose();
@@ -180,6 +195,7 @@ public sealed class Plugin : IDalamudPlugin
 
         CommandManager.RemoveHandler(CommandName_SizeChange);
         CommandManager.RemoveHandler(CommandName_Scale);
+        CommandManager.RemoveHandler(CommandName_DeltaPulse);
     }
 
     internal unsafe void ImportProfile(ProfileSettingsFile imported, SCActorGroup group)
@@ -250,6 +266,48 @@ public sealed class Plugin : IDalamudPlugin
             {
                 UpdateScale((Character*)player.Address, scale);
             }
+        }
+    }
+
+    private void OnDeltaPulse(string command, string args)
+    {
+        if (!ImmediateGrowth.Parse(args, out float amount))
+        { Chat.PrintError("Delta Suite: use /deltapulse <positive decimal>, e.g. /deltapulse 0.1 (maximum 10000)."); return; }
+        _ = Framework.RunOnFrameworkThread(() =>
+        {
+            if (disposed) return;
+            var player = ObjectTable.LocalPlayer;
+            if (!Configuration.Enable || !Configuration.AffectSelf || !Configuration.SelfSettings.GrowthFromDelta ||
+                !ClientState.IsLoggedIn || ClientState.IsPvP || player == null || player.CurrentHp <= 0 ||
+                Condition[ConditionFlag.BetweenAreas] || Condition[ConditionFlag.BetweenAreas51])
+            { Chat.PrintError("Delta Suite: enable Self delta growth on a living character outside PvP/loading."); return; }
+            immediateGrowth.Add(player.EntityId, player.Address, amount);
+        });
+    }
+
+    private void ReadActionGrowth(bool allowed)
+    {
+        uint territory = ClientState.TerritoryType;
+        if (actionTerritory != territory || !allowed)
+        { actionDeduplication.Clear(); immediateGrowth.Clear(); actionTerritory = territory; }
+        bool enabled = Configuration.SelfSettings.ActionGrowth.Enabled || Configuration.PlayerSettings.ActionGrowth.Enabled || Configuration.MonsterSettings.ActionGrowth.Enabled;
+        ActionObserver.Tick(allowed && enabled, territory);
+        while (ActionObserver.TryRead(out var action))
+        {
+            if (!allowed || action.Territory != territory || !actionDeduplication.Accept(action, Environment.TickCount64)) continue;
+            if (ObjectTable.SearchById(action.Target) is not IBattleChara recipient || recipient.Address == 0 || recipient.CurrentHp <= 0) continue;
+            GrowthSettings settings;
+            if (recipient.Address == ObjectTable.LocalPlayer?.Address)
+            { if (!Configuration.AffectSelf) continue; settings = Configuration.SelfSettings; }
+            else if (recipient is IPlayerCharacter player && Configuration.AffectPlayers &&
+                Configuration.TrackedPlayerNames.Exists(n => string.Equals(n, GetPlayerIdentity(player), StringComparison.OrdinalIgnoreCase))) settings = Configuration.PlayerSettings;
+            else if (recipient is IBattleNpc && Configuration.IsMonsterTracked(recipient.Name.TextValue)) settings = Configuration.MonsterSettings;
+            else continue;
+            if (!settings.GrowthFromDelta || !settings.ActionGrowth.Enabled) continue;
+            string name = DataManager.GetExcelSheet<Lumina.Excel.Sheets.Action>().GetRowOrDefault(action.ActionId)?.Name.ExtractText() ?? string.Empty;
+            float growth = settings.ActionGrowth.GrowthFor(name);
+            ActionObserver.LastAction = $"{name} ({action.ActionId}) → {recipient.Name.TextValue}";
+            if (growth > 0) immediateGrowth.Add(recipient.EntityId, recipient.Address, growth);
         }
     }
 
@@ -343,6 +401,7 @@ public sealed class Plugin : IDalamudPlugin
         try { OnFrameworkUpdateCore(framework); }
         finally
         {
+            immediateGrowth.Clear();
             PlayerEffects.EndFrame();
             PlayerProfileHeight.Tick();
             PlayerEffects.UpdateSounds(PlayerProfileHeight.IsCaptured);
@@ -352,6 +411,12 @@ public sealed class Plugin : IDalamudPlugin
     private unsafe void OnFrameworkUpdateCore(IFramework framework)
     {
         UpdateDrainLocation();
+        try
+        {
+            ReadActionGrowth(Configuration.Enable && ClientState.IsLoggedIn && !ClientState.IsPvP &&
+                !Condition[ConditionFlag.BetweenAreas] && !Condition[ConditionFlag.BetweenAreas51]);
+        }
+        catch (Exception ex) { ActionObserver.Fail(ex); }
         vfxActorIdentities.Clear();
         vfxActorModels.Clear();
         if (ClientState.IsLoggedIn && !Condition[ConditionFlag.BetweenAreas] && !Condition[ConditionFlag.BetweenAreas51])
@@ -778,30 +843,28 @@ public sealed class Plugin : IDalamudPlugin
         // and one-second cadence. Per-receiver lists prevent cross-profile loss.
         bool proximityActive = aetherCount + drainCount > 0;
         bool proximityHitDue = charState.Aether.Advance(aetherCount + drainCount, deltaSeconds) > 0;
-        void QueueGrowth(EarnedGrowth earned, bool aether)
+        void QueueGrowth(EarnedGrowth earned, bool aether, bool immediate = false)
         {
             float addedGrowth = (float)earned.Growth;
             float healthLostRatio = (float)earned.DamageRatio;
             if (addedGrowth <= 0f) return;
-            if (settings.AccumulatorDelaySeconds <= 0f)
+            bool released = GrowthContribution.Queue(ref charState.GrowthMultiplier, ref charState.PendingGrowth,
+                ref charState.PendingDamageRatio, ref charState.AccumulatorRemainingSeconds,
+                addedGrowth, healthLostRatio, settings.AccumulatorDelaySeconds, immediate);
+            if (released)
             {
-                charState.GrowthMultiplier += addedGrowth;
                 if (aether) charState.Aether.Bonus += addedGrowth;
                 releasedGrowth = true;
             }
-            else
+            else if (aether)
             {
-                charState.PendingGrowth += addedGrowth;
-                charState.PendingDamageRatio = Math.Min(1f, charState.PendingDamageRatio + healthLostRatio);
-                if (aether)
-                {
-                    charState.Aether.PendingGrowth += addedGrowth;
-                    charState.Aether.PendingDamageRatio = Math.Min(1f, charState.Aether.PendingDamageRatio + healthLostRatio);
-                }
-                if (charState.AccumulatorRemainingSeconds <= 0f)
-                    charState.AccumulatorRemainingSeconds = settings.AccumulatorDelaySeconds;
+                charState.Aether.PendingGrowth += addedGrowth;
+                charState.Aether.PendingDamageRatio = Math.Min(1f, charState.Aether.PendingDamageRatio + healthLostRatio);
             }
         }
+        float immediateAmount = settings.GrowthFromDelta && !disable
+            ? immediateGrowth.Take(actor->EntityId, (nint)actor) : 0f;
+        if (immediateAmount > 0) QueueGrowth(new EarnedGrowth(immediateAmount, 0), false, true);
         void Accumulate(float healthLostRatio, bool aether)
         {
             healthLostRatio = Math.Min(healthLostRatio, settings.MaximumHealthLossRatioPerTrigger);
@@ -963,7 +1026,7 @@ public sealed class Plugin : IDalamudPlugin
             !proximityActive && !digesting &&
             charState.PendingGrowth <= 0f &&
             !charState.OvershootPulse.IsActive &&
-            !triggerOvershoot &&
+            !triggerOvershoot && immediateAmount <= 0f &&
             charState.GrowthMultiplier > 1.0f)
         {
             float decayMultiplier =
@@ -1020,7 +1083,7 @@ public sealed class Plugin : IDalamudPlugin
                 settings.GrowthOvershootSettleSeconds,
                 settings.GrowthOvershootRiseCurve,
                 settings.GrowthOvershootReturnCurve,
-                settings.AccumulatorDelaySeconds,
+                immediateAmount > 0 ? 0f : settings.AccumulatorDelaySeconds,
                 deltaSeconds);
         }
 
