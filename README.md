@@ -53,3 +53,11 @@ Each tab supports JSON import/export. **Self and Added Players exports work in b
 ## License
 
 [GNU AGPL-3.0-or-later](LICENSE.md).
+
+### Skills and monster animations
+
+In **Skills & Actions**, each skill row can trigger on **Receiving effect** or **Successful use**. Successful use grows the caster once per action, even for area attacks. Growth uses the existing immediate pulse, limits and effects; misses and failed attempts do not trigger it.
+
+Expand a name filter in **Added Monsters** to add animation slots. Each slot has a game `.tmb` timeline path, a maximum duration in seconds, and **Is idle**. Idle animations start once outside combat, rearming after the monster leaves combat; growth pulses do not restart an active idle pose. Other slots play on growth pulses. Multiple slots of the same kind form a random choice pool. Matching uses the existing partial name filters; if filters overlap, the first filter with animation slots wins.
+
+Paths must match a game ActionTimeline entry and suit that monster's model. Duration caps playback; it does not extend a short animation. These settings are included in monster profile exports.

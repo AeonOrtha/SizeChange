@@ -4,11 +4,14 @@ using System.Globalization;
 
 namespace SizeChange;
 
+public enum ActionGrowthTrigger { ReceivingEffect, SuccessfulUse }
+
 [Serializable]
 public sealed class ActionGrowthRule
 {
     public string Name { get; set; } = string.Empty;
     public float Growth { get; set; } = 0.1f;
+    public ActionGrowthTrigger Trigger { get; set; }
 }
 
 [Serializable]
@@ -19,13 +22,13 @@ public sealed class ActionGrowthSettings
     public static ActionGrowthSettings CopyOf(ActionGrowthSettings value) => new()
     {
         Enabled = value.Enabled,
-        Rules = value.Rules.ConvertAll(r => new ActionGrowthRule { Name = r.Name, Growth = r.Growth }),
+        Rules = value.Rules.ConvertAll(r => new ActionGrowthRule { Name = r.Name, Growth = r.Growth, Trigger = r.Trigger }),
     };
-    public float GrowthFor(string name)
+    public float GrowthFor(string name, ActionGrowthTrigger trigger = ActionGrowthTrigger.ReceivingEffect)
     {
         if (!Enabled || string.IsNullOrWhiteSpace(name)) return 0;
         foreach (var rule in Rules)
-            if (string.Equals(rule.Name?.Trim(), name, StringComparison.OrdinalIgnoreCase))
+            if (rule.Trigger == trigger && string.Equals(rule.Name?.Trim(), name, StringComparison.OrdinalIgnoreCase))
                 return float.IsFinite(rule.Growth) ? Math.Clamp(rule.Growth, 0, ImmediateGrowth.Maximum) : 0;
         return 0;
     }
@@ -36,6 +39,7 @@ public sealed class ActionGrowthSettings
         Rules.RemoveAll(r => r == null);
         foreach (var rule in Rules)
         {
+            if (!Enum.IsDefined(rule.Trigger)) rule.Trigger = ActionGrowthTrigger.ReceivingEffect;
             rule.Name ??= string.Empty; // Preserve spaces while typing; matching trims the name.
             rule.Growth = float.IsFinite(rule.Growth) ? Math.Clamp(rule.Growth, 0, ImmediateGrowth.Maximum) : 0;
         }
@@ -93,13 +97,13 @@ internal readonly record struct ReceivedAction(uint Caster, uint Sequence, uint 
 internal sealed class ActionGrowthDeduplication
 {
     private readonly Dictionary<(uint Caster, uint Sequence, uint Action, ulong Target), long> seen = new();
-    public bool Accept(ReceivedAction action, long now)
+    public bool Accept(ReceivedAction action, long now, bool casterOnly = false)
     {
         if (now - action.ReceivedAt > 2000 || now < action.ReceivedAt) return false;
         if (seen.Count > 4096) seen.Clear();
-        if (action.Sequence == 0) return true;
-        var key = (action.Caster, action.Sequence, action.ActionId, action.Target);
-        if (seen.TryGetValue(key, out long time) && now - time < 10000) return false;
+        if (action.Sequence == 0 && !casterOnly) return true;
+        var key = (action.Caster, action.Sequence, action.ActionId, casterOnly ? 0UL : action.Target);
+        if (seen.TryGetValue(key, out long time) && now - time < (action.Sequence == 0 ? 50 : 10000)) return false;
         seen[key] = now;
         return true;
     }

@@ -110,6 +110,8 @@ public sealed class Plugin : IDalamudPlugin
 
     private readonly ImmediateGrowth immediateGrowth = new();
     private readonly ActionGrowthDeduplication actionDeduplication = new();
+    private readonly ActionGrowthDeduplication castDeduplication = new();
+    private readonly MonsterAnimationPlayer monsterAnimations = new();
     internal ActionGrowthObserver ActionObserver { get; }
     private uint actionTerritory = uint.MaxValue;
     private bool disposed;
@@ -176,6 +178,7 @@ public sealed class Plugin : IDalamudPlugin
         disposed = true;
         Framework.Update -= OnFrameworkUpdate;
         ActionObserver.Dispose();
+        monsterAnimations.Dispose();
         immediateGrowth.Clear();
         PlayerProfileHeight.Dispose();
         PlayerEffects.Dispose();
@@ -289,26 +292,36 @@ public sealed class Plugin : IDalamudPlugin
     {
         uint territory = ClientState.TerritoryType;
         if (actionTerritory != territory || !allowed)
-        { actionDeduplication.Clear(); immediateGrowth.Clear(); actionTerritory = territory; }
+        { actionDeduplication.Clear(); castDeduplication.Clear(); immediateGrowth.Clear(); actionTerritory = territory; }
         bool enabled = Configuration.SelfSettings.ActionGrowth.Enabled || Configuration.PlayerSettings.ActionGrowth.Enabled || Configuration.MonsterSettings.ActionGrowth.Enabled;
         ActionObserver.Tick(allowed && enabled, territory);
         while (ActionObserver.TryRead(out var action))
         {
-            if (!allowed || action.Territory != territory || !actionDeduplication.Accept(action, Environment.TickCount64)) continue;
-            if (ObjectTable.SearchById(action.Target) is not IBattleChara recipient || recipient.Address == 0 || recipient.CurrentHp <= 0) continue;
-            GrowthSettings settings;
-            if (recipient.Address == ObjectTable.LocalPlayer?.Address)
-            { if (!Configuration.AffectSelf) continue; settings = Configuration.SelfSettings; }
-            else if (recipient is IPlayerCharacter player && Configuration.AffectPlayers &&
-                Configuration.TrackedPlayerNames.Exists(n => string.Equals(n, GetPlayerIdentity(player), StringComparison.OrdinalIgnoreCase))) settings = Configuration.PlayerSettings;
-            else if (recipient is IBattleNpc && Configuration.IsMonsterTracked(recipient.Name.TextValue)) settings = Configuration.MonsterSettings;
-            else continue;
-            if (!settings.GrowthFromDelta || !settings.ActionGrowth.Enabled) continue;
+            if (!allowed || action.Territory != territory) continue;
+            long now = Environment.TickCount64;
             string name = DataManager.GetExcelSheet<Lumina.Excel.Sheets.Action>().GetRowOrDefault(action.ActionId)?.Name.ExtractText() ?? string.Empty;
-            float growth = settings.ActionGrowth.GrowthFor(name);
-            ActionObserver.LastAction = $"{name} ({action.ActionId}) → {recipient.Name.TextValue}";
-            if (growth > 0) immediateGrowth.Add(recipient.EntityId, recipient.Address, growth);
+            if (actionDeduplication.Accept(action, now))
+                QueueActionGrowth(ObjectTable.SearchById(action.Target), name, action.ActionId, ActionGrowthTrigger.ReceivingEffect);
+            // Target-independent key: an AoE gives its caster one contribution.
+            if (castDeduplication.Accept(action, now, casterOnly: true))
+                QueueActionGrowth(ObjectTable.SearchByEntityId(action.Caster), name, action.ActionId, ActionGrowthTrigger.SuccessfulUse);
         }
+    }
+
+    private void QueueActionGrowth(IGameObject? obj, string name, uint actionId, ActionGrowthTrigger trigger)
+    {
+        if (obj is not IBattleChara recipient || recipient.Address == 0 || recipient.CurrentHp <= 0) return;
+        GrowthSettings settings;
+        if (recipient.Address == ObjectTable.LocalPlayer?.Address)
+        { if (!Configuration.AffectSelf) return; settings = Configuration.SelfSettings; }
+        else if (recipient is IPlayerCharacter player && Configuration.AffectPlayers &&
+            Configuration.TrackedPlayerNames.Exists(n => string.Equals(n, GetPlayerIdentity(player), StringComparison.OrdinalIgnoreCase))) settings = Configuration.PlayerSettings;
+        else if (recipient is IBattleNpc && Configuration.IsMonsterTracked(recipient.Name.TextValue)) settings = Configuration.MonsterSettings;
+        else return;
+        if (!settings.GrowthFromDelta || !settings.ActionGrowth.Enabled) return;
+        float growth = settings.ActionGrowth.GrowthFor(name, trigger);
+        ActionObserver.LastAction = $"{name} ({actionId}) [{trigger}] → {recipient.Name.TextValue}";
+        if (growth > 0) immediateGrowth.Add(recipient.EntityId, recipient.Address, growth);
     }
 
     private unsafe void UpdateScale(Character* actor, float scale)
@@ -398,9 +411,11 @@ public sealed class Plugin : IDalamudPlugin
     private void OnFrameworkUpdate(IFramework framework)
     {
         PlayerEffects.BeginFrame();
+        monsterAnimations.BeginFrame();
         try { OnFrameworkUpdateCore(framework); }
         finally
         {
+            monsterAnimations.EndFrame();
             immediateGrowth.Clear();
             PlayerEffects.EndFrame();
             PlayerProfileHeight.Tick();
@@ -592,6 +607,9 @@ public sealed class Plugin : IDalamudPlugin
             }
 
             var actor = (Character*)gameObject.Address;
+            var monsterChoices = Configuration.MonsterAnimationsFor(gameObject.Name.TextValue);
+            monsterAnimations.Tick(actor, monsterChoices, !globallyDisabled && !drainTransition && actor->Health > 0,
+                TryResolveActionTimeline);
             ProcessSelectedActor(
                 actor,
                 true,
@@ -1000,6 +1018,8 @@ public sealed class Plugin : IDalamudPlugin
                 charState.LastDeltaGrowthVfxTick = currentTick;
             }
 
+            if (actorGroup == SCActorGroup.Monster)
+                monsterAnimations.Pulse(actor, Configuration.MonsterAnimationsFor(ObjectTable.SearchByEntityId(actor->EntityId)?.Name.TextValue ?? string.Empty), TryResolveActionTimeline);
             if (actorGroup is SCActorGroup.Self or SCActorGroup.Player)
             {
                 long animationCooldownMilliseconds =
@@ -1360,7 +1380,7 @@ public sealed class Plugin : IDalamudPlugin
         return null;
     }
 
-    private static bool TryResolveActionTimeline(
+    internal static bool TryResolveActionTimeline(
         string configuredPath,
         out ushort actionTimelineId,
         out string error)

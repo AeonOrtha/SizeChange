@@ -286,6 +286,14 @@ public class Configuration : IPluginConfiguration
     public List<string> TrackedPlayerNames { get; set; } = new();
     // Monsters use case-insensitive portions of their displayed battle-NPC name.
     public List<string> TrackedMonsterNames { get; set; } = new();
+    public Dictionary<string, List<MonsterAnimationSlot>> MonsterAnimations { get; set; } = new();
+    internal List<MonsterAnimationSlot>? MonsterAnimationsFor(string name)
+    {
+        foreach (string filter in TrackedMonsterNames)
+            if (name.Contains(filter, StringComparison.OrdinalIgnoreCase) && MonsterAnimations.TryGetValue(filter, out var slots) && slots.Count > 0)
+                return slots;
+        return null;
+    }
 
     // Version-0 fields are retained so released 1.3.4.2 configurations can be
     // migrated without losing the user's existing growth behavior.
@@ -380,6 +388,14 @@ public class Configuration : IPluginConfiguration
         MonsterSettings.Validate();
         NormalizeNames(TrackedPlayerNames);
         NormalizeNames(TrackedMonsterNames);
+        MonsterAnimations ??= new();
+        foreach (string key in new List<string>(MonsterAnimations.Keys))
+        {
+            if (!TrackedMonsterNames.Contains(key)) { MonsterAnimations.Remove(key); continue; }
+            var slots = MonsterAnimations[key] ?? new();
+            MonsterAnimationSlot.Validate(slots);
+            MonsterAnimations[key] = slots;
+        }
     }
 
     // A drain UI edit must not normalize active heartbeat/bone/growth state.

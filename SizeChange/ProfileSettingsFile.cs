@@ -21,6 +21,7 @@ internal sealed class ProfileSettingsFile
     public float? FlatHeightOffset { get; set; }
     public BoneHeartbeatSettings? Bones { get; set; }
     public List<string>? TrackedNames { get; set; }
+    public Dictionary<string, List<MonsterAnimationSlot>>? MonsterAnimations { get; set; }
     public PlayerProfileHeightSettings? LocalHeight { get; set; }
 
     private static readonly JsonSerializerOptions Options = new()
@@ -43,6 +44,7 @@ internal sealed class ProfileSettingsFile
         FlatHeightOffset = group == SCActorGroup.Self ? config.SelfFlatHeightOffset : group == SCActorGroup.Player ? config.PlayerProfileHeight.Offset : null,
         Bones = group == SCActorGroup.Self ? config.SelfBoneHeartbeat : group == SCActorGroup.Player ? config.PlayerBoneHeartbeat : null,
         TrackedNames = group == SCActorGroup.Player ? config.TrackedPlayerNames : group == SCActorGroup.Monster ? config.TrackedMonsterNames : null,
+        MonsterAnimations = group == SCActorGroup.Monster ? config.MonsterAnimations : null,
         LocalHeight = group == SCActorGroup.Player ? config.PlayerProfileHeight : null,
     };
     internal string ToJson() => JsonSerializer.Serialize(this, Options);
@@ -131,6 +133,8 @@ internal sealed class ProfileSettingsFile
                 break;
             case SCActorGroup.Monster:
                 config.MonsterSettings = growth; config.TrackedMonsterNames = Copy(TrackedNames ?? new());
+                config.MonsterAnimations = Copy(MonsterAnimations ?? new());
+                foreach (var slots in config.MonsterAnimations.Values) if (slots != null) MonsterAnimationSlot.Validate(slots);
                 break;
         }
     }

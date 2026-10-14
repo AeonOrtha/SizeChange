@@ -741,16 +741,56 @@ public class ConfigWindow : Window, IDisposable
 
         for (int index = 0; index < configuration.TrackedMonsterNames.Count; index++)
         {
-            ImGui.TextUnformatted(configuration.TrackedMonsterNames[index]);
+            string filter = configuration.TrackedMonsterNames[index];
+            bool open = ImGui.TreeNode($"{filter}##monster-animation-{index}");
             ImGui.SameLine();
             if (ImGui.SmallButton($"Remove##tracked-monster-remove-{index}"))
             {
+                configuration.MonsterAnimations.Remove(filter);
                 configuration.TrackedMonsterNames.RemoveAt(index);
                 configuration.Save();
                 plugin.InvalidateTrackedActorCaches();
                 index--;
+                if (open) ImGui.TreePop();
+                continue;
+            }
+            if (open)
+            {
+                DrawMonsterAnimations(filter);
+                ImGui.TreePop();
             }
         }
+    }
+
+    private void DrawMonsterAnimations(string filter)
+    {
+        ImGui.PushID(filter);
+        if (!configuration.MonsterAnimations.TryGetValue(filter, out var slots))
+            configuration.MonsterAnimations[filter] = slots = new();
+        bool changed = false;
+        for (int i = 0; i < slots.Count; i++)
+        {
+            var slot = slots[i];
+            ImGui.PushID(i);
+            string path = slot.Path;
+            ImGui.SetNextItemWidth(Math.Max(160f, ImGui.GetContentRegionAvail().X - 95f));
+            if (ImGui.InputTextWithHint("##path", "Animation .tmb path", ref path, 512)) { slot.Path = path; changed = true; }
+            ImGui.SameLine(); float seconds = slot.DurationSeconds;
+            ImGui.SetNextItemWidth(75f);
+            if (ImGui.InputFloat("##duration", ref seconds, 0, 0, "%.2f")) { slot.DurationSeconds = seconds; changed = true; }
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Maximum playback time in seconds. Natural animation length still applies.");
+            bool idle = slot.IsIdle;
+            if (ImGui.Checkbox("Is idle", ref idle)) { slot.IsIdle = idle; changed = true; }
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Play once on entering out of combat. Never restart on growth pulses. Multiple eligible slots form a random choice pool.");
+            ImGui.SameLine(); bool remove = ImGui.SmallButton("X");
+            ImGui.PopID();
+            if (remove) { slots.RemoveAt(i--); changed = true; }
+        }
+        ImGui.BeginDisabled(slots.Count >= 32);
+        if (ImGui.Button("+ Animation")) { slots.Add(new()); changed = true; }
+        ImGui.EndDisabled();
+        if (changed) configuration.Save();
+        ImGui.PopID();
     }
 
     private void AddTrackedPlayer()
@@ -1098,7 +1138,7 @@ public class ConfigWindow : Window, IDisposable
         ImGui.PushID("action-growth-" + id);
         bool enabled = settings.Enabled;
         if (ImGui.Checkbox("Enabled", ref enabled)) { settings.Enabled = enabled; configuration.Save(); }
-        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Successful action effects on this profile add growth immediately. Existing pulse, limits and feedback apply. Does not release pending damage.");
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Choose receiving an effect or successfully using a skill. Growth is immediate. Existing pulse, limits and feedback apply. Does not release pending damage.");
         bool changed = false;
         for (int i = 0; i < settings.Rules.Count; i++)
         {
@@ -1114,6 +1154,10 @@ public class ConfigWindow : Window, IDisposable
             if (ImGui.InputFloat("##growth", ref growth, 0, 0, "%.3f"))
             { rule.Growth = float.IsFinite(growth) ? Math.Clamp(growth, 0, ImmediateGrowth.Maximum) : 0; changed = true; }
             if (ImGui.IsItemHovered()) ImGui.SetTooltip("Extra base-size multiplier per successful cast. 0.1 adds +0.1x. 0 disables this row.");
+            ImGui.SetNextItemWidth(170f);
+            int trigger = (int)rule.Trigger;
+            if (ImGui.Combo("Trigger", ref trigger, "Receiving effect\0Successful use\0"))
+            { rule.Trigger = (ActionGrowthTrigger)trigger; changed = true; }
             ImGui.SameLine(); bool remove = ImGui.SmallButton("X");
             ImGui.PopID();
             if (remove) { settings.Rules.RemoveAt(i--); changed = true; }
