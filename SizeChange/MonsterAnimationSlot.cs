@@ -28,16 +28,16 @@ public sealed class MonsterAnimationSlot
     }
 }
 
-// Latch survives animation expiry: an idle starts only once per combat transition
+// Latch survives animation expiry: an idle starts only once per combat/movement transition
 // or changed configuration, not every time growth pulses or a timeline ends.
 internal sealed class MonsterIdleLatch
 {
     private bool attempted;
     private string signature = string.Empty;
-    public bool ShouldStart(bool inCombat, string configuration)
+    public bool ShouldStart(bool blocked, string configuration)
     {
         if (configuration != signature) { signature = configuration; attempted = false; }
-        if (inCombat) { attempted = false; return false; }
+        if (blocked) { attempted = false; return false; }
         if (attempted) return false;
         attempted = true;
         return true;

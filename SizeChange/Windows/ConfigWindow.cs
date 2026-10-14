@@ -781,7 +781,7 @@ public class ConfigWindow : Window, IDisposable
             if (ImGui.IsItemHovered()) ImGui.SetTooltip("Seconds to keep the animation override. For idle slots, 0 holds until combat or Stop. The animation must support looping.");
             bool idle = slot.IsIdle;
             if (ImGui.Checkbox("Is idle", ref idle)) { slot.IsIdle = idle; changed = true; }
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Hold the idle outside combat without restarting on growth pulses. Use duration 0 to hold until combat. Multiple slots form a random choice pool.");
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Hold while stationary and out of combat. Movement releases it; it returns after 0.3 seconds of stillness. Growth pulses do not restart it. Duration 0 holds until interrupted.");
             ImGui.SameLine();
             if (ImGui.SmallButton("Test")) plugin.QueueMonsterAnimationTest(filter, slot);
             ImGui.SameLine(); bool remove = ImGui.SmallButton("X");

@@ -18,6 +18,8 @@ internal sealed unsafe class MonsterAnimationPlayer : IDisposable
         public int Pulses, Requests;
         public string Signature = string.Empty, Status = "Waiting for pulse";
         public MonsterIdleLatch Latch = new();
+        public MonsterIdleMovement Movement;
+        public bool IdleReady = true;
         public MonsterTimelineOverride Override;
     }
     private readonly Dictionary<uint, State> states = new();
@@ -45,9 +47,12 @@ internal sealed unsafe class MonsterAnimationPlayer : IDisposable
         {
             Stop(state);
             if (state.Available) state.Latch = new();
+            state.Movement = default; state.IdleReady = false;
             state.Available = false; state.Status = "Inactive or model unavailable"; return;
         }
         state.Available = true;
+        var position = actor->GameObject.Position;
+        state.IdleReady = state.Movement.Observe(position.X, position.Y, position.Z, Environment.TickCount64);
         string configuration = Signature(slots);
         if (configuration != state.Signature)
         { Stop(state); state.Signature = configuration; state.SuppressIdle = false; }
@@ -55,7 +60,7 @@ internal sealed unsafe class MonsterAnimationPlayer : IDisposable
         {
             if ((nint)actor->DrawObject != state.Model || !state.Override.Matches(actor->Timeline.BaseOverride, (byte)actor->Mode, actor->ModeParam))
             { Stop(state); state.Status = "Interrupted by actor state"; }
-            else if (Environment.TickCount64 >= state.Deadline || (state.Idle && actor->InCombat))
+            else if (Environment.TickCount64 >= state.Deadline || (state.Idle && (actor->InCombat || !state.IdleReady)))
             { Stop(state); state.Status = "Finished"; }
             else
             {
@@ -66,12 +71,14 @@ internal sealed unsafe class MonsterAnimationPlayer : IDisposable
         // Our own AnimLock must not fail the Normal-mode guard or prevent expiry.
         if (!state.Override.Active && actor->Mode != CharacterModes.Normal)
         {
-            if (actor->InCombat) state.Latch.ShouldStart(true, configuration);
+            if (actor->InCombat || !state.IdleReady) state.Latch.ShouldStart(true, configuration);
             state.Status = $"Blocked: actor mode {actor->Mode} ({(byte)actor->Mode})";
             return;
         }
         if (actor->InCombat) state.SuppressIdle = false;
-        bool idleDue = state.Latch.ShouldStart(actor->InCombat, configuration);
+        bool idleDue = state.Latch.ShouldStart(actor->InCombat || !state.IdleReady, configuration);
+        if (!state.IdleReady && !state.Override.Active && !state.SuppressIdle)
+            state.Status = "Idle paused: moving / settling";
         if (idleDue && !state.SuppressIdle)
         {
             var slot = MonsterAnimationSlot.Select(slots, true, Random.Shared.NextDouble());
@@ -91,6 +98,7 @@ internal sealed unsafe class MonsterAnimationPlayer : IDisposable
         if (actor == null || !states.TryGetValue(actor->EntityId, out var state) || state.Address != (nint)actor) return;
         if (slot == null) { Stop(state); state.SuppressIdle = true; state.Status = "Stopped"; }
         else if (slot.IsIdle && actor->InCombat) state.Status = "Idle test requires out of combat";
+        else if (slot.IsIdle && !state.IdleReady) state.Status = "Idle paused: moving / settling";
         else { state.SuppressIdle = false; Start(actor, state, slot, resolve); }
     }
     private static void Start(Character* actor, State state, MonsterAnimationSlot slot, Resolve resolve)
