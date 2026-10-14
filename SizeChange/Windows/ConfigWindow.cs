@@ -778,10 +778,12 @@ public class ConfigWindow : Window, IDisposable
             ImGui.SameLine(); float seconds = slot.DurationSeconds;
             ImGui.SetNextItemWidth(75f);
             if (ImGui.InputFloat("##duration", ref seconds, 0, 0, "%.2f")) { slot.DurationSeconds = seconds; changed = true; }
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Maximum playback time in seconds. Natural animation length still applies.");
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Seconds to keep the animation override. For idle slots, 0 holds until combat or Stop. The animation must support looping.");
             bool idle = slot.IsIdle;
             if (ImGui.Checkbox("Is idle", ref idle)) { slot.IsIdle = idle; changed = true; }
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Play once on entering out of combat. Never restart on growth pulses. Multiple eligible slots form a random choice pool.");
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Hold the idle outside combat without restarting on growth pulses. Use duration 0 to hold until combat. Multiple slots form a random choice pool.");
+            ImGui.SameLine();
+            if (ImGui.SmallButton("Test")) plugin.QueueMonsterAnimationTest(filter, slot);
             ImGui.SameLine(); bool remove = ImGui.SmallButton("X");
             ImGui.PopID();
             if (remove) { slots.RemoveAt(i--); changed = true; }
@@ -789,6 +791,9 @@ public class ConfigWindow : Window, IDisposable
         ImGui.BeginDisabled(slots.Count >= 32);
         if (ImGui.Button("+ Animation")) { slots.Add(new()); changed = true; }
         ImGui.EndDisabled();
+        ImGui.SameLine();
+        if (ImGui.Button("Stop")) plugin.QueueMonsterAnimationTest(filter, null);
+        ImGui.TextWrapped(plugin.MonsterAnimationStatus(filter));
         if (changed) configuration.Save();
         ImGui.PopID();
     }

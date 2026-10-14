@@ -17,7 +17,7 @@ public sealed class MonsterAnimationSlot
         foreach (var slot in slots)
         {
             slot.Path ??= string.Empty;
-            slot.DurationSeconds = float.IsFinite(slot.DurationSeconds) ? Math.Clamp(slot.DurationSeconds, 0.05f, 600f) : 6f;
+            slot.DurationSeconds = float.IsFinite(slot.DurationSeconds) ? Math.Clamp(slot.DurationSeconds, 0f, 600f) : 6f;
         }
     }
     internal static MonsterAnimationSlot? Select(List<MonsterAnimationSlot>? slots, bool idle, double roll)

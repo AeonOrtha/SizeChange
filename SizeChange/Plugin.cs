@@ -112,6 +112,19 @@ public sealed class Plugin : IDalamudPlugin
     private readonly ActionGrowthDeduplication actionDeduplication = new();
     private readonly ActionGrowthDeduplication castDeduplication = new();
     private readonly MonsterAnimationPlayer monsterAnimations = new();
+    private readonly Dictionary<string, MonsterAnimationSlot?> monsterAnimationTests = new();
+    internal void QueueMonsterAnimationTest(string filter, MonsterAnimationSlot? slot)
+    {
+        monsterAnimationTests[filter] = slot == null ? null : new() { Path = slot.Path, DurationSeconds = slot.DurationSeconds, IsIdle = slot.IsIdle };
+        InvalidateTrackedActorCaches();
+    }
+    internal string MonsterAnimationStatus(string filter)
+    {
+        foreach (var obj in ObjectTable)
+            if (obj is IBattleNpc && obj.Name.TextValue.Contains(filter, StringComparison.OrdinalIgnoreCase))
+                return monsterAnimations.Status(obj.EntityId);
+        return "No matching monster nearby";
+    }
     internal ActionGrowthObserver ActionObserver { get; }
     private uint actionTerritory = uint.MaxValue;
     private bool disposed;
@@ -417,6 +430,7 @@ public sealed class Plugin : IDalamudPlugin
         {
             monsterAnimations.EndFrame();
             immediateGrowth.Clear();
+            monsterAnimationTests.Clear();
             PlayerEffects.EndFrame();
             PlayerProfileHeight.Tick();
             PlayerEffects.UpdateSounds(PlayerProfileHeight.IsCaptured);
@@ -610,6 +624,13 @@ public sealed class Plugin : IDalamudPlugin
             var monsterChoices = Configuration.MonsterAnimationsFor(gameObject.Name.TextValue);
             monsterAnimations.Tick(actor, monsterChoices, !globallyDisabled && !drainTransition && actor->Health > 0,
                 TryResolveActionTimeline);
+            if (!globallyDisabled && !drainTransition)
+                foreach (string filter in new List<string>(monsterAnimationTests.Keys))
+                    if (gameObject.Name.TextValue.Contains(filter, StringComparison.OrdinalIgnoreCase))
+                    {
+                        monsterAnimations.Test(actor, monsterAnimationTests[filter], TryResolveActionTimeline);
+                        monsterAnimationTests.Remove(filter);
+                    }
             ProcessSelectedActor(
                 actor,
                 true,
