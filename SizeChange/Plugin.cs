@@ -622,8 +622,14 @@ public sealed class Plugin : IDalamudPlugin
 
             var actor = (Character*)gameObject.Address;
             var monsterChoices = Configuration.MonsterAnimationsFor(gameObject.Name.TextValue);
+            bool accumulatingMonster = TryGetCharacterState(actor, out var monsterState) &&
+                !monsterState.Transform.ScaleConflict && monsterState.PendingGrowth > 0f;
+            var monsterSettings = Configuration.MonsterSettings;
             monsterAnimations.Tick(actor, monsterChoices, !globallyDisabled && !drainTransition && actor->Health > 0,
-                TryResolveActionTimeline);
+                TryResolveActionTimeline, accumulatingMonster,
+                MonsterIdleActivity.Interval(monsterSettings.AccumulatorDelaySeconds,
+                    monsterSettings.GrowthOvershootRiseSeconds, monsterSettings.GrowthOvershootSettleSeconds),
+                monsterSettings.GrowthFromDelta);
             if (!globallyDisabled && !drainTransition)
                 foreach (string filter in new List<string>(monsterAnimationTests.Keys))
                     if (gameObject.Name.TextValue.Contains(filter, StringComparison.OrdinalIgnoreCase))

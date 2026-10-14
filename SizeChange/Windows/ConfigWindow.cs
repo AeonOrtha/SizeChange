@@ -778,10 +778,10 @@ public class ConfigWindow : Window, IDisposable
             ImGui.SameLine(); float seconds = slot.DurationSeconds;
             ImGui.SetNextItemWidth(75f);
             if (ImGui.InputFloat("##duration", ref seconds, 0, 0, "%.2f")) { slot.DurationSeconds = seconds; changed = true; }
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Seconds to keep the animation override. For idle slots, 0 holds until combat or Stop. The animation must support looping.");
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Seconds to keep the animation override. For idle slots, 0 uses the accumulation hold without an extra time cap. The animation must support looping.");
             bool idle = slot.IsIdle;
             if (ImGui.Checkbox("Is idle", ref idle)) { slot.IsIdle = idle; changed = true; }
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Hold while stationary and out of combat. Movement releases it; it returns after 0.3 seconds of stillness. Growth pulses do not restart it. Duration 0 holds until interrupted.");
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Requires accumulation; holds for two accumulator intervals after the last activity. Zero-delay uses two rise + settle cycles. Stationary and out of combat only; resumes after 0.3 seconds of stillness. Duration 0 removes the extra time cap.");
             ImGui.SameLine();
             if (ImGui.SmallButton("Test")) plugin.QueueMonsterAnimationTest(filter, slot);
             ImGui.SameLine(); bool remove = ImGui.SmallButton("X");

@@ -19,10 +19,13 @@ internal sealed unsafe class MonsterAnimationPlayer : IDisposable
         public string Signature = string.Empty, Status = "Waiting for pulse";
         public MonsterIdleLatch Latch = new();
         public MonsterIdleMovement Movement;
-        public bool IdleReady = true;
+        public bool IdleReady = true, GrowthEligible;
+        public MonsterIdleActivity Activity;
         public MonsterTimelineOverride Override;
     }
     private readonly Dictionary<uint, State> states = new();
+    private readonly Func<long> clock;
+    public MonsterAnimationPlayer(Func<long>? clock = null) { this.clock = clock ?? (() => Environment.TickCount64); }
     public string Status(uint entity) => states.TryGetValue(entity, out var state)
         ? $"{state.Status} | Pulses {state.Pulses}, requests {state.Requests}" : "Waiting for actor update";
     public void BeginFrame() { foreach (var state in states.Values) state.Seen = false; }
@@ -32,7 +35,7 @@ internal sealed unsafe class MonsterAnimationPlayer : IDisposable
         foreach (var slot in slots) text.Append(slot.Path).Append('|').Append(slot.DurationSeconds).Append('|').Append(slot.IsIdle).Append(';');
         return text.ToString();
     }
-    public void Tick(Character* actor, List<MonsterAnimationSlot>? slots, bool allowed, Resolve resolve)
+    public void Tick(Character* actor, List<MonsterAnimationSlot>? slots, bool allowed, Resolve resolve, bool accumulating, float pulseIntervalSeconds, bool growthEnabled = true)
     {
         if (actor == null) return;
         if (states.TryGetValue(actor->EntityId, out var prior) && prior.Address != (nint)actor)
@@ -48,11 +51,14 @@ internal sealed unsafe class MonsterAnimationPlayer : IDisposable
             Stop(state);
             if (state.Available) state.Latch = new();
             state.Movement = default; state.IdleReady = false;
+            state.Activity = default; state.GrowthEligible = false;
             state.Available = false; state.Status = "Inactive or model unavailable"; return;
         }
         state.Available = true;
+        if (!growthEnabled) state.Activity = default;
+        state.GrowthEligible = growthEnabled && state.Activity.Update(accumulating, clock(), pulseIntervalSeconds);
         var position = actor->GameObject.Position;
-        state.IdleReady = state.Movement.Observe(position.X, position.Y, position.Z, Environment.TickCount64);
+        state.IdleReady = state.Movement.Observe(position.X, position.Y, position.Z, clock());
         string configuration = Signature(slots);
         if (configuration != state.Signature)
         { Stop(state); state.Signature = configuration; state.SuppressIdle = false; }
@@ -60,7 +66,7 @@ internal sealed unsafe class MonsterAnimationPlayer : IDisposable
         {
             if ((nint)actor->DrawObject != state.Model || !state.Override.Matches(actor->Timeline.BaseOverride, (byte)actor->Mode, actor->ModeParam))
             { Stop(state); state.Status = "Interrupted by actor state"; }
-            else if (Environment.TickCount64 >= state.Deadline || (state.Idle && (actor->InCombat || !state.IdleReady)))
+            else if (clock() >= state.Deadline || (state.Idle && (actor->InCombat || !state.IdleReady || !state.GrowthEligible)))
             { Stop(state); state.Status = "Finished"; }
             else
             {
@@ -71,14 +77,16 @@ internal sealed unsafe class MonsterAnimationPlayer : IDisposable
         // Our own AnimLock must not fail the Normal-mode guard or prevent expiry.
         if (!state.Override.Active && actor->Mode != CharacterModes.Normal)
         {
-            if (actor->InCombat || !state.IdleReady) state.Latch.ShouldStart(true, configuration);
+            if (actor->InCombat || !state.IdleReady || !state.GrowthEligible) state.Latch.ShouldStart(true, configuration);
             state.Status = $"Blocked: actor mode {actor->Mode} ({(byte)actor->Mode})";
             return;
         }
         if (actor->InCombat) state.SuppressIdle = false;
-        bool idleDue = state.Latch.ShouldStart(actor->InCombat || !state.IdleReady, configuration);
+        bool idleDue = state.Latch.ShouldStart(actor->InCombat || !state.IdleReady || !state.GrowthEligible, configuration);
         if (!state.IdleReady && !state.Override.Active && !state.SuppressIdle)
             state.Status = "Idle paused: moving / settling";
+        if (!state.GrowthEligible && !state.Override.Active && !state.SuppressIdle)
+            state.Status = "Idle waiting for accumulation";
         if (idleDue && !state.SuppressIdle)
         {
             var slot = MonsterAnimationSlot.Select(slots, true, Random.Shared.NextDouble());
@@ -89,6 +97,8 @@ internal sealed unsafe class MonsterAnimationPlayer : IDisposable
     {
         if (actor == null || !states.TryGetValue(actor->EntityId, out var state) || state.Address != (nint)actor) return;
         state.Pulses++;
+        state.Activity.Pulse(clock());
+        state.GrowthEligible = true;
         if (state.Override.Active && state.Idle && !actor->InCombat) return;
         var slot = MonsterAnimationSlot.Select(slots, false, Random.Shared.NextDouble());
         if (slot != null) Start(actor, state, slot, resolve);
@@ -97,11 +107,12 @@ internal sealed unsafe class MonsterAnimationPlayer : IDisposable
     {
         if (actor == null || !states.TryGetValue(actor->EntityId, out var state) || state.Address != (nint)actor) return;
         if (slot == null) { Stop(state); state.SuppressIdle = true; state.Status = "Stopped"; }
+        else if (slot.IsIdle && !state.GrowthEligible) state.Status = "Idle waiting for accumulation";
         else if (slot.IsIdle && actor->InCombat) state.Status = "Idle test requires out of combat";
         else if (slot.IsIdle && !state.IdleReady) state.Status = "Idle paused: moving / settling";
         else { state.SuppressIdle = false; Start(actor, state, slot, resolve); }
     }
-    private static void Start(Character* actor, State state, MonsterAnimationSlot slot, Resolve resolve)
+    private void Start(Character* actor, State state, MonsterAnimationSlot slot, Resolve resolve)
     {
         if (actor->DrawObject == null || actor->Health == 0) { state.Status = "Model unavailable or dead"; return; }
         if (!resolve(slot.Path, out ushort timeline, out string error)) { state.Status = error; return; }
@@ -120,7 +131,7 @@ internal sealed unsafe class MonsterAnimationPlayer : IDisposable
         actor->Timeline.TimelineSequencer.TimelineIds[0] = 0;
         state.Idle = slot.IsIdle;
         state.Deadline = slot.IsIdle && slot.DurationSeconds <= 0 ? long.MaxValue :
-            Environment.TickCount64 + (long)(Math.Clamp(slot.DurationSeconds, 0.05f, 600f) * 1000f);
+            clock() + (long)(Math.Clamp(slot.DurationSeconds, 0.05f, 600f) * 1000f);
         state.Requests++;
         state.Status = $"Requested timeline {timeline}";
     }
