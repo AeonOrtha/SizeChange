@@ -126,6 +126,7 @@ public sealed class Plugin : IDalamudPlugin
         return "No matching monster nearby";
     }
     internal ActionGrowthObserver ActionObserver { get; }
+    internal PeriodicGrowthObserver PeriodicObserver { get; }
     private uint actionTerritory = uint.MaxValue;
     private bool disposed;
     private readonly GrowthSoundPlayer GrowthSoundPlayer;
@@ -164,6 +165,7 @@ public sealed class Plugin : IDalamudPlugin
             PluginInterface, message => Log.Warning("Player profile: {Message}", message), PlayerEffects.Build);
 
         ActionObserver = new(GameInteropProvider, message => Log.Warning("Action growth: {Message}", message));
+        PeriodicObserver = new(GameInteropProvider, message => Log.Warning("Periodic growth: {Message}", message));
         ConfigWindow = new ConfigWindow(this);
         WindowSystem.AddWindow(ConfigWindow);
 
@@ -191,6 +193,7 @@ public sealed class Plugin : IDalamudPlugin
         disposed = true;
         Framework.Update -= OnFrameworkUpdate;
         ActionObserver.Dispose();
+        PeriodicObserver.Dispose();
         monsterAnimations.Dispose();
         immediateGrowth.Clear();
         PlayerProfileHeight.Dispose();
@@ -321,6 +324,19 @@ public sealed class Plugin : IDalamudPlugin
         }
     }
 
+    private void ReadPeriodicGrowth(bool allowed)
+    {
+        bool enabled = Configuration.SelfSettings.ActionGrowth.GrowthPerTick() > 0 ||
+            Configuration.PlayerSettings.ActionGrowth.GrowthPerTick() > 0 || Configuration.MonsterSettings.ActionGrowth.GrowthPerTick() > 0;
+        PeriodicObserver.Tick(allowed && enabled, ClientState.TerritoryType);
+        while (PeriodicObserver.TryRead(out var tick))
+        {
+            if (!allowed) continue;
+            QueueActionGrowth(ObjectTable.SearchByEntityId(tick.Target),
+                tick.Healing ? "Healing tick" : "Damage tick", 0, ActionGrowthTrigger.OverTime);
+        }
+    }
+
     private void QueueActionGrowth(IGameObject? obj, string name, uint actionId, ActionGrowthTrigger trigger)
     {
         if (obj is not IBattleChara recipient || recipient.Address == 0 || recipient.CurrentHp <= 0) return;
@@ -333,7 +349,9 @@ public sealed class Plugin : IDalamudPlugin
         else return;
         if (!settings.GrowthFromDelta || !settings.ActionGrowth.Enabled) return;
         float growth = settings.ActionGrowth.GrowthFor(name, trigger);
-        ActionObserver.LastAction = $"{name} ({actionId}) [{trigger}] → {recipient.Name.TextValue}";
+        if (trigger == ActionGrowthTrigger.OverTime)
+            PeriodicObserver.LastTick = $"{name} → {recipient.Name.TextValue}";
+        else ActionObserver.LastAction = $"{name} ({actionId}) [{trigger}] → {recipient.Name.TextValue}";
         if (growth > 0) immediateGrowth.Add(recipient.EntityId, recipient.Address, growth);
     }
 
@@ -446,6 +464,12 @@ public sealed class Plugin : IDalamudPlugin
                 !Condition[ConditionFlag.BetweenAreas] && !Condition[ConditionFlag.BetweenAreas51]);
         }
         catch (Exception ex) { ActionObserver.Fail(ex); }
+        try
+        {
+            ReadPeriodicGrowth(Configuration.Enable && ClientState.IsLoggedIn && !ClientState.IsPvP &&
+                !Condition[ConditionFlag.BetweenAreas] && !Condition[ConditionFlag.BetweenAreas51]);
+        }
+        catch (Exception ex) { PeriodicObserver.Fail(ex); }
         vfxActorIdentities.Clear();
         vfxActorModels.Clear();
         if (ClientState.IsLoggedIn && !Condition[ConditionFlag.BetweenAreas] && !Condition[ConditionFlag.BetweenAreas51])

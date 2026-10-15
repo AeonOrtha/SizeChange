@@ -1143,25 +1143,28 @@ public class ConfigWindow : Window, IDisposable
         ImGui.PushID("action-growth-" + id);
         bool enabled = settings.Enabled;
         if (ImGui.Checkbox("Enabled", ref enabled)) { settings.Enabled = enabled; configuration.Save(); }
-        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Choose receiving an effect or successfully using a skill. Growth is immediate. Existing pulse, limits and feedback apply. Does not release pending damage.");
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Choose receiving an effect, successfully using a skill, or periodic damage/healing ticks. Growth is immediate. Existing pulse, limits and feedback apply. Does not release pending damage.");
         bool changed = false;
         for (int i = 0; i < settings.Rules.Count; i++)
         {
             var rule = settings.Rules[i];
             ImGui.PushID(i);
             ImGui.SetNextItemWidth(Math.Max(140f, ImGui.GetContentRegionAvail().X - 150f));
-            string name = rule.Name;
-            if (ImGui.InputTextWithHint("##skill", "Skill name", ref name, 128))
+            bool overTime = rule.Trigger == ActionGrowthTrigger.OverTime;
+            string name = overTime ? "Any damage / healing tick" : rule.Name;
+            if (ImGui.InputTextWithHint("##skill", "Skill name", ref name, 128, overTime ? ImGuiInputTextFlags.ReadOnly : ImGuiInputTextFlags.None) && !overTime)
             { rule.Name = name; changed = true; }
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Exact skill name in your game language. Case ignored. Identical names match all action IDs with that name; the first matching row is used.");
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip(overTime
+                ? "Any periodic effect received by this profile. One contribution per reported tick; combined effects count once. First Over time row wins. Skill name is not used."
+                : "Exact skill name in your game language. Case ignored. Identical names match all action IDs with that name; the first matching row is used.");
             ImGui.SameLine(); ImGui.SetNextItemWidth(90f);
             float growth = rule.Growth;
             if (ImGui.InputFloat("##growth", ref growth, 0, 0, "%.3f"))
             { rule.Growth = float.IsFinite(growth) ? Math.Clamp(growth, 0, ImmediateGrowth.Maximum) : 0; changed = true; }
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Extra base-size multiplier per successful cast. 0.1 adds +0.1x. 0 disables this row.");
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Extra base-size multiplier per trigger. Over time adds this for each reported damage or healing tick. 0.1 adds +0.1x. 0 disables this row.");
             ImGui.SetNextItemWidth(170f);
             int trigger = (int)rule.Trigger;
-            if (ImGui.Combo("Trigger", ref trigger, "Receiving effect\0Successful use\0"))
+            if (ImGui.Combo("Trigger", ref trigger, "Receiving effect\0Successful use\0Over time\0"))
             { rule.Trigger = (ActionGrowthTrigger)trigger; changed = true; }
             ImGui.SameLine(); bool remove = ImGui.SmallButton("X");
             ImGui.PopID();
@@ -1176,7 +1179,13 @@ public class ConfigWindow : Window, IDisposable
             ImGui.TextUnformatted(plugin.ActionObserver.Status);
             if (ImGui.IsItemHovered() && plugin.ActionObserver.LastAction.Length > 0)
                 ImGui.SetTooltip("Last received: " + plugin.ActionObserver.LastAction);
-            if (ImGui.Button("Retry##action-observer")) plugin.ActionObserver.Retry();
+            if (settings.Rules.Exists(r => r.Trigger == ActionGrowthTrigger.OverTime))
+            {
+                ImGui.TextUnformatted(plugin.PeriodicObserver.Status);
+                if (ImGui.IsItemHovered() && plugin.PeriodicObserver.LastTick.Length > 0)
+                    ImGui.SetTooltip("Last received: " + plugin.PeriodicObserver.LastTick);
+            }
+            if (ImGui.Button("Retry##action-observer")) { plugin.ActionObserver.Retry(); plugin.PeriodicObserver.Retry(); }
         }
         if (id == "self")
         {

@@ -4,7 +4,7 @@ using System.Globalization;
 
 namespace SizeChange;
 
-public enum ActionGrowthTrigger { ReceivingEffect, SuccessfulUse }
+public enum ActionGrowthTrigger { ReceivingEffect, SuccessfulUse, OverTime }
 
 [Serializable]
 public sealed class ActionGrowthRule
@@ -26,11 +26,20 @@ public sealed class ActionGrowthSettings
     };
     public float GrowthFor(string name, ActionGrowthTrigger trigger = ActionGrowthTrigger.ReceivingEffect)
     {
+        if (trigger == ActionGrowthTrigger.OverTime) return GrowthPerTick();
         if (!Enabled || string.IsNullOrWhiteSpace(name)) return 0;
         foreach (var rule in Rules)
             if (rule.Trigger == trigger && string.Equals(rule.Name?.Trim(), name, StringComparison.OrdinalIgnoreCase))
                 return float.IsFinite(rule.Growth) ? Math.Clamp(rule.Growth, 0, ImmediateGrowth.Maximum) : 0;
         return 0;
+    }
+    // Periodic packets usually aggregate effects and have no individual skill ID.
+    // As with named rules, the first matching row wins (duplicates do not stack).
+    public float GrowthPerTick()
+    {
+        if (!Enabled) return 0;
+        var rule = Rules.Find(r => r.Trigger == ActionGrowthTrigger.OverTime);
+        return rule != null && float.IsFinite(rule.Growth) ? Math.Clamp(rule.Growth, 0, ImmediateGrowth.Maximum) : 0;
     }
     public void Validate()
     {
