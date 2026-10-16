@@ -28,7 +28,14 @@ internal sealed class EmoteGrowthTracker
         territory = currentTerritory; now = timestamp; allowed = enabled;
         foreach (var state in states.Values) state.Seen = false;
     }
-    public float Observe(Actor source, Actor recipient, uint emoteId, EmoteGrowthRule rule)
+    public float Observe(Actor source, Actor recipient, uint emoteId, EmoteGrowthRule rule,
+        bool eventStarts = false) => Advance(source, recipient, emoteId, rule, false, eventStarts);
+    // Each server notification is a distinct use, even for the same emote and
+    // target in one frame. The following animation observation must not duplicate it.
+    public float Started(Actor source, Actor recipient, uint emoteId, EmoteGrowthRule rule) =>
+        Advance(source, recipient, emoteId, rule, true, true);
+    private float Advance(Actor source, Actor recipient, uint emoteId, EmoteGrowthRule rule,
+        bool started, bool eventStarts)
     {
         if (!allowed || emoteId == 0 || rule.EmoteId != emoteId ||
             source.Entity is 0 or 0xE0000000 || recipient.Entity is 0 or 0xE0000000 ||
@@ -37,11 +44,11 @@ internal sealed class EmoteGrowthTracker
         float growth = Math.Min(rule.Growth, ImmediateGrowth.Maximum);
         long interval = (long)Math.Round(EmoteGrowthSettings.ClampInterval(rule.IntervalSeconds) * 1000d);
         var key = new Key(source, recipient, rule.Trigger);
-        if (!states.TryGetValue(key, out var state) || state.Emote != emoteId || !ReferenceEquals(state.Rule, rule))
+        if (started || !states.TryGetValue(key, out var state) || state.Emote != emoteId || !ReferenceEquals(state.Rule, rule))
         {
             states[key] = new() { Emote = emoteId, Rule = rule, Growth = growth, Interval = interval,
                 NextAt = now + interval, LastSeen = now, Seen = true };
-            return growth; // One contribution when the active emote is first observed.
+            return started || !eventStarts ? growth : 0f; // Events own Received starts; polling only sustains them.
         }
         if (state.Seen) return 0;
         state.Seen = true;

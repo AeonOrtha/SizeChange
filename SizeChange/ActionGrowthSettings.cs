@@ -60,7 +60,7 @@ public sealed class ActionGrowthSettings
 internal sealed class ImmediateGrowth
 {
     internal const float Maximum = 10000f;
-    private readonly Dictionary<(uint Entity, nint Address), float> pending = new();
+    private readonly Dictionary<(uint Entity, nint Address), ImmediateGrowthAmount> pending = new();
     public static bool Parse(string text, out float amount) => float.TryParse(text.Trim(),
         NumberStyles.Float, CultureInfo.InvariantCulture, out amount) && float.IsFinite(amount) && amount > 0 && amount <= Maximum;
     public static bool ParseCommand(string text, out float amount, out bool target)
@@ -76,14 +76,41 @@ internal sealed class ImmediateGrowth
         if (!Parse(parts[valueIndex], out amount)) return false;
         target = true; return true;
     }
-    public void Add(uint entity, nint address, float amount)
+    public void Add(uint entity, nint address, float amount, bool bypassLimit = false)
     {
         if (address == 0 || !float.IsFinite(amount) || amount <= 0) return;
         var key = (entity, address);
-        pending[key] = Math.Min(Maximum, pending.GetValueOrDefault(key) + Math.Min(Maximum, amount));
+        var current = pending.GetValueOrDefault(key);
+        float accepted = Math.Min(amount, Math.Max(0f, Maximum - current.Total));
+        pending[key] = bypassLimit ? current with { Bypass = current.Bypass + accepted }
+            : current with { Limited = current.Limited + accepted };
     }
-    public float Take(uint entity, nint address) => pending.Remove((entity, address), out var value) ? value : 0;
+    public ImmediateGrowthAmount TakeContributions(uint entity, nint address) =>
+        pending.Remove((entity, address), out var value) ? value : default;
+    public float Take(uint entity, nint address) => TakeContributions(entity, address).Total;
+
     public void Clear() => pending.Clear();
+}
+
+internal readonly record struct ImmediateGrowthAmount(float Limited, float Bypass)
+{
+    public float Total => Limited + Bypass;
+}
+
+// Keep emote allowance separate from proximity state: entering a duty must not
+// erase already-earned emote growth. Decay spends a single budget across both.
+internal struct EmoteGrowthAllowance
+{
+    internal float Bonus;
+    internal void Add(float amount)
+    { if (float.IsFinite(amount) && amount > 0) Bonus += amount; }
+    internal float Cap(float regularLimit, float aetherBonus) => regularLimit + aetherBonus + Bonus;
+    internal float Decay(float amount)
+    {
+        float used = Math.Min(Bonus, Math.Max(0f, amount));
+        Bonus -= used;
+        return Math.Max(0f, amount - used);
+    }
 }
 
 // Shared by ordinary accumulation and immediate contributions. Only the new

@@ -39,6 +39,7 @@ struct SCCharacterState
     public float PendingGrowth;
     public float PendingDamageRatio;
     public AetherGrowthState Aether;
+    public EmoteGrowthAllowance EmoteAllowance;
     public DigestionReserve Digestion;
     public int NearbyAetherSources;
     public int NearbyDrainSources;
@@ -111,13 +112,19 @@ public sealed class Plugin : IDalamudPlugin
 
     private readonly ImmediateGrowth immediateGrowth = new();
     private readonly EmoteGrowthTracker emoteGrowth = new();
+    private readonly ReceivedEmoteObserver receivedEmotes;
+    private readonly Dictionary<EmoteGrowthTracker.Actor, (uint Emote, ulong Target)> receivedEmoteTargets = new();
+    private readonly HashSet<EmoteGrowthTracker.Actor> seenEmoteSources = new();
+    private uint emoteTerritory;
+    internal string ReceivedEmoteStatus => receivedEmotes.Status;
+    internal string ReceivedEmoteDetails => receivedEmotes.Details;
     private readonly EmotePlaybackSpeed emoteSpeed = new();
     private bool emoteGrowthFaulted;
     internal string EmoteSpeedStatus => emoteSpeed.Status;
     internal string EmoteSpeedDetails => emoteSpeed.Details;
     internal string EmoteGrowthStatus { get; private set; } = "Off";
     internal string LastGrowthEmote { get; private set; } = string.Empty;
-    internal void RetryEmoteGrowth() { emoteGrowth.Clear(); emoteGrowthFaulted = false; emoteSpeed.Retry(); }
+    internal void RetryEmoteGrowth() { emoteGrowth.Clear(); emoteGrowthFaulted = false; emoteSpeed.Retry(); receivedEmotes.Retry(); }
     private readonly ActionGrowthDeduplication actionDeduplication = new();
     private readonly ActionGrowthDeduplication castDeduplication = new();
     private readonly MonsterAnimationPlayer monsterAnimations = new();
@@ -175,6 +182,7 @@ public sealed class Plugin : IDalamudPlugin
 
         ActionObserver = new(GameInteropProvider, message => Log.Warning("Action growth: {Message}", message));
         PeriodicObserver = new(GameInteropProvider, message => Log.Warning("Periodic growth: {Message}", message));
+        receivedEmotes = new(GameInteropProvider);
         ConfigWindow = new ConfigWindow(this);
         WindowSystem.AddWindow(ConfigWindow);
 
@@ -203,6 +211,8 @@ public sealed class Plugin : IDalamudPlugin
         Framework.Update -= OnFrameworkUpdate;
         ActionObserver.Dispose();
         PeriodicObserver.Dispose();
+        receivedEmotes.Dispose();
+        receivedEmoteTargets.Clear();
         emoteGrowth.Clear();
         emoteSpeed.BeginFrame(ClientState.IsLoggedIn && !Condition[ConditionFlag.BetweenAreas] && !Condition[ConditionFlag.BetweenAreas51], ClientState.TerritoryType);
         emoteSpeed.Dispose();
@@ -386,11 +396,35 @@ public sealed class Plugin : IDalamudPlugin
         bool enabled = allowed && !emoteGrowthFaulted &&
             (Configuration.SelfSettings.EmoteGrowth.Enabled || Configuration.PlayerSettings.EmoteGrowth.Enabled || Configuration.MonsterSettings.EmoteGrowth.Enabled);
         emoteSpeed.BeginFrame(ClientState.IsLoggedIn && !Condition[ConditionFlag.BetweenAreas] && !Condition[ConditionFlag.BetweenAreas51], ClientState.TerritoryType);
+        static bool HasReceived(GrowthSettings s) => s.EmoteGrowth.Enabled &&
+            s.EmoteGrowth.Rules.Exists(r => r.Trigger == EmoteGrowthTrigger.Received && r.Growth > 0f);
+        bool wantsReceived = enabled && (HasReceived(Configuration.SelfSettings) ||
+            HasReceived(Configuration.PlayerSettings) || HasReceived(Configuration.MonsterSettings));
+        receivedEmotes.Tick(wantsReceived, ClientState.TerritoryType);
+        if (!wantsReceived || emoteTerritory != ClientState.TerritoryType)
+        { receivedEmoteTargets.Clear(); emoteTerritory = ClientState.TerritoryType; }
+        seenEmoteSources.Clear();
         emoteGrowth.BeginFrame(enabled, ClientState.TerritoryType, Environment.TickCount64);
         if (!enabled) { emoteSpeed.EndFrame(); if (!emoteGrowthFaulted) EmoteGrowthStatus = "Off"; return; }
         try
         {
             EmoteGrowthStatus = "Watching emotes";
+            // Consume every event before sampling animations. Same-emote spam can
+            // produce several notifications in one frame; none are time-deduplicated.
+            while (receivedEmotes.TryRead(out var incoming))
+            {
+                if (ObjectTable.SearchByEntityId(incoming.Source) is not IBattleChara performer ||
+                    performer.Address == 0 || performer.CurrentHp <= 0) continue;
+                var sourceActor = (Character*)performer.Address;
+                if (sourceActor->DrawObject == null) continue;
+                var sourceIdentity = new EmoteGrowthTracker.Actor(performer.EntityId, performer.Address, (nint)sourceActor->DrawObject);
+                // Log-only spam is a real received use, but must not retarget a
+                // different animation which the performer still has looping.
+                if (!incoming.LogOnly) receivedEmoteTargets[sourceIdentity] = (incoming.Emote, incoming.Target);
+                if (incoming.Target != 0 && incoming.Target != 0xE0000000)
+                    ApplyEmoteGrowth(sourceIdentity, ObjectTable.SearchById(incoming.Target), incoming.Emote,
+                        EmoteGrowthTrigger.Received, started: true);
+            }
             foreach (var obj in ObjectTable)
             {
                 if (obj is not IBattleChara source || source.Address == 0 || source.CurrentHp <= 0) continue;
@@ -404,25 +438,38 @@ public sealed class Plugin : IDalamudPlugin
                     emoteSpeed.Tick(actor, poseSettings.EmoteGrowth.PoseFor(emote));
                 if (emote == 0) continue;
                 var identity = new EmoteGrowthTracker.Actor(source.EntityId, source.Address, (nint)actor->DrawObject);
+                seenEmoteSources.Add(identity);
                 ApplyEmoteGrowth(identity, source, emote, EmoteGrowthTrigger.Used);
                 ulong target = actor->EmoteController.Target.Id;
+                if (receivedEmoteTargets.TryGetValue(identity, out var directed))
+                {
+                    if (directed.Emote == emote) target = directed.Target;
+                    else receivedEmoteTargets.Remove(identity);
+                }
                 if (target != 0 && target != 0xE0000000)
                     ApplyEmoteGrowth(identity, ObjectTable.SearchById(target), emote, EmoteGrowthTrigger.Received);
             }
         }
-        finally { emoteGrowth.EndFrame(); emoteSpeed.EndFrame(); }
+        finally
+        {
+            foreach (var source in new List<EmoteGrowthTracker.Actor>(receivedEmoteTargets.Keys))
+                if (!seenEmoteSources.Contains(source)) receivedEmoteTargets.Remove(source);
+            emoteGrowth.EndFrame(); emoteSpeed.EndFrame();
+        }
     }
 
-    private unsafe void ApplyEmoteGrowth(EmoteGrowthTracker.Actor source, IGameObject? obj, uint emote, EmoteGrowthTrigger trigger)
+    private unsafe void ApplyEmoteGrowth(EmoteGrowthTracker.Actor source, IGameObject? obj, uint emote, EmoteGrowthTrigger trigger, bool started = false)
     {
         if (!TryGetGrowthRecipient(obj, out var recipient, out var settings) || !settings.GrowthFromDelta) return;
         var rule = settings.EmoteGrowth.Match(emote, trigger);
         if (rule == null) return;
         var actor = (Character*)recipient.Address;
         var identity = new EmoteGrowthTracker.Actor(recipient.EntityId, recipient.Address, (nint)actor->DrawObject);
-        float amount = emoteGrowth.Observe(source, identity, emote, rule);
+        float amount = started ? emoteGrowth.Started(source, identity, emote, rule) :
+            emoteGrowth.Observe(source, identity, emote, rule,
+                eventStarts: trigger == EmoteGrowthTrigger.Received && receivedEmotes.Listening);
         if (amount <= 0) return;
-        immediateGrowth.Add(recipient.EntityId, recipient.Address, amount);
+        immediateGrowth.Add(recipient.EntityId, recipient.Address, amount, rule.BypassSizeLimit);
         string name = DataManager.GetExcelSheet<Lumina.Excel.Sheets.Emote>().GetRowOrDefault(emote)?.Name.ExtractText() ?? emote.ToString();
         LastGrowthEmote = $"{name} [{trigger}] → {recipient.Name.TextValue} (+{amount:0.###}x)";
     }
@@ -1014,9 +1061,14 @@ public sealed class Plugin : IDalamudPlugin
                 charState.Aether.PendingDamageRatio = Math.Min(1f, charState.Aether.PendingDamageRatio + healthLostRatio);
             }
         }
-        float immediateAmount = settings.GrowthFromDelta && !disable
-            ? immediateGrowth.Take(actor->EntityId, (nint)actor) : 0f;
-        if (immediateAmount > 0) QueueGrowth(new EarnedGrowth(immediateAmount, 0), false, true);
+        var immediate = settings.GrowthFromDelta && !disable
+            ? immediateGrowth.TakeContributions(actor->EntityId, (nint)actor) : default;
+        float immediateAmount = immediate.Total;
+        if (immediateAmount > 0)
+        {
+            QueueGrowth(new EarnedGrowth(immediateAmount, 0), false, true);
+            charState.EmoteAllowance.Add(immediate.Bypass);
+        }
         void Accumulate(float healthLostRatio, bool aether)
         {
             healthLostRatio = Math.Min(healthLostRatio, settings.MaximumHealthLossRatioPerTrigger);
@@ -1057,6 +1109,7 @@ public sealed class Plugin : IDalamudPlugin
             charState.PendingDamageRatio = 0f;
             charState.AccumulatorRemainingSeconds = 0f;
             charState.Aether = default;
+            charState.EmoteAllowance = default;
         }
         else if (charState.PendingGrowth > 0f)
         {
@@ -1109,7 +1162,7 @@ public sealed class Plugin : IDalamudPlugin
         {
             charState.GrowthMultiplier = Math.Min(
                 charState.GrowthMultiplier,
-                charState.Aether.Cap(settings.DeltaMaxScaleMultiplier));
+                charState.EmoteAllowance.Cap(settings.DeltaMaxScaleMultiplier, charState.Aether.Bonus));
         }
 
         bool triggerOvershoot = settings.GrowthFromDelta && !disable &&
@@ -1195,7 +1248,7 @@ public sealed class Plugin : IDalamudPlugin
             charState.GrowthMultiplier = Math.Max(
                 1.0f,
                 charState.GrowthMultiplier - shrinkAmount);
-            charState.Aether.Decay(shrinkAmount);
+            charState.Aether.Decay(charState.EmoteAllowance.Decay(shrinkAmount));
         }
 
         float intendedTargetScale = disable
@@ -1219,7 +1272,7 @@ public sealed class Plugin : IDalamudPlugin
         if (settings.GrowthFromDelta && settings.LimitDeltaGrowth)
         {
             maximumAllowedScale =
-                charState.PlayerScale * charState.Aether.Cap(settings.DeltaMaxScaleMultiplier);
+                charState.PlayerScale * charState.EmoteAllowance.Cap(settings.DeltaMaxScaleMultiplier, charState.Aether.Bonus);
             intendedTargetScale = Math.Min(
                 intendedTargetScale,
                 maximumAllowedScale);

@@ -11,6 +11,7 @@ public sealed class EmoteGrowthRule
     public uint EmoteId { get; set; }
     public EmoteGrowthTrigger Trigger { get; set; }
     public float Growth { get; set; } = 0.1f;
+    public bool BypassSizeLimit { get; set; }
     public float IntervalSeconds { get; set; } = 1f;
     public bool EnableHeightOffset { get; set; }
     public float HeightOffset { get; set; }
@@ -51,6 +52,6 @@ public sealed class EmoteGrowthSettings
     {
         Enabled = value.Enabled,
         Rules = value.Rules.ConvertAll(r => new EmoteGrowthRule
-        { EmoteId = r.EmoteId, Trigger = r.Trigger, Growth = r.Growth, IntervalSeconds = r.IntervalSeconds, EnableHeightOffset = r.EnableHeightOffset, HeightOffset = r.HeightOffset, PlaySpeed = r.PlaySpeed }),
+        { EmoteId = r.EmoteId, Trigger = r.Trigger, Growth = r.Growth, BypassSizeLimit = r.BypassSizeLimit, IntervalSeconds = r.IntervalSeconds, EnableHeightOffset = r.EnableHeightOffset, HeightOffset = r.HeightOffset, PlaySpeed = r.PlaySpeed }),
     };
 }

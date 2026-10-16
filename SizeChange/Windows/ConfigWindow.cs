@@ -1184,7 +1184,10 @@ public class ConfigWindow : Window, IDisposable
             ImGui.SameLine(); float interval = rule.IntervalSeconds;
             ImGui.SetNextItemWidth(85f);
             if (ImGui.InputFloat("Every (s)", ref interval, 0, 0, "%.2f")) { rule.IntervalSeconds = interval; changed = true; }
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("0 = once when the emote starts. Positive values repeat every 0.1–3600 seconds while it remains active. Loop restarts do not add extra ticks.");
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("0 = once per use. Received emote notifications each count, including repeated uses of the same emote. Positive values also repeat while its animation stays active; natural loop cycles are not new uses.");
+            bool bypassLimit = rule.BypassSizeLimit;
+            if (ImGui.Checkbox("Bypass size limit", ref bypassLimit)) { rule.BypassSizeLimit = bypassLimit; changed = true; }
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("This emote's growth can exceed the profile's settled size limit. Other growth keeps its normal allowance. Normal shrinking still applies.");
             bool heightEnabled = rule.EnableHeightOffset;
             if (ImGui.Checkbox("Height offset", ref heightEnabled)) { rule.EnableHeightOffset = heightEnabled; changed = true; }
             if (ImGui.IsItemHovered()) ImGui.SetTooltip("Replaces this character's flat height while they perform this emote. Takes priority over sitting height. Growth height remains unchanged. First row for the emote wins, regardless of Used/Received.");
@@ -1215,6 +1218,11 @@ public class ConfigWindow : Window, IDisposable
             {
                 ImGui.TextUnformatted(plugin.EmoteSpeedStatus);
                 if (ImGui.IsItemHovered()) ImGui.SetTooltip(plugin.EmoteSpeedDetails);
+            }
+            if (settings.Rules.Exists(r => r.Trigger == EmoteGrowthTrigger.Received && r.Growth > 0f))
+            {
+                ImGui.TextUnformatted(plugin.ReceivedEmoteStatus);
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip(plugin.ReceivedEmoteDetails);
             }
             if (ImGui.SmallButton("Retry")) plugin.RetryEmoteGrowth();
         }
