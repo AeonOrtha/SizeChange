@@ -113,9 +113,11 @@ public sealed class Plugin : IDalamudPlugin
     private readonly EmoteGrowthTracker emoteGrowth = new();
     private readonly EmotePlaybackSpeed emoteSpeed = new();
     private bool emoteGrowthFaulted;
+    internal string EmoteSpeedStatus => emoteSpeed.Status;
+    internal string EmoteSpeedDetails => emoteSpeed.Details;
     internal string EmoteGrowthStatus { get; private set; } = "Off";
     internal string LastGrowthEmote { get; private set; } = string.Empty;
-    internal void RetryEmoteGrowth() { emoteGrowth.Clear(); emoteGrowthFaulted = false; }
+    internal void RetryEmoteGrowth() { emoteGrowth.Clear(); emoteGrowthFaulted = false; emoteSpeed.Retry(); }
     private readonly ActionGrowthDeduplication actionDeduplication = new();
     private readonly ActionGrowthDeduplication castDeduplication = new();
     private readonly MonsterAnimationPlayer monsterAnimations = new();

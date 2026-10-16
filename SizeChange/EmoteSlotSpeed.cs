@@ -2,8 +2,8 @@ using System;
 
 namespace SizeChange;
 
-// Own only the value we wrote. A competing speed writer wins until this slot
-// changes animation or the emote/configuration changes.
+// Track the latest unmodified game request separately from our applied value.
+// Framework refreshes must never multiply a previously modified speed again.
 internal struct EmoteSlotSpeed
 {
     private float baseline, applied;
@@ -19,6 +19,14 @@ internal struct EmoteSlotSpeed
         bool changed = current != target;
         current = target;
         return changed;
+    }
+    internal float FromGame(float requested, float multiplier)
+    {
+        float target = requested * multiplier;
+        if (!float.IsFinite(requested) || requested < 0f || !float.IsFinite(target) || target < 0f)
+            return requested;
+        baseline = requested; applied = target; owned = true; blocked = false;
+        return target;
     }
     internal bool Release(ref float current)
     {

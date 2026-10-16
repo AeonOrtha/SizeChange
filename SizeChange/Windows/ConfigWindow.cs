@@ -1211,6 +1211,11 @@ public class ConfigWindow : Window, IDisposable
         {
             ImGui.TextUnformatted(plugin.EmoteGrowthStatus);
             if (ImGui.IsItemHovered() && plugin.LastGrowthEmote.Length > 0) ImGui.SetTooltip(plugin.LastGrowthEmote);
+            if (settings.Rules.Exists(r => r.PlaySpeed != 1f))
+            {
+                ImGui.TextUnformatted(plugin.EmoteSpeedStatus);
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip(plugin.EmoteSpeedDetails);
+            }
             if (ImGui.SmallButton("Retry")) plugin.RetryEmoteGrowth();
         }
         ImGui.PopID();
