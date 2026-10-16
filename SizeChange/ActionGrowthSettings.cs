@@ -63,6 +63,19 @@ internal sealed class ImmediateGrowth
     private readonly Dictionary<(uint Entity, nint Address), float> pending = new();
     public static bool Parse(string text, out float amount) => float.TryParse(text.Trim(),
         NumberStyles.Float, CultureInfo.InvariantCulture, out amount) && float.IsFinite(amount) && amount > 0 && amount <= Maximum;
+    public static bool ParseCommand(string text, out float amount, out bool target)
+    {
+        amount = 0; target = false;
+        var parts = text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length == 1) return Parse(parts[0], out amount);
+        if (parts.Length != 2) return false;
+        int valueIndex;
+        if (string.Equals(parts[1], "<t>", StringComparison.OrdinalIgnoreCase)) valueIndex = 0;
+        else if (string.Equals(parts[0], "<t>", StringComparison.OrdinalIgnoreCase)) valueIndex = 1;
+        else return false;
+        if (!Parse(parts[valueIndex], out amount)) return false;
+        target = true; return true;
+    }
     public void Add(uint entity, nint address, float amount)
     {
         if (address == 0 || !float.IsFinite(amount) || amount <= 0) return;

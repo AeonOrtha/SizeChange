@@ -74,6 +74,7 @@ public sealed class Plugin : IDalamudPlugin
     [PluginService] internal static IDataManager DataManager { get; private set; } = null!;
     [PluginService] internal static IGameInteropProvider GameInteropProvider { get; private set; } = null!;
     [PluginService] internal static ISigScanner SigScanner { get; private set; } = null!;
+    [PluginService] internal static ITargetManager TargetManager { get; private set; } = null!;
 
     private const string CommandName_SizeChange = "/sizechange";
     private const string CommandName_DeltaPulse = "/deltapulse";
@@ -109,6 +110,11 @@ public sealed class Plugin : IDalamudPlugin
     };
 
     private readonly ImmediateGrowth immediateGrowth = new();
+    private readonly EmoteGrowthTracker emoteGrowth = new();
+    private bool emoteGrowthFaulted;
+    internal string EmoteGrowthStatus { get; private set; } = "Off";
+    internal string LastGrowthEmote { get; private set; } = string.Empty;
+    internal void RetryEmoteGrowth() { emoteGrowth.Clear(); emoteGrowthFaulted = false; }
     private readonly ActionGrowthDeduplication actionDeduplication = new();
     private readonly ActionGrowthDeduplication castDeduplication = new();
     private readonly MonsterAnimationPlayer monsterAnimations = new();
@@ -180,7 +186,7 @@ public sealed class Plugin : IDalamudPlugin
         });
 
         CommandManager.AddHandler(CommandName_DeltaPulse, new CommandInfo(OnDeltaPulse)
-        { HelpMessage = "Immediately trigger Self delta growth: /deltapulse 0.1 adds +0.1x. Requires enabled Self delta growth." });
+        { HelpMessage = "Immediate growth: /deltapulse 0.1 for Self; /deltapulse 0.1 <t> for your current target. Requires an enabled, matching delta-growth profile." });
 
         PluginInterface.UiBuilder.Draw += WindowSystem.Draw;
         PluginInterface.UiBuilder.OpenConfigUi += ToggleConfigUi;
@@ -194,6 +200,7 @@ public sealed class Plugin : IDalamudPlugin
         Framework.Update -= OnFrameworkUpdate;
         ActionObserver.Dispose();
         PeriodicObserver.Dispose();
+        emoteGrowth.Clear();
         monsterAnimations.Dispose();
         immediateGrowth.Clear();
         PlayerProfileHeight.Dispose();
@@ -290,17 +297,25 @@ public sealed class Plugin : IDalamudPlugin
 
     private void OnDeltaPulse(string command, string args)
     {
-        if (!ImmediateGrowth.Parse(args, out float amount))
-        { Chat.PrintError("Delta Suite: use /deltapulse <positive decimal>, e.g. /deltapulse 0.1 (maximum 10000)."); return; }
+        if (!ImmediateGrowth.ParseCommand(args, out float amount, out bool useTarget))
+        { Chat.PrintError("Delta Suite: use /deltapulse <positive decimal> [<t>], e.g. /deltapulse 0.1 <t> (maximum 10000)."); return; }
         _ = Framework.RunOnFrameworkThread(() =>
         {
             if (disposed) return;
-            var player = ObjectTable.LocalPlayer;
-            if (!Configuration.Enable || !Configuration.AffectSelf || !Configuration.SelfSettings.GrowthFromDelta ||
-                !ClientState.IsLoggedIn || ClientState.IsPvP || player == null || player.CurrentHp <= 0 ||
+            if (!Configuration.Enable || !ClientState.IsLoggedIn || ClientState.IsPvP ||
                 Condition[ConditionFlag.BetweenAreas] || Condition[ConditionFlag.BetweenAreas51])
-            { Chat.PrintError("Delta Suite: enable Self delta growth on a living character outside PvP/loading."); return; }
-            immediateGrowth.Add(player.EntityId, player.Address, amount);
+            { Chat.PrintError("Delta Suite: enable the plugin and use this outside PvP/loading."); return; }
+            var selected = useTarget ? TargetManager.Target : ObjectTable.LocalPlayer;
+            if (selected == null)
+            { Chat.PrintError(useTarget ? "Delta Suite: select a target first." : "Delta Suite: your character is unavailable."); return; }
+            if (!TryGetGrowthRecipient(selected, out var recipient, out var settings) || !settings.GrowthFromDelta)
+            {
+                Chat.PrintError(useTarget
+                    ? "Delta Suite: target must be alive and match an enabled Self, Added Players, or Monsters delta-growth profile."
+                    : "Delta Suite: enable Self delta growth on a living character.");
+                return;
+            }
+            immediateGrowth.Add(recipient.EntityId, recipient.Address, amount);
         });
     }
 
@@ -339,20 +354,69 @@ public sealed class Plugin : IDalamudPlugin
 
     private void QueueActionGrowth(IGameObject? obj, string name, uint actionId, ActionGrowthTrigger trigger)
     {
-        if (obj is not IBattleChara recipient || recipient.Address == 0 || recipient.CurrentHp <= 0) return;
-        GrowthSettings settings;
-        if (recipient.Address == ObjectTable.LocalPlayer?.Address)
-        { if (!Configuration.AffectSelf) return; settings = Configuration.SelfSettings; }
-        else if (recipient is IPlayerCharacter player && Configuration.AffectPlayers &&
-            Configuration.TrackedPlayerNames.Exists(n => string.Equals(n, GetPlayerIdentity(player), StringComparison.OrdinalIgnoreCase))) settings = Configuration.PlayerSettings;
-        else if (recipient is IBattleNpc && Configuration.IsMonsterTracked(recipient.Name.TextValue)) settings = Configuration.MonsterSettings;
-        else return;
+        if (!TryGetGrowthRecipient(obj, out var recipient, out var settings)) return;
         if (!settings.GrowthFromDelta || !settings.ActionGrowth.Enabled) return;
         float growth = settings.ActionGrowth.GrowthFor(name, trigger);
         if (trigger == ActionGrowthTrigger.OverTime)
             PeriodicObserver.LastTick = $"{name} → {recipient.Name.TextValue}";
         else ActionObserver.LastAction = $"{name} ({actionId}) [{trigger}] → {recipient.Name.TextValue}";
         if (growth > 0) immediateGrowth.Add(recipient.EntityId, recipient.Address, growth);
+    }
+
+    private bool TryGetGrowthRecipient(IGameObject? obj, out IBattleChara recipient, out GrowthSettings settings)
+    {
+        recipient = null!; settings = null!;
+        if (obj is not IBattleChara actor || actor.Address == 0 || actor.CurrentHp <= 0) return false;
+        if (actor.Address == ObjectTable.LocalPlayer?.Address)
+        { if (!Configuration.AffectSelf) return false; settings = Configuration.SelfSettings; }
+        else if (actor is IPlayerCharacter player && Configuration.AffectPlayers &&
+            Configuration.TrackedPlayerNames.Exists(n => string.Equals(n, GetPlayerIdentity(player), StringComparison.OrdinalIgnoreCase))) settings = Configuration.PlayerSettings;
+        else if (actor is IBattleNpc && Configuration.IsMonsterTracked(actor.Name.TextValue)) settings = Configuration.MonsterSettings;
+        else return false;
+        recipient = actor; return true;
+    }
+
+    private unsafe void ReadEmoteGrowth(bool allowed)
+    {
+        bool enabled = allowed && !emoteGrowthFaulted &&
+            (Configuration.SelfSettings.EmoteGrowth.Enabled || Configuration.PlayerSettings.EmoteGrowth.Enabled || Configuration.MonsterSettings.EmoteGrowth.Enabled);
+        emoteGrowth.BeginFrame(enabled, ClientState.TerritoryType, Environment.TickCount64);
+        if (!enabled) { if (!emoteGrowthFaulted) EmoteGrowthStatus = "Off"; return; }
+        try
+        {
+            EmoteGrowthStatus = "Watching emotes";
+            foreach (var obj in ObjectTable)
+            {
+                if (obj is not IBattleChara source || source.Address == 0 || source.CurrentHp <= 0) continue;
+                var actor = (Character*)source.Address;
+                if (actor->DrawObject == null) continue;
+                // IsEmoting is defined by the client as EmoteId != 0. Read only
+                // the current live controller; never infer emotes from chat or
+                // from an action-timeline animation played by our own feedback.
+                uint emote = actor->EmoteController.EmoteId;
+                if (emote == 0) continue;
+                var identity = new EmoteGrowthTracker.Actor(source.EntityId, source.Address, (nint)actor->DrawObject);
+                ApplyEmoteGrowth(identity, source, emote, EmoteGrowthTrigger.Used);
+                ulong target = actor->EmoteController.Target.Id;
+                if (target != 0 && target != 0xE0000000)
+                    ApplyEmoteGrowth(identity, ObjectTable.SearchById(target), emote, EmoteGrowthTrigger.Received);
+            }
+        }
+        finally { emoteGrowth.EndFrame(); }
+    }
+
+    private unsafe void ApplyEmoteGrowth(EmoteGrowthTracker.Actor source, IGameObject? obj, uint emote, EmoteGrowthTrigger trigger)
+    {
+        if (!TryGetGrowthRecipient(obj, out var recipient, out var settings) || !settings.GrowthFromDelta) return;
+        var rule = settings.EmoteGrowth.Match(emote, trigger);
+        if (rule == null) return;
+        var actor = (Character*)recipient.Address;
+        var identity = new EmoteGrowthTracker.Actor(recipient.EntityId, recipient.Address, (nint)actor->DrawObject);
+        float amount = emoteGrowth.Observe(source, identity, emote, rule);
+        if (amount <= 0) return;
+        immediateGrowth.Add(recipient.EntityId, recipient.Address, amount);
+        string name = DataManager.GetExcelSheet<Lumina.Excel.Sheets.Emote>().GetRowOrDefault(emote)?.Name.ExtractText() ?? emote.ToString();
+        LastGrowthEmote = $"{name} [{trigger}] → {recipient.Name.TextValue} (+{amount:0.###}x)";
     }
 
     private unsafe void UpdateScale(Character* actor, float scale)
@@ -470,6 +534,17 @@ public sealed class Plugin : IDalamudPlugin
                 !Condition[ConditionFlag.BetweenAreas] && !Condition[ConditionFlag.BetweenAreas51]);
         }
         catch (Exception ex) { PeriodicObserver.Fail(ex); }
+        try
+        {
+            ReadEmoteGrowth(Configuration.Enable && ClientState.IsLoggedIn && !ClientState.IsPvP &&
+                !Condition[ConditionFlag.BetweenAreas] && !Condition[ConditionFlag.BetweenAreas51]);
+        }
+        catch (Exception ex)
+        {
+            emoteGrowth.Clear(); emoteGrowthFaulted = true;
+            EmoteGrowthStatus = "Unavailable: " + ex.GetBaseException().Message;
+            Log.Warning(ex, "Emote growth paused");
+        }
         vfxActorIdentities.Clear();
         vfxActorModels.Clear();
         if (ClientState.IsLoggedIn && !Condition[ConditionFlag.BetweenAreas] && !Condition[ConditionFlag.BetweenAreas51])
@@ -1094,6 +1169,7 @@ public sealed class Plugin : IDalamudPlugin
 
         // Ambient decay is exclusive to Growth From Delta.
         if (settings.GrowthFromDelta &&
+            !charState.AfterglowActive &&
             !proximityActive && !digesting &&
             charState.PendingGrowth <= 0f &&
             !charState.OvershootPulse.IsActive &&

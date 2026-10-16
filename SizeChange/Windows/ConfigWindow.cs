@@ -26,6 +26,8 @@ public class ConfigWindow : Window, IDisposable
     private bool growthAnimationTestSucceeded;
     private string heartbeatBoneInput = string.Empty;
     private string heartbeatInputError = string.Empty;
+    private string emoteSearch = string.Empty;
+    private readonly System.Collections.Generic.List<(uint Id, string Name)> emoteChoices = new();
     private readonly System.Collections.Generic.Dictionary<string, string> drainNameInputs = new();
 
     public ConfigWindow(Plugin plugin) : base("SizeChange Config")
@@ -902,7 +904,7 @@ public class ConfigWindow : Window, IDisposable
         { settings.FadeOut = fadeOut; configuration.Save(); }
         bool afterglow = settings.Afterglow;
         if (ImGui.Checkbox("Afterglow", ref afterglow)) { settings.Afterglow = afterglow; configuration.Save(); }
-        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Keeps these effects and enabled bone heartbeat active briefly after absorption or growth. Adds no growth.");
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Pauses ambient shrink in and out of combat while active. Also keeps effects and enabled bone heartbeat active. Adds no growth.");
         if (afterglow)
         {
             float seconds = settings.AfterglowSeconds;
@@ -1137,6 +1139,68 @@ public class ConfigWindow : Window, IDisposable
         ImGui.PopID();
     }
 
+    private void DrawEmoteGrowth(EmoteGrowthSettings settings, string id)
+    {
+        if (!ImGui.CollapsingHeader($"Emotes##{id}")) return;
+        ImGui.PushID("emote-growth-" + id);
+        bool changed = false, enabled = settings.Enabled;
+        if (ImGui.Checkbox("Enabled", ref enabled)) { settings.Enabled = enabled; changed = true; }
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Grow on the first observation, then each interval while the emote remains active. Stops when it ends or the actor disappears. Uses this profile's growth limit and effects.");
+        for (int i = 0; i < settings.Rules.Count; i++)
+        {
+            var rule = settings.Rules[i];
+            ImGui.PushID(i);
+            string label = rule.EmoteId == 0 ? "Choose emote" :
+                Plugin.DataManager.GetExcelSheet<Lumina.Excel.Sheets.Emote>().GetRowOrDefault(rule.EmoteId)?.Name.ExtractText() ?? $"Emote {rule.EmoteId}";
+            ImGui.SetNextItemWidth(Math.Max(180f, ImGui.GetContentRegionAvail().X - 40f));
+            if (ImGui.BeginCombo("##emote", label))
+            {
+                if (ImGui.IsWindowAppearing()) { emoteSearch = string.Empty; ImGui.SetKeyboardFocusHere(); }
+                ImGui.InputTextWithHint("##search", "Search emotes", ref emoteSearch, 100);
+                if (emoteChoices.Count == 0)
+                    foreach (var entry in Plugin.DataManager.GetExcelSheet<Lumina.Excel.Sheets.Emote>())
+                    {
+                        string name = entry.Name.ExtractText();
+                        if (entry.RowId != 0 && !string.IsNullOrWhiteSpace(name)) emoteChoices.Add((entry.RowId, name));
+                    }
+                foreach (var choice in emoteChoices)
+                {
+                    if (!choice.Name.Contains(emoteSearch, StringComparison.OrdinalIgnoreCase)) continue;
+                    if (ImGui.Selectable($"{choice.Name}##{choice.Id}", rule.EmoteId == choice.Id))
+                    { rule.EmoteId = choice.Id; changed = true; }
+                }
+                ImGui.EndCombo();
+            }
+            ImGui.SameLine(); bool remove = ImGui.SmallButton("X");
+            int trigger = (int)rule.Trigger;
+            ImGui.SetNextItemWidth(110f);
+            if (ImGui.Combo("##trigger", ref trigger, "Used\0Received\0"))
+            { rule.Trigger = (EmoteGrowthTrigger)trigger; changed = true; }
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Used: this character performs it. Received: someone directs it at this character. Multiple performers contribute independently; first matching row per direction wins.");
+            ImGui.SameLine(); float amount = rule.Growth;
+            ImGui.SetNextItemWidth(85f);
+            if (ImGui.InputFloat("Growth", ref amount, 0, 0, "%.3f")) { rule.Growth = amount; changed = true; }
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Extra size per tick. 0.1 adds +0.1x; 0 disables this row.");
+            ImGui.SameLine(); float interval = rule.IntervalSeconds;
+            ImGui.SetNextItemWidth(85f);
+            if (ImGui.InputFloat("Every (s)", ref interval, 0, 0, "%.2f")) { rule.IntervalSeconds = interval; changed = true; }
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Repeat while the game reports this emote active. 0.1–3600 seconds. Loop restarts do not add extra ticks.");
+            ImGui.Separator(); ImGui.PopID();
+            if (remove) { settings.Rules.RemoveAt(i--); changed = true; }
+        }
+        ImGui.BeginDisabled(settings.Rules.Count >= 128);
+        if (ImGui.Button("+")) { settings.Rules.Add(new()); changed = true; }
+        ImGui.EndDisabled();
+        if (changed) { settings.Validate(); configuration.Save(); }
+        if (settings.Enabled)
+        {
+            ImGui.TextUnformatted(plugin.EmoteGrowthStatus);
+            if (ImGui.IsItemHovered() && plugin.LastGrowthEmote.Length > 0) ImGui.SetTooltip(plugin.LastGrowthEmote);
+            if (ImGui.SmallButton("Retry")) plugin.RetryEmoteGrowth();
+        }
+        ImGui.PopID();
+    }
+
     private void DrawActionGrowth(ActionGrowthSettings settings, string id)
     {
         if (!ImGui.CollapsingHeader($"Skills & Actions##{id}")) return;
@@ -1190,7 +1254,7 @@ public class ConfigWindow : Window, IDisposable
         if (id == "self")
         {
             ImGui.TextDisabled("/deltapulse 0.1");
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Immediately add Self growth from a command or macro. The skills toggle is not required.");
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Immediately add Self growth from a command or macro. Add <t> to pulse your current target using its matching profile. The skills toggle is not required.");
         }
         ImGui.PopID();
     }
@@ -1268,6 +1332,7 @@ public class ConfigWindow : Window, IDisposable
 
         if (!settings.GrowthFromDelta) return;
         DrawActionGrowth(settings.ActionGrowth, id);
+        DrawEmoteGrowth(settings.EmoteGrowth, id);
 
         ImGui.PushID("accumulation-" + id);
         DrawAccumulatingEffects(settings.AccumulatingEffects);
