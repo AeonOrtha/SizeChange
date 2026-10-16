@@ -53,6 +53,8 @@ public class GrowthSettings
     public float OutOfCombatDecayMultiplier { get; set; } = 10.0f;
     public bool EnableDeltaHeightOffset { get; set; }
     public float DeltaHeightOffsetPerScale { get; set; } = 0.5f;
+    public bool EnableSitHeightOffset { get; set; }
+    public float SitHeightOffset { get; set; }
     public bool EnableDeltaGrowthSound { get; set; }
     public string DeltaGrowthSoundPath { get; set; } = DefaultDeltaGrowthSoundPath;
     public int DeltaGrowthSoundIndex { get; set; }
@@ -148,6 +150,7 @@ public class GrowthSettings
         AmbientShrinkRate = Math.Max(0f, AmbientShrinkRate);
         OutOfCombatDecayMultiplier = Math.Max(1f, OutOfCombatDecayMultiplier);
         DeltaHeightOffsetPerScale = Math.Max(0f, DeltaHeightOffsetPerScale);
+        SitHeightOffset = PoseHeightOffset.Clamp(SitHeightOffset);
         DeltaGrowthSoundPath = string.IsNullOrWhiteSpace(DeltaGrowthSoundPath)
             ? DefaultDeltaGrowthSoundPath
             : DeltaGrowthSoundPath.Trim().Replace('\\', '/');
@@ -235,6 +238,8 @@ public class GrowthSettings
             OutOfCombatDecayMultiplier = settings.OutOfCombatDecayMultiplier,
             EnableDeltaHeightOffset = settings.EnableDeltaHeightOffset,
             DeltaHeightOffsetPerScale = settings.DeltaHeightOffsetPerScale,
+            EnableSitHeightOffset = settings.EnableSitHeightOffset,
+            SitHeightOffset = settings.SitHeightOffset,
             EnableDeltaGrowthSound = settings.EnableDeltaGrowthSound,
             DeltaGrowthSoundPath = settings.DeltaGrowthSoundPath,
             DeltaGrowthSoundIndex = settings.DeltaGrowthSoundIndex,

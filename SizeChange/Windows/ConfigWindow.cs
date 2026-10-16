@@ -596,7 +596,7 @@ public class ConfigWindow : Window, IDisposable
             float offset = settings.Offset;
             if (ImGui.DragFloat("Base Height Offset", ref offset, 0.01f, 0f, 100f, "%.3f"))
             { settings.Offset = Math.Clamp(offset, 0f, 100f); changed = true; }
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Always-added root Y. Growth height is configured under Shrink & Height and follows visible growth, including overshoot.");
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Normal flat root Y. Enabled sitting/emote heights replace this value. Growth height under Shrink & Height remains additional, including overshoot.");
             foreach (string name in configuration.TrackedPlayerNames)
             {
                 bool selected = settings.Players.Exists(x => string.Equals(x, name, StringComparison.OrdinalIgnoreCase));
@@ -1145,7 +1145,7 @@ public class ConfigWindow : Window, IDisposable
         ImGui.PushID("emote-growth-" + id);
         bool changed = false, enabled = settings.Enabled;
         if (ImGui.Checkbox("Enabled", ref enabled)) { settings.Enabled = enabled; changed = true; }
-        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Grow on the first observation, then each interval while the emote remains active. Stops when it ends or the actor disappears. Uses this profile's growth limit and effects.");
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Enable emote growth, pose height and playback speed. Growth uses this profile's limit and effects; height and speed can be used with Growth set to zero.");
         for (int i = 0; i < settings.Rules.Count; i++)
         {
             var rule = settings.Rules[i];
@@ -1180,11 +1180,26 @@ public class ConfigWindow : Window, IDisposable
             ImGui.SameLine(); float amount = rule.Growth;
             ImGui.SetNextItemWidth(85f);
             if (ImGui.InputFloat("Growth", ref amount, 0, 0, "%.3f")) { rule.Growth = amount; changed = true; }
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Extra size per tick. 0.1 adds +0.1x; 0 disables this row.");
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Extra size per tick. 0.1 adds +0.1x; 0 disables growth only.");
             ImGui.SameLine(); float interval = rule.IntervalSeconds;
             ImGui.SetNextItemWidth(85f);
             if (ImGui.InputFloat("Every (s)", ref interval, 0, 0, "%.2f")) { rule.IntervalSeconds = interval; changed = true; }
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Repeat while the game reports this emote active. 0.1–3600 seconds. Loop restarts do not add extra ticks.");
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("0 = once when the emote starts. Positive values repeat every 0.1–3600 seconds while it remains active. Loop restarts do not add extra ticks.");
+            bool heightEnabled = rule.EnableHeightOffset;
+            if (ImGui.Checkbox("Height offset", ref heightEnabled)) { rule.EnableHeightOffset = heightEnabled; changed = true; }
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Replaces this character's flat height while they perform this emote. Takes priority over sitting height. Growth height remains unchanged. First row for the emote wins, regardless of Used/Received.");
+            ImGui.SameLine();
+            ImGui.BeginDisabled(!heightEnabled);
+            float height = rule.HeightOffset;
+            ImGui.SetNextItemWidth(85f);
+            if (ImGui.InputFloat("##height", ref height, 0, 0, "%.3f")) { rule.HeightOffset = height; changed = true; }
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Flat root Y offset. Negative lowers; zero is a valid replacement. Not multiplied by size.");
+            ImGui.EndDisabled();
+            ImGui.SameLine();
+            float speed = rule.PlaySpeed;
+            ImGui.SetNextItemWidth(85f);
+            if (ImGui.InputFloat("Play speed", ref speed, 0, 0, "%.3f")) { rule.PlaySpeed = speed; changed = true; }
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Local playback of this character's own emote. 1 = unchanged; 0.5 = half speed. Range 0.1–2. Affects matching emote animation slots, not growth tick timing. First row wins.");
             ImGui.Separator(); ImGui.PopID();
             if (remove) { settings.Rules.RemoveAt(i--); changed = true; }
         }
@@ -1599,6 +1614,20 @@ public class ConfigWindow : Window, IDisposable
             {
                 settings.OutOfCombatDecayMultiplier = Math.Max(1f, outOfCombatDecayMultiplier);
                 configuration.Save();
+            }
+
+            bool sitEnabled = settings.EnableSitHeightOffset;
+            if (ImGui.Checkbox($"Sit Height Offset##{id}", ref sitEnabled))
+            { settings.EnableSitHeightOffset = sitEnabled; configuration.Save(); }
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Replace normal flat height while sitting on the ground or in a chair. An enabled emote height takes priority. Growth height stays unchanged.");
+            if (sitEnabled)
+            {
+                ImGui.SameLine();
+                float sitHeight = settings.SitHeightOffset;
+                ImGui.SetNextItemWidth(100f);
+                if (ImGui.InputFloat($"##sit-height-{id}", ref sitHeight, 0, 0, "%.3f"))
+                { settings.SitHeightOffset = PoseHeightOffset.Clamp(sitHeight); configuration.Save(); }
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Flat root Y offset. Negative lowers; zero is valid. Not multiplied by size.");
             }
 
             bool enableDeltaHeightOffset = settings.EnableDeltaHeightOffset;

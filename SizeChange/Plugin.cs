@@ -111,6 +111,7 @@ public sealed class Plugin : IDalamudPlugin
 
     private readonly ImmediateGrowth immediateGrowth = new();
     private readonly EmoteGrowthTracker emoteGrowth = new();
+    private readonly EmotePlaybackSpeed emoteSpeed = new();
     private bool emoteGrowthFaulted;
     internal string EmoteGrowthStatus { get; private set; } = "Off";
     internal string LastGrowthEmote { get; private set; } = string.Empty;
@@ -201,6 +202,8 @@ public sealed class Plugin : IDalamudPlugin
         ActionObserver.Dispose();
         PeriodicObserver.Dispose();
         emoteGrowth.Clear();
+        emoteSpeed.BeginFrame(ClientState.IsLoggedIn && !Condition[ConditionFlag.BetweenAreas] && !Condition[ConditionFlag.BetweenAreas51], ClientState.TerritoryType);
+        emoteSpeed.Dispose();
         monsterAnimations.Dispose();
         immediateGrowth.Clear();
         PlayerProfileHeight.Dispose();
@@ -380,8 +383,9 @@ public sealed class Plugin : IDalamudPlugin
     {
         bool enabled = allowed && !emoteGrowthFaulted &&
             (Configuration.SelfSettings.EmoteGrowth.Enabled || Configuration.PlayerSettings.EmoteGrowth.Enabled || Configuration.MonsterSettings.EmoteGrowth.Enabled);
+        emoteSpeed.BeginFrame(ClientState.IsLoggedIn && !Condition[ConditionFlag.BetweenAreas] && !Condition[ConditionFlag.BetweenAreas51], ClientState.TerritoryType);
         emoteGrowth.BeginFrame(enabled, ClientState.TerritoryType, Environment.TickCount64);
-        if (!enabled) { if (!emoteGrowthFaulted) EmoteGrowthStatus = "Off"; return; }
+        if (!enabled) { emoteSpeed.EndFrame(); if (!emoteGrowthFaulted) EmoteGrowthStatus = "Off"; return; }
         try
         {
             EmoteGrowthStatus = "Watching emotes";
@@ -394,6 +398,8 @@ public sealed class Plugin : IDalamudPlugin
                 // the current live controller; never infer emotes from chat or
                 // from an action-timeline animation played by our own feedback.
                 uint emote = actor->EmoteController.EmoteId;
+                if (TryGetGrowthRecipient(source, out _, out var poseSettings))
+                    emoteSpeed.Tick(actor, poseSettings.EmoteGrowth.PoseFor(emote));
                 if (emote == 0) continue;
                 var identity = new EmoteGrowthTracker.Actor(source.EntityId, source.Address, (nint)actor->DrawObject);
                 ApplyEmoteGrowth(identity, source, emote, EmoteGrowthTrigger.Used);
@@ -402,7 +408,7 @@ public sealed class Plugin : IDalamudPlugin
                     ApplyEmoteGrowth(identity, ObjectTable.SearchById(target), emote, EmoteGrowthTrigger.Received);
             }
         }
-        finally { emoteGrowth.EndFrame(); }
+        finally { emoteGrowth.EndFrame(); emoteSpeed.EndFrame(); }
     }
 
     private unsafe void ApplyEmoteGrowth(EmoteGrowthTracker.Actor source, IGameObject? obj, uint emote, EmoteGrowthTrigger trigger)
@@ -1264,6 +1270,20 @@ public sealed class Plugin : IDalamudPlugin
             Configuration.PlayerProfileHeight.Includes(GetPlayerIdentity(heightPlayer));
         float desiredHeightOffset = actorGroup == SCActorGroup.Self ? Configuration.SelfFlatHeightOffset :
             playerProfileHeight ? Configuration.PlayerProfileHeight.Offset : 0f;
+        // Select a replacement flat offset before the unchanged growth-height addition.
+        bool poseAllowed = !disable && !charState.Transform.ScaleConflict && actor->Health > 0;
+        bool sitting = false;
+        if (poseAllowed && settings.EnableSitHeightOffset && actor->EmoteController.OwnerObject != null &&
+            FFXIVClientStructs.FFXIV.Client.Game.Control.EmoteController.MemberFunctionPointers.GetPosture != null)
+        {
+            var posture = actor->EmoteController.GetPosture();
+            sitting = posture is FFXIVClientStructs.FFXIV.Client.Game.Control.EmoteController.Posture.SittingOnGround
+                or FFXIVClientStructs.FFXIV.Client.Game.Control.EmoteController.Posture.SittingInChair;
+        }
+        desiredHeightOffset = PoseHeightOffset.Select(desiredHeightOffset, poseAllowed, sitting,
+            settings.EnableSitHeightOffset, settings.SitHeightOffset,
+            settings.EmoteGrowth.HeightFor(actor->EmoteController.EmoteId));
+
         if (settings.GrowthFromDelta && !charState.Transform.ScaleConflict &&
             settings.EnableDeltaHeightOffset &&
             charState.PlayerScale > 0f)
@@ -1290,7 +1310,7 @@ public sealed class Plugin : IDalamudPlugin
                 sessionHeights.SaveOwnership(HeightKey(actor), charState.Transform.Height);
             }
         }
-        else if (charState.HasDrawOffset || charState.Transform.Height.Owned || desiredHeightOffset > 0f)
+        else if (charState.HasDrawOffset || charState.Transform.Height.Owned || desiredHeightOffset != 0f)
         {
             ApplyHeightOffset(actor, ref charState, desiredHeightOffset);
         }

@@ -35,7 +35,7 @@ internal sealed class EmoteGrowthTracker
             source.Address == 0 || recipient.Address == 0 || source.Model == 0 || recipient.Model == 0 ||
             !float.IsFinite(rule.Growth) || rule.Growth <= 0 || !float.IsFinite(rule.IntervalSeconds)) return 0;
         float growth = Math.Min(rule.Growth, ImmediateGrowth.Maximum);
-        long interval = (long)Math.Round(Math.Clamp(rule.IntervalSeconds, 0.1f, 3600f) * 1000d);
+        long interval = (long)Math.Round(EmoteGrowthSettings.ClampInterval(rule.IntervalSeconds) * 1000d);
         var key = new Key(source, recipient, rule.Trigger);
         if (!states.TryGetValue(key, out var state) || state.Emote != emoteId || !ReferenceEquals(state.Rule, rule))
         {
@@ -50,7 +50,9 @@ internal sealed class EmoteGrowthTracker
         bool reset = now - state.LastSeen > 2000 || state.Growth != growth || state.Interval != interval;
         state.LastSeen = now; state.Growth = growth; state.Interval = interval;
         if (reset) { state.NextAt = now + interval; return 0; }
-        if (now < state.NextAt) return 0;
+        // Zero is a one-shot: keep observing the active emote without repeating,
+        // even after a stall or configuration edit. Ending the emote rearms it.
+        if (interval == 0 || now < state.NextAt) return 0;
         long ticks = 1 + (now - state.NextAt) / interval;
         state.NextAt += ticks * interval;
         return (float)Math.Min(ImmediateGrowth.Maximum, ticks * (double)growth);
