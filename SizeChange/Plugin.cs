@@ -197,7 +197,7 @@ public sealed class Plugin : IDalamudPlugin
         });
 
         CommandManager.AddHandler(CommandName_DeltaPulse, new CommandInfo(OnDeltaPulse)
-        { HelpMessage = "Immediate growth: /deltapulse 0.1 for Self; /deltapulse 0.1 <t> for your current target. Requires an enabled, matching delta-growth profile." });
+        { HelpMessage = "Pulse: /deltapulse 0.1 [<t>]. Growth switch: /deltapulse enable|disable profile self|others|monsters." });
 
         PluginInterface.UiBuilder.Draw += WindowSystem.Draw;
         PluginInterface.UiBuilder.OpenConfigUi += ToggleConfigUi;
@@ -312,8 +312,31 @@ public sealed class Plugin : IDalamudPlugin
 
     private void OnDeltaPulse(string command, string args)
     {
+        if (ImmediateGrowth.ParseProfileCommand(args, out var profile, out bool enabled))
+        {
+            _ = Framework.RunOnFrameworkThread(() =>
+            {
+                if (disposed) return;
+                var (settings, name) = profile switch
+                {
+                    DeltaPulseProfile.Self => (Configuration.SelfSettings, "Self"),
+                    DeltaPulseProfile.Others => (Configuration.PlayerSettings, "Added Players"),
+                    _ => (Configuration.MonsterSettings, "Monsters"),
+                };
+                // Match the Growth From Delta checkbox, including its exclusive mode.
+                // Configuration changes are safe even while logged out or loading.
+                if (settings.GrowthFromDelta != enabled || (enabled && settings.GrowFromDamage))
+                {
+                    settings.GrowthFromDelta = enabled;
+                    if (enabled) settings.GrowFromDamage = false;
+                    Configuration.Save();
+                }
+                Chat.Print($"Delta Suite: {name} delta growth {(enabled ? "enabled" : "disabled")}.");
+            });
+            return;
+        }
         if (!ImmediateGrowth.ParseCommand(args, out float amount, out bool useTarget))
-        { Chat.PrintError("Delta Suite: use /deltapulse <positive decimal> [<t>], e.g. /deltapulse 0.1 <t> (maximum 10000)."); return; }
+        { Chat.PrintError("Delta Suite: use /deltapulse <positive decimal> [<t>] (maximum 10000), or /deltapulse enable|disable profile self|others|monsters."); return; }
         _ = Framework.RunOnFrameworkThread(() =>
         {
             if (disposed) return;

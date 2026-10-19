@@ -1321,6 +1321,7 @@ public class ConfigWindow : Window, IDisposable
 
                 configuration.Save();
             }
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip($"Macro: /deltapulse enable profile {(id == "players" ? "others" : id)} (or disable).");
 
             float speed = settings.Speed;
             if (ImGui.DragFloat($"Speed##{id}", ref speed, 0.1f, 0.1f, 100.0f))

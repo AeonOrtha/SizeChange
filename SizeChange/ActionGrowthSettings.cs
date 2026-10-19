@@ -6,6 +6,8 @@ namespace SizeChange;
 
 public enum ActionGrowthTrigger { ReceivingEffect, SuccessfulUse, OverTime }
 
+internal enum DeltaPulseProfile { Self, Others, Monsters }
+
 [Serializable]
 public sealed class ActionGrowthRule
 {
@@ -61,6 +63,23 @@ internal sealed class ImmediateGrowth
 {
     internal const float Maximum = 10000f;
     private readonly Dictionary<(uint Entity, nint Address), ImmediateGrowthAmount> pending = new();
+    public static bool ParseProfileCommand(string text, out DeltaPulseProfile profile, out bool enabled)
+    {
+        profile = default;
+        enabled = false;
+        var parts = text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length != 3 || !parts[1].Equals("profile", StringComparison.OrdinalIgnoreCase)) return false;
+        if (parts[0].Equals("enable", StringComparison.OrdinalIgnoreCase)) enabled = true;
+        else if (!parts[0].Equals("disable", StringComparison.OrdinalIgnoreCase)) return false;
+        // Explicit names avoid accepting numeric enum values as profile names.
+        switch (parts[2].ToLowerInvariant())
+        {
+            case "self": profile = DeltaPulseProfile.Self; return true;
+            case "others": profile = DeltaPulseProfile.Others; return true;
+            case "monsters": profile = DeltaPulseProfile.Monsters; return true;
+            default: return false;
+        }
+    }
     public static bool Parse(string text, out float amount) => float.TryParse(text.Trim(),
         NumberStyles.Float, CultureInfo.InvariantCulture, out amount) && float.IsFinite(amount) && amount > 0 && amount <= Maximum;
     public static bool ParseCommand(string text, out float amount, out bool target)

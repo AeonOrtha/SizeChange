@@ -31,6 +31,19 @@ Use `/deltapulse 0.1` to immediately add **+0.1×** to Self's intended size. It 
 
 Add `<t>` to pulse your current target: `/deltapulse 0.1 <t>` (also accepts `/deltapulse <t> 0.1`). The target must be alive and match an enabled Self, Added Players, or Monsters delta-growth profile. It uses that profile's size limit, lerp, overshoot and effects; the Skills & Actions toggle is not required. Missing or unconfigured targets produce an error and never fall back to Self. Changes are local to your client.
 
+Switch a profile's **Growth From Delta** setting from an in-game macro:
+
+```text
+/deltapulse enable profile self
+/deltapulse disable profile self
+/deltapulse enable profile others
+/deltapulse disable profile others
+/deltapulse enable profile monsters
+/deltapulse disable profile monsters
+```
+
+`others` means the **Added Players** tab, using its existing tracked-player list; `monsters` uses the tracked-monster list. Commands ignore letter case and save the setting, just like the checkbox. Enabling selects delta growth instead of the alternate **Grow From Damage** mode. Disabling follows the existing checkbox behaviour: pending accumulation is cleared and the normal non-delta size behaviour resumes; it does not freeze the current size. The plugin-wide enable switch, Self/Added Players enable switches, lists, limits and effect settings remain unchanged. Configuration commands also work during loading; actual growth still obeys the normal runtime restrictions.
+
 For automatic confirmed triggers, open **Skills & Actions** in any profile, enable it, click **+**, and enter an exact skill name with its decimal growth amount. Names use your game language and ignore case. Each successfully affected, configured recipient receives one immediate contribution per cast, including AoE recipients. Misses, fully resisted/immune effects and interrupted casts do not trigger growth. Healing and buffs can trigger without HP loss. Normal damage growth may contribute alongside this skill bonus. Normal limits, effect cooldowns and shrinking still apply; direct amounts do not use the damage multiplier or feed the digestion reserve.
 
 Multiple action IDs can share a name; those all match that name. Duplicate rule names use the first matching row. This observes action-effect events; periodic status/ground-effect ticks are not separate skill casts. Skill rules are included in profile exports and Self ↔ Added Players imports.
