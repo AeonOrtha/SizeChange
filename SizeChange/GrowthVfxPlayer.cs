@@ -47,7 +47,6 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable
     [Signature("40 53 48 83 EC 20 48 8B D9 48 8B 89 ?? ?? ?? ?? 48 85 C9 74 28 33 D2 E8 ?? ?? ?? ?? 48 8B 8B ?? ?? ?? ?? 48 85 C9",
         DetourName = nameof(StaticVfxRemoveDetour))]
     private readonly Hook<StaticVfxRemoveDelegate>? staticVfxRemoveHook = null;
-    private float proximityDelta;
     private readonly Func<nint, uint, bool> actorIsCurrent;
     private bool disposed;
     private readonly Func<long> tickCount;
@@ -67,10 +66,6 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable
         public required nint VfxAddress { get; init; }
         public required nint ActorAddress { get; init; }
         public int Channel { get; init; }
-        public VfxFade Fade;
-        public float FadeIn;
-        public float FadeOut;
-        public float OriginalAlpha = 1f;
         public bool IsStatic { get; init; }
         public uint EntityId { get; init; }
         public nint ModelAddress { get; init; }
@@ -207,26 +202,22 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable
             if (key.Channel is 3 or 4) retryAfter.Remove(key);
     }
 
-    public void BeginProximityFrame(float seconds = 0f)
+    public void BeginProximityFrame()
     {
         proximityRequested.Clear();
-        proximityDelta = float.IsFinite(seconds) ? Math.Clamp(seconds, 0f, 1f) : 0f;
     }
 
     public void KeepProximity(nint address, uint entityId, string configuredPath, bool source, Vector3 position,
         bool attachToSource = false, float sourceHeight = 0f,
-        float fadeIn = 0f, float fadeOut = 0f, bool sizeDrain = false, int accumulatorLayer = -1, float durationSeconds = 0f)
+        bool sizeDrain = false, int accumulatorLayer = -1, float durationSeconds = 0f)
     {
         string path = configuredPath?.Trim().Replace('\\', '/') ?? string.Empty;
         bool isStatic = source && !attachToSource;
         if (disposed || address == 0 || !actorIsCurrent(address, entityId) || (!isStatic && !(source && !sizeDrain) && modelForActor(address) == 0) ||
             !float.IsFinite(durationSeconds) || durationSeconds < 0f ||
             !float.IsFinite(position.X) || !float.IsFinite(position.Y) || !float.IsFinite(position.Z) ||
-            !float.IsFinite(sourceHeight) ||
-            !float.IsFinite(fadeIn) || !float.IsFinite(fadeOut) || !IsValidProximityPath(path)) return;
+            !float.IsFinite(sourceHeight) || !IsValidProximityPath(path)) return;
         durationSeconds = accumulatorLayer >= 0 && durationSeconds > 0f ? Math.Clamp(durationSeconds, 0.05f, 300f) : 0f;
-        fadeIn = Math.Clamp(fadeIn, 0f, 10f);
-        fadeOut = Math.Clamp(fadeOut, 0f, 10f);
         if (isStatic) position.Y += sourceHeight;
         if (accumulatorLayer < -1 || accumulatorLayer >= 16) return;
         int channel = accumulatorLayer >= 0 ? 10 + accumulatorLayer : (source ? 2 : 1) + (sizeDrain ? 2 : 0);
@@ -237,8 +228,6 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable
         {
             if (old.Path == path && old.EntityId == entityId && old.IsStatic == isStatic && old.PlaybackSeconds == durationSeconds && IsCurrent(old))
             {
-                old.FadeIn = fadeIn;
-                old.FadeOut = fadeOut;
                 if (isStatic) SetSourcePosition((VfxObject*)oldAddress, position);
                 return;
             }
@@ -250,7 +239,6 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable
         retryAfter[key] = (path, now + 1000);
         diagnostic?.Invoke($"Create proximity channel={channel}, actor={entityId:X}, static={isStatic}, path={path}");
         VfxObject* vfx;
-        float originalAlpha;
         if (isStatic)
         {
             if (staticVfxRun == null || staticVfxRemoveHook == null)
@@ -260,8 +248,6 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable
             staticVfxRun(vfx, 0f, 0xFFFFFFFF);
             vfx->Rotation = FFXIVClientStructs.FFXIV.Common.Math.Quaternion.Identity;
             SetSourcePosition(vfx, position);
-            originalAlpha = CaptureAlpha(vfx);
-            if (fadeIn > 0f) vfx->Color.W = 0f;
         }
         else
         {
@@ -269,9 +255,7 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable
             { if (source) sourceErrors[path] = "Attached VFX unavailable."; return; }
             vfx = actorVfxCreate(path, address, address, -1f, (char)0, 0, (char)0);
             if (vfx == null) { if (source) sourceErrors[path] = "VFX creation failed."; return; }
-            originalAlpha = CaptureAlpha(vfx);
         }
-        if (fadeIn > 0f) vfx->Color.W = 0f;
         if (source) sourceErrors.Remove(path);
         nint vfxAddress = (nint)vfx;
         activeByVfx[vfxAddress] = new ActiveGrowthVfx
@@ -280,15 +264,10 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable
             EntityId = entityId, ModelAddress = modelForActor(address), Path = path, IsStatic = isStatic, RemoveAtTick = accumulatorLayer >= 0 && durationSeconds > 0f
                 ? now + (long)(Math.Clamp(durationSeconds, 0.05f, 300f) * 1000f) : long.MaxValue,
             PlaybackSeconds = durationSeconds,
-            FadeIn = fadeIn, FadeOut = fadeOut, OriginalAlpha = originalAlpha,
-            Fade = new VfxFade { Level = fadeIn > 0f ? 0f : 1f },
         };
         activeVfxByActor[key] = vfxAddress;
         if (durationSeconds > 0f) retryAfter[key] = (path, now + (long)(durationSeconds * 1000f));
     }
-
-    private static float CaptureAlpha(VfxObject* vfx) =>
-        float.IsFinite(vfx->Color.W) && vfx->Color.W > 0f ? vfx->Color.W : 1f;
 
     public string SourceStatus(string configuredPath, bool attached)
     {
@@ -330,9 +309,9 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable
             if (immediate || !IsCurrent(active)) { expired.Add(pair.Key); continue; }
             if (!activeByVfx.TryGetValue(pair.Key, out owned) || !ReferenceEquals(owned, active)) continue;
             bool visible = proximityRequested.Contains((active.ActorAddress, active.Channel));
-            float opacity = active.Fade.Advance(visible, proximityDelta, active.FadeIn, active.FadeOut);
-            ((VfxObject*)pair.Key)->Color.W = active.OriginalAlpha * opacity;
-            if (!visible && active.Fade.Level <= 0f) expired.Add(pair.Key);
+            // Visibility is controlled solely by native creation/removal.
+            // Do not read or write the effect's colour/opacity fields.
+            if (!visible) expired.Add(pair.Key);
         }
         foreach (var address in expired) RemoveTrackedVfx(address);
         foreach (var key in new List<(nint Actor, int Channel)>(retryAfter.Keys))

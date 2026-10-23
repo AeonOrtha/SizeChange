@@ -37,8 +37,6 @@ public sealed class SizeDrainSettings
     public string ReceiverVfxPath { get; set; } = string.Empty;
     public bool SourceVfxEnabled { get; set; }
     public string SourceVfxPath { get; set; } = string.Empty;
-    public float FadeIn { get; set; } = 0.5f;
-    public float FadeOut { get; set; } = 0.5f;
 
     public void Validate()
     {
@@ -63,8 +61,6 @@ public sealed class SizeDrainSettings
         ContributorMinimumSeconds = float.IsFinite(ContributorMinimumSeconds) ? Math.Clamp(ContributorMinimumSeconds, 0.1f, 300f) : 5f;
         ContributorMaximumSeconds = float.IsFinite(ContributorMaximumSeconds) ? Math.Clamp(ContributorMaximumSeconds, ContributorMinimumSeconds, 300f) : Math.Max(15f, ContributorMinimumSeconds);
         MaximumTargets = Math.Clamp(MaximumTargets, 1, 64);
-        FadeIn = float.IsFinite(FadeIn) ? Math.Clamp(FadeIn, 0f, 10f) : 0.5f;
-        FadeOut = float.IsFinite(FadeOut) ? Math.Clamp(FadeOut, 0f, 10f) : 0.5f;
         ReceiverVfxPath = ReceiverVfxPath?.Trim().Replace('\\', '/') ?? string.Empty;
         SourceVfxPath = SourceVfxPath?.Trim().Replace('\\', '/') ?? string.Empty;
     }

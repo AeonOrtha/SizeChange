@@ -641,7 +641,7 @@ public sealed class Plugin : IDalamudPlugin
             vfxActorIdentities[crystal.Address] = crystal.EntityId;
             vfxActorModels[crystal.Address] = crystal.ModelAddress;
         }
-        GrowthVfxPlayer.BeginProximityFrame((float)Framework.UpdateDelta.TotalSeconds);
+        GrowthVfxPlayer.BeginProximityFrame();
         aetherSound.BeginFrame((float)Framework.UpdateDelta.TotalSeconds);
         GrowthVfxPlayer.Update();
 
@@ -1015,15 +1015,13 @@ public sealed class Plugin : IDalamudPlugin
                 aetherSound.Request(hit.Crystal.Address, hit.Crystal.EntityId, true, settings.AetherSourceSound,
                     hit.Crystal.Position.X, hit.Crystal.Position.Y, hit.Crystal.Position.Z);
             if (settings.AetherActorVfxEnabled)
-                GrowthVfxPlayer.KeepProximity((nint)actor, actor->EntityId, settings.AetherActorVfxPath, false, position,
-                    fadeIn: settings.AetherActorVfxFadeIn, fadeOut: settings.AetherActorVfxFadeOut);
+                GrowthVfxPlayer.KeepProximity((nint)actor, actor->EntityId, settings.AetherActorVfxPath, false, position);
             if (settings.AetherSourceVfxEnabled)
                 foreach (var hit in nearbyCrystals!)
                     GrowthVfxPlayer.KeepProximity(hit.Crystal.Address, hit.Crystal.EntityId,
                         settings.AetherSourceVfxPath, true,
                         new Vector3(hit.Crystal.Position.X, hit.Crystal.Position.Y, hit.Crystal.Position.Z),
-                        settings.AetherSourceVfxAttached, settings.AetherSourceVfxHeight,
-                        settings.AetherSourceVfxFadeIn, settings.AetherSourceVfxFadeOut);
+                        settings.AetherSourceVfxAttached, settings.AetherSourceVfxHeight);
         }
         charState.DrainHits ??= new List<SizeDrainSources.Hit>();
 
@@ -1054,12 +1052,12 @@ public sealed class Plugin : IDalamudPlugin
         {
             if (drain.ReceiverVfxEnabled && !string.IsNullOrWhiteSpace(drain.ReceiverVfxPath))
                 GrowthVfxPlayer.KeepProximity((nint)actor, actor->EntityId, drain.ReceiverVfxPath, false, position,
-                    fadeIn: drain.FadeIn, fadeOut: drain.FadeOut, sizeDrain: true);
+                    sizeDrain: true);
             if (drain.SourceVfxEnabled && !string.IsNullOrWhiteSpace(drain.SourceVfxPath))
                 foreach (var hit in nearbyTargets!)
                     GrowthVfxPlayer.KeepProximity(hit.Target.Address, hit.Target.EntityId, drain.SourceVfxPath, true,
                         new Vector3(hit.Target.Position.X, hit.Target.Position.Y, hit.Target.Position.Z),
-                        attachToSource: true, fadeIn: drain.FadeIn, fadeOut: drain.FadeOut, sizeDrain: true);
+                        attachToSource: true, sizeDrain: true);
         }
         // Both source types share the existing exposure accumulator, cap bonus
         // and one-second cadence. Per-receiver lists prevent cross-profile loss.
@@ -1174,7 +1172,7 @@ public sealed class Plugin : IDalamudPlugin
         if (feedbackAllowed && accumulationFx.Enabled && (charState.PendingGrowth > 0f || charState.AfterglowActive))
             for (int layer = 0; layer < Math.Min(16, accumulationFx.Paths.Count); layer++)
                 GrowthVfxPlayer.KeepProximity((nint)actor, actor->EntityId, accumulationFx.Paths[layer], false,
-                    position, fadeIn: accumulationFx.FadeIn, fadeOut: accumulationFx.FadeOut, accumulatorLayer: layer, durationSeconds: layer < accumulationFx.Durations.Count ? accumulationFx.Durations[layer] : 0f);
+                    position, accumulatorLayer: layer, durationSeconds: layer < accumulationFx.Durations.Count ? accumulationFx.Durations[layer] : 0f);
 
         // Measure the damage-driven release before capping earned growth so a
         // character already at the cap can still display a temporary pulse.

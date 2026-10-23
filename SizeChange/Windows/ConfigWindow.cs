@@ -897,11 +897,6 @@ public class ConfigWindow : Window, IDisposable
         ImGui.BeginDisabled(settings.Paths.Count >= 16);
         if (ImGui.Button("+ Layer")) { settings.Paths.Add(string.Empty); settings.Durations.Add(0f); configuration.Save(); }
         ImGui.EndDisabled();
-        float fadeIn = settings.FadeIn, fadeOut = settings.FadeOut;
-        if (ImGui.DragFloat("Fade In (s)", ref fadeIn, 0.05f, 0f, 10f, "%.2f"))
-        { settings.FadeIn = fadeIn; configuration.Save(); }
-        if (ImGui.DragFloat("Fade Out (s)", ref fadeOut, 0.05f, 0f, 10f, "%.2f"))
-        { settings.FadeOut = fadeOut; configuration.Save(); }
         bool afterglow = settings.Afterglow;
         if (ImGui.Checkbox("Afterglow", ref afterglow)) { settings.Afterglow = afterglow; configuration.Save(); }
         if (ImGui.IsItemHovered()) ImGui.SetTooltip("Pauses ambient shrink in and out of combat while active. Also keeps effects and enabled bone heartbeat active. Adds no growth.");
@@ -1128,12 +1123,6 @@ public class ConfigWindow : Window, IDisposable
             if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
                 ImGui.SetTooltip(sourceMissing ? "Enter an AVFX path first." : "Effect on each contributing source. Shared sources use Self's settings first.");
 
-            float fadeIn = settings.FadeIn, fadeOut = settings.FadeOut;
-            if (ImGui.DragFloat("Fade In", ref fadeIn, 0.05f, 0f, 10f, "%.2fs"))
-            { settings.FadeIn = Math.Clamp(fadeIn, 0f, 10f); configuration.SaveSizeDrain(settings); }
-            if (ImGui.DragFloat("Fade Out", ref fadeOut, 0.05f, 0f, 10f, "%.2fs"))
-            { settings.FadeOut = Math.Clamp(fadeOut, 0f, 10f); configuration.SaveSizeDrain(settings); }
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Visible fading depends on the AVFX asset.");
             ImGui.TreePop();
         }
         ImGui.PopID();
@@ -1407,12 +1396,6 @@ public class ConfigWindow : Window, IDisposable
                 { settings.AetherActorVfxEnabled = actorVfx; configuration.Save(); }
                 if (actorVfx)
                 {
-                    float fadeIn = settings.AetherActorVfxFadeIn;
-                    if (ImGui.DragFloat($"Proximity Fade In##{id}", ref fadeIn, 0.05f, 0f, 10f, "%.2fs"))
-                    { settings.AetherActorVfxFadeIn = Math.Clamp(fadeIn, 0f, 10f); configuration.Save(); }
-                    float fadeOut = settings.AetherActorVfxFadeOut;
-                    if (ImGui.DragFloat($"Proximity Fade Out##{id}", ref fadeOut, 0.05f, 0f, 10f, "%.2fs"))
-                    { settings.AetherActorVfxFadeOut = Math.Clamp(fadeOut, 0f, 10f); configuration.Save(); }
                     string path = settings.AetherActorVfxPath;
                     if (ImGui.InputText($"Proximity AVFX##{id}", ref path, 512))
                     { settings.AetherActorVfxPath = path; configuration.Save(); }
@@ -1423,12 +1406,6 @@ public class ConfigWindow : Window, IDisposable
                 { settings.AetherSourceVfxEnabled = sourceVfx; configuration.Save(); }
                 if (sourceVfx)
                 {
-                    float fadeIn = settings.AetherSourceVfxFadeIn;
-                    if (ImGui.DragFloat($"Crystal Fade In##{id}", ref fadeIn, 0.05f, 0f, 10f, "%.2fs"))
-                    { settings.AetherSourceVfxFadeIn = Math.Clamp(fadeIn, 0f, 10f); configuration.Save(); }
-                    float fadeOut = settings.AetherSourceVfxFadeOut;
-                    if (ImGui.DragFloat($"Crystal Fade Out##{id}", ref fadeOut, 0.05f, 0f, 10f, "%.2fs"))
-                    { settings.AetherSourceVfxFadeOut = Math.Clamp(fadeOut, 0f, 10f); configuration.Save(); }
                     string path = settings.AetherSourceVfxPath;
                     if (ImGui.InputText($"Crystal AVFX##{id}", ref path, 512))
                     { settings.AetherSourceVfxPath = path; configuration.Save(); }

@@ -21,10 +21,6 @@ public class GrowthSettings
     public bool AetherActorVfxEnabled { get; set; }
     public string AetherActorVfxPath { get; set; } = string.Empty;
     public bool AetherSourceVfxEnabled { get; set; }
-    public float AetherActorVfxFadeIn { get; set; } = 0.5f;
-    public float AetherActorVfxFadeOut { get; set; } = 0.5f;
-    public float AetherSourceVfxFadeIn { get; set; } = 0.5f;
-    public float AetherSourceVfxFadeOut { get; set; } = 0.5f;
     public bool AetherSourceVfxAttached { get; set; } = true;
     public float AetherSourceVfxHeight { get; set; } = 0f;
     public string AetherSourceVfxPath { get; set; } = string.Empty;
@@ -123,10 +119,6 @@ public class GrowthSettings
         MinScaleMultiplier = Math.Clamp(MinScaleMultiplier, 0.01f, 1f);
         MaxScaleMultiplier = Math.Max(1f, MaxScaleMultiplier);
         AetherProximityRange = float.IsFinite(AetherProximityRange) ? Math.Clamp(AetherProximityRange, 0.1f, 100f) : 10f;
-        AetherActorVfxFadeIn = float.IsFinite(AetherActorVfxFadeIn) ? Math.Clamp(AetherActorVfxFadeIn, 0f, 10f) : 0.5f;
-        AetherActorVfxFadeOut = float.IsFinite(AetherActorVfxFadeOut) ? Math.Clamp(AetherActorVfxFadeOut, 0f, 10f) : 0.5f;
-        AetherSourceVfxFadeIn = float.IsFinite(AetherSourceVfxFadeIn) ? Math.Clamp(AetherSourceVfxFadeIn, 0f, 10f) : 0.5f;
-        AetherSourceVfxFadeOut = float.IsFinite(AetherSourceVfxFadeOut) ? Math.Clamp(AetherSourceVfxFadeOut, 0f, 10f) : 0.5f;
         AetherSourceVfxHeight = float.IsFinite(AetherSourceVfxHeight) ? Math.Clamp(AetherSourceVfxHeight, -100f, 100f) : 0f;
         AetherActorSound ??= new(); AetherActorSound.Validate();
         AetherSourceSound ??= new(); AetherSourceSound.Validate();
@@ -205,10 +197,6 @@ public class GrowthSettings
             AetherLargeHitPercent = settings.AetherLargeHitPercent,
             AetherActorVfxEnabled = settings.AetherActorVfxEnabled,
             AetherActorVfxPath = settings.AetherActorVfxPath,
-            AetherActorVfxFadeIn = settings.AetherActorVfxFadeIn,
-            AetherActorVfxFadeOut = settings.AetherActorVfxFadeOut,
-            AetherSourceVfxFadeIn = settings.AetherSourceVfxFadeIn,
-            AetherSourceVfxFadeOut = settings.AetherSourceVfxFadeOut,
             AetherSourceVfxAttached = settings.AetherSourceVfxAttached,
             AetherSourceVfxHeight = settings.AetherSourceVfxHeight,
             AetherSourceVfxEnabled = settings.AetherSourceVfxEnabled,
