@@ -23,6 +23,7 @@ internal sealed class ProfileSettingsFile
     public List<string>? TrackedNames { get; set; }
     public Dictionary<string, List<MonsterAnimationSlot>>? MonsterAnimations { get; set; }
     public PlayerProfileHeightSettings? LocalHeight { get; set; }
+    public OutgoingBlendSyncSettings? OutgoingBlendSync { get; set; }
 
     private static readonly JsonSerializerOptions Options = new()
     {
@@ -46,6 +47,7 @@ internal sealed class ProfileSettingsFile
         TrackedNames = group == SCActorGroup.Player ? config.TrackedPlayerNames : group == SCActorGroup.Monster ? config.TrackedMonsterNames : null,
         MonsterAnimations = group == SCActorGroup.Monster ? config.MonsterAnimations : null,
         LocalHeight = group == SCActorGroup.Player ? config.PlayerProfileHeight : null,
+        OutgoingBlendSync = group == SCActorGroup.Self ? config.SelfProfileSync : null,
     };
     internal string ToJson() => JsonSerializer.Serialize(this, Options);
     internal static ProfileSettingsFile Parse(string json, SCActorGroup group)
@@ -117,6 +119,7 @@ internal sealed class ProfileSettingsFile
                 if (cross && !bones.Blend.Enabled) bones.BaseProfileId = config.SelfBoneHeartbeat.BaseProfileId;
                 config.SelfSettings = growth;
                 if (!cross) config.AffectSelf = AffectSelf ?? true;
+                if (!cross) config.SelfProfileSync = Copy(OutgoingBlendSync ?? new());
                 config.SelfFlatHeightOffset = height; config.SelfBoneHeartbeat = bones;
                 break;
             case SCActorGroup.Player:

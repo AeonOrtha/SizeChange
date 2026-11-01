@@ -48,6 +48,11 @@ internal sealed class BoneHeartbeatPlayer : IDisposable
 
     public bool IsPulsing => ownedProfile.HasValue && !faulted && envelope > 0f;
 
+    // Only expose a successfully applied blend for the same live actor. Never
+    // fetch a temporary profile back from C+ or publish a partially built frame.
+    internal string? AppliedBlendFrame(nint address, uint id) => !faulted && wasBlendEnabled &&
+        targetJson != null && ownedProfile.HasValue && actorAddress == address && entityId == id ? lastSent : null;
+
     public string Status { get; private set; } = "Disabled.";
     public IReadOnlyList<(Guid Id, string Name)> Profiles { get; private set; } = Array.Empty<(Guid, string)>();
 

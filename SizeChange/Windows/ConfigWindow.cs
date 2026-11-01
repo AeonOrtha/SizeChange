@@ -135,6 +135,7 @@ public class ConfigWindow : Window, IDisposable
 
         DrawGrowthSettings(configuration.SelfSettings, "self");
         DrawBoneHeartbeat();
+        DrawOutgoingBlendSync();
         if (ImGui.TreeNode("Transform Values##self"))
         {
             ImGui.TextWrapped(plugin.TransformDiagnostics(SCActorGroup.Self));
@@ -148,6 +149,8 @@ public class ConfigWindow : Window, IDisposable
             plugin.GetPreview(SCActorGroup.Self).Enabled = false;
             configuration.SelfSettings = GrowthSettings.Defaults();
             configuration.SelfBoneHeartbeat = new BoneHeartbeatSettings();
+            configuration.SelfProfileSync = new OutgoingBlendSyncSettings();
+            plugin.OutgoingBlendSync.ClearSnapshot();
             configuration.Save();
         }
 
@@ -179,9 +182,43 @@ public class ConfigWindow : Window, IDisposable
         ImGui.PopID();
     }
 
+    private void DrawOutgoingBlendSync()
+    {
+        if (!ImGui.CollapsingHeader("Blend Sync (Test)")) return;
+        var sync = plugin.OutgoingBlendSync;
+        bool enabled = configuration.SelfProfileSync.Enabled;
+        if (ImGui.Checkbox("Share captured blend via Lightless", ref enabled))
+        {
+            configuration.SelfProfileSync.Enabled = enabled;
+            sync.ClearSnapshot();
+            configuration.Save();
+        }
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Captures one fixed Customize+ appearance for Lightless's normal outgoing reads. Includes current bone effects and root height; excludes game draw scale, VFX and sound. Your saved profiles stay untouched. No automatic sync requests.");
+        ImGui.TextWrapped(sync.Status);
+        if (!enabled) return;
+        ImGui.BeginDisabled(!sync.Installed);
+        if (ImGui.Button("Capture Current Blend")) sync.RequestCapture();
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Requires an active Self profile blend. Captures on the next frame, then stays frozen until you capture again. Trigger an outgoing Lightless refresh after capture. If resync reuses cached data and Served stays unchanged, change a visible equipment piece to trigger a fresh appearance read.");
+        ImGui.SameLine();
+        if (ImGui.Button("Clear Snapshot")) sync.ClearSnapshot();
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Returns future Lightless reads to normal. Resync in Lightless to restore the normal appearance for receivers too.");
+        ImGui.EndDisabled();
+        ImGui.SameLine();
+        if (ImGui.Button("Retry##outgoing-blend")) sync.Retry();
+        ImGui.TextWrapped(sync.CaptureStatus);
+        ImGui.TextUnformatted(sync.Counters);
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Served confirms that Lightless read a snapshot, not that the server delivered it. Last snapshot identifies the revision it read. " + sync.RuntimeVersion);
+    }
+
     private void DrawBoneHeartbeat(bool addedPlayers = false)
     {
         if (!ImGui.CollapsingHeader("Bones & Heartbeat")) return;
+        if (addedPlayers && configuration.PlayerProfileHeight.Enabled && configuration.PlayerProfileHeight.FollowIncomingAppearance)
+        {
+            ImGui.TextDisabled("Following incoming appearance");
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Local bone, blend, jaw and root-height layers are bypassed for selected synced players. Disable Follow Incoming Appearance above to edit these settings.");
+            return;
+        }
         ImGui.PushID(addedPlayers ? "player-bones" : "self-bones");
         var settings = addedPlayers ? configuration.PlayerBoneHeartbeat : configuration.SelfBoneHeartbeat;
         bool enabled = settings.Enabled;
@@ -595,10 +632,16 @@ public class ConfigWindow : Window, IDisposable
         if (ImGui.IsItemHovered()) ImGui.SetTooltip("Experimental local Customize+ interception for selected Added Players. Keeps Lightless syncing. Applies to incoming temporary profiles from any local caller for these players.");
         if (enabled)
         {
+            bool follow = settings.FollowIncomingAppearance;
+            if (ImGui.Checkbox("Follow Incoming Appearance", ref follow))
+            { settings.FollowIncomingAppearance = follow; changed = true; }
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("For selected players below, use incoming Customize+ bone and root values unchanged. Prevents applying a second blend, heartbeat, jaw, bone growth or height offset. Whole-character growth still uses Added Players settings. No target profile is needed locally.");
+            ImGui.BeginDisabled(follow);
             float offset = settings.Offset;
             if (ImGui.DragFloat("Base Height Offset", ref offset, 0.01f, 0f, 100f, "%.3f"))
             { settings.Offset = Math.Clamp(offset, 0f, 100f); changed = true; }
             if (ImGui.IsItemHovered()) ImGui.SetTooltip("Normal flat root Y. Enabled sitting/emote heights replace this value. Growth height under Shrink & Height remains additional, including overshoot.");
+            ImGui.EndDisabled();
             foreach (string name in configuration.TrackedPlayerNames)
             {
                 bool selected = settings.Players.Exists(x => string.Equals(x, name, StringComparison.OrdinalIgnoreCase));

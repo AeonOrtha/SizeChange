@@ -153,6 +153,7 @@ public sealed class Plugin : IDalamudPlugin
     internal readonly HeartbeatSoundPlayer HeartbeatSound = new(new HeartbeatScdVoice(), new HeartbeatScdVoice(), new HeartbeatScdVoice());
     private readonly GrowthVfxPlayer GrowthVfxPlayer;
     internal BoneHeartbeatPlayer BoneHeartbeat { get; }
+    internal LightlessBlendSync OutgoingBlendSync { get; }
     internal PlayerProfileHeightCompatibility PlayerProfileHeight { get; }
     internal AddedPlayerEffects PlayerEffects { get; }
     private bool drainInDuty;
@@ -176,8 +177,10 @@ public sealed class Plugin : IDalamudPlugin
             address => vfxActorModels.TryGetValue(address, out var model) ? model : 0,
             message => Log.Debug("VFX: {Event}", message));
         BoneHeartbeat = new BoneHeartbeatPlayer(new CustomizeHeartbeatApi(PluginInterface));
+        OutgoingBlendSync = new(PluginInterface.AssemblyLocation.FullName,
+            message => Log.Warning("Outgoing blend sync: {Message}", message));
         PlayerEffects = new(() => Configuration.PlayerBoneHeartbeat, () => Configuration.PlayerProfileHeight.Offset,
-            new CustomizeHeartbeatApi(PluginInterface));
+            new CustomizeHeartbeatApi(PluginInterface), () => Configuration.PlayerProfileHeight.FollowIncomingAppearance);
         PlayerProfileHeight = new PlayerProfileHeightCompatibility(
             () => Configuration.PlayerProfileHeight,
             ResolveHeightActor,
@@ -215,6 +218,7 @@ public sealed class Plugin : IDalamudPlugin
     {
         disposed = true;
         Framework.Update -= OnFrameworkUpdate;
+        OutgoingBlendSync.Dispose();
         ActionObserver.Dispose();
         PeriodicObserver.Dispose();
         receivedEmotes.Dispose();
@@ -264,7 +268,7 @@ public sealed class Plugin : IDalamudPlugin
             GrowthVfxPlayer.ClearActorEffects(state.ActorAddress);
             CharacterIdToLastScaleMap.Remove(pair.Key);
         }
-        if (group == SCActorGroup.Self) { BoneHeartbeat.Retry(); HeartbeatSound.Dispose(); }
+        if (group == SCActorGroup.Self) { OutgoingBlendSync.ClearSnapshot(); BoneHeartbeat.Retry(); HeartbeatSound.Dispose(); }
         if (group == SCActorGroup.Player) { PlayerEffects.Dispose(); PlayerProfileHeight.Retry(); }
         // Proximity sources are shared; the next frame reconciles their ownership.
         TrackedActorRefreshRequested = true;
@@ -630,11 +634,13 @@ public sealed class Plugin : IDalamudPlugin
 
     private void OnFrameworkUpdate(IFramework framework)
     {
+        bool completed = false;
         PlayerEffects.BeginFrame();
         monsterAnimations.BeginFrame();
-        try { OnFrameworkUpdateCore(framework); }
+        try { OnFrameworkUpdateCore(framework); completed = true; }
         finally
         {
+            UpdateOutgoingBlendSync(completed);
             monsterAnimations.EndFrame();
             immediateGrowth.Clear();
             monsterAnimationTests.Clear();
@@ -642,6 +648,19 @@ public sealed class Plugin : IDalamudPlugin
             PlayerProfileHeight.Tick();
             PlayerEffects.UpdateSounds(PlayerProfileHeight.IsCaptured);
         }
+    }
+
+    private void UpdateOutgoingBlendSync(bool completed)
+    {
+        var self = ObjectTable.LocalPlayer;
+        bool allowed = completed && Configuration.Enable && Configuration.AffectSelf &&
+            Configuration.SelfBoneHeartbeat.Blend.Enabled && ClientState.IsLoggedIn && !ClientState.IsPvP &&
+            !Condition[ConditionFlag.BetweenAreas] && !Condition[ConditionFlag.BetweenAreas51] &&
+            self != null && self.CurrentHp > 0;
+        var actor = allowed ? new OutgoingBlendSnapshot.Actor(self!.Address, self.EntityId, ClientState.TerritoryType)
+            : (OutgoingBlendSnapshot.Actor?)null;
+        string? frame = allowed ? BoneHeartbeat.AppliedBlendFrame(self!.Address, self.EntityId) : null;
+        OutgoingBlendSync.Tick(Configuration.SelfProfileSync.Enabled, actor, frame);
     }
 
     private unsafe void OnFrameworkUpdateCore(IFramework framework)

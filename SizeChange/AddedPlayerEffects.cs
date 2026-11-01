@@ -28,17 +28,19 @@ internal sealed class AddedPlayerEffects : IDisposable
     private readonly Dictionary<PlayerProfileHeightHook.Actor, State> states = new();
     private readonly Func<BoneHeartbeatSettings> settings;
     private readonly Func<float> flatHeight;
+    private readonly Func<bool> followIncoming;
     private readonly CustomizeBlendInputs blendInputs;
-    public string BlendStatus => !settings().Blend.Enabled ? "Blend disabled" :
+    public string BlendStatus => followIncoming() ? "Following incoming appearance" : !settings().Blend.Enabled ? "Blend disabled" :
         states.Values.Select(s => s.Profile?.BlendNotice).FirstOrDefault(e => e != null) ?? blendInputs.Status;
     public void RetryBlend() => blendInputs.Retry();
-    public AddedPlayerEffects(Func<BoneHeartbeatSettings> settings, Func<float> flatHeight, ICustomizeHeartbeatApi api)
-    { this.settings = settings; this.flatHeight = flatHeight; blendInputs = new(api); }
+    public AddedPlayerEffects(Func<BoneHeartbeatSettings> settings, Func<float> flatHeight, ICustomizeHeartbeatApi api,
+        Func<bool>? followIncoming = null)
+    { this.settings = settings; this.flatHeight = flatHeight; blendInputs = new(api); this.followIncoming = followIncoming ?? (() => false); }
     public string SoundStatus => states.Values.Select(s => s.Sound?.Status).FirstOrDefault(s => !string.IsNullOrEmpty(s)) ?? string.Empty;
     public void RetrySounds() { foreach (var state in states.Values) state.Sound?.Retry(); }
     public void BeginFrame()
     {
-        blendInputs.Refresh(settings(), true);
+        if (!followIncoming()) blendInputs.Refresh(settings(), true);
         foreach (var state in states.Values) state.Seen = false;
     }
     public void EndFrame()
@@ -57,6 +59,7 @@ internal sealed class AddedPlayerEffects : IDisposable
     {
         var state = Get(actor);
         var config = settings();
+        allowed &= !followIncoming();
         state.Seen = true; state.Allowed = allowed; state.Settings = config;
         state.Seconds = float.IsFinite(seconds) ? Math.Clamp(seconds, 0f, 1f) : 0;
         state.Scale = scale; state.RootHeight = allowed ? height : 0;
@@ -84,6 +87,9 @@ internal sealed class AddedPlayerEffects : IDisposable
     }
     public string Build(PlayerProfileHeightHook.Actor actor, string original)
     {
+        // The sender already composed these values. Preserve the full JSON and
+        // do not add a second blend, heartbeat, jaw, reserve, or root offset.
+        if (followIncoming()) return original;
         var state = Get(actor);
         if (!state.Seen)
             // A sync can arrive just before the actor's first growth update.
@@ -108,7 +114,7 @@ internal sealed class AddedPlayerEffects : IDisposable
         foreach (var pair in states)
         {
             var state = pair.Value;
-            bool available = state.Allowed && captured(pair.Key);
+            bool available = state.Allowed && !followIncoming() && captured(pair.Key);
             if (state.Settings.Sound.Enabled && available)
                 state.Sound ??= new HeartbeatSoundPlayer(state.Loop, state.First, state.Second);
             state.Sound?.Tick(state.Settings.Sound, state.Settings.Enabled && state.Envelope > 0,

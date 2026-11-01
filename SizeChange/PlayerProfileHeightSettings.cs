@@ -9,6 +9,7 @@ namespace SizeChange;
 public sealed class PlayerProfileHeightSettings
 {
     public bool Enabled { get; set; }
+    public bool FollowIncomingAppearance { get; set; }
     public float Offset { get; set; } = 0.5f;
     public List<string> Players { get; set; } = new();
     public void Validate()

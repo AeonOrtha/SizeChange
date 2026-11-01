@@ -87,6 +87,20 @@ Different inheritance flags no longer disable the entire body blend. Customize+ 
 
 Source profiles are read-only and refreshed about once per second. Missing or invalid blend inputs report **Blend unavailable** and fall back to the normal baseline and existing effects. Turning blending off removes the blend while preserving enabled effects. Disabling the feature/actor still uses the existing temporary-profile ownership and restoration rules.
 
+### Outgoing blend snapshot test
+
+Under **Your Character → Blend Sync (Test)**, enable **Share captured blend via Lightless**. With the Self profile blend active, click **Capture Current Blend**, then trigger an outgoing appearance refresh in Lightless. **Served** must increase and **Last snapshot** must match the captured revision. A resync that only resends cached data will not read a new snapshot; changing a visible equipment piece can trigger an appearance rebuild in the public Lightless version inspected. Leave it changed long enough for the update to finish. Check the result on a paired player's screen.
+
+This first test sends one frozen Customize+ appearance, including the current body blend, bone effects, jaw position and root-height values. Further local growth does not alter it until you capture again and trigger another refresh. Ordinary game draw scale, VFX, sounds, animation timing and growth settings are not included. A snapshot is not a saved Customize+ profile and is never written to your profile files.
+
+Receivers do not need the sender's target profile locally. If they use SizeChange's incoming interception, select the sender under **Added Players → Synced Profile Effects**, then enable **Follow Incoming Appearance**. This bypasses local bone/blend/jaw/reserve/root-height additions for the selected intercepted players, preventing duplicate effects. Their existing whole-character growth simulation remains separate. Without SizeChange interception, Lightless applies the received Customize+ values normally.
+
+**Clear Snapshot** or disable sharing to restore normal future reads, then trigger another outgoing refresh to restore the normal appearance on receivers too. Logout, zoning, disabling the Self blend, invalid local output, and actor replacement clear the snapshot. No network reset is sent automatically: an already received or cached snapshot remains until Lightless processes a new appearance. Captured data is session-only and is not exported.
+
+The outgoing hook is optional and off by default. It wraps the managed `LightlessSync.Interop.Ipc.IpcCallerCustomize.GetScaleAsync(nint)` reader and substitutes a base64 UTF-8 JSON result only for the currently tracked local actor. It uses the existing isolated Harmony runtime; there are no new native hooks, memory writes, server changes, or automatic update notifications. Other actors and unavailable snapshots use the original reader. **Reads/Served** diagnose the local hook; they do not confirm network delivery. Unsupported runtime signatures stop this integration and report their status.
+
+The candidate was verified in public Lightless commit `dc0265f` (1.11.4, 2025-08-30). The current Lightless source host could not be accessed, so installed-version compatibility and delivery still require the in-game test above. Continuous updates and receiver interpolation are deliberately deferred until that test succeeds.
+
 ## Import and export
 
 Each tab supports JSON import/export. **Self and Added Players exports work in both directions**, including custom bone names and effect settings. Cross-tab imports preserve destination player selections and enable switches. Normal heartbeat imports retain the destination base-profile selection; an enabled profile blend carries its explicit base/target choices and range. Profile choices are local Customize+ IDs, so the referenced profiles must exist on the importing machine. Same-tab imports replace that tab's configuration. Imports reset its live growth and preview; older exports remain supported, with chat triggers and profile blending off. Monster exports stay separate.
