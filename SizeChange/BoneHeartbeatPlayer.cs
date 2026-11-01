@@ -23,7 +23,7 @@ internal sealed class BoneHeartbeatPlayer : IDisposable
     private string? targetJson;
     private readonly CustomizeBlendInputs blendInputs;
     private readonly ProfileBlendTransition blendTransition = new();
-    public string BlendStatus => baseline?.BlendError ?? blendInputs.Status;
+    public string BlendStatus => baseline?.BlendNotice ?? blendInputs.Status;
     private Guid requestedProfile;
     private nint actorAddress;
     private uint entityId;
@@ -166,7 +166,7 @@ internal sealed class BoneHeartbeatPlayer : IDisposable
                 : settings.BeatsPerMinute;
             if (envelope > 0f) phase += seconds * bpm / 60.0;
             if (jawEnvelope > 0f) jawPhase = (jawPhase + seconds / settings.Jaw.CycleSeconds) % 1.0;
-            if (!blendEnabled || targetJson == null || baseline!.BlendError != null) blendTransition.Reset();
+            if (!blendEnabled || targetJson == null) blendTransition.Reset();
             else blendTransition.Update(settings.Blend.Progress(settledScale), seconds, settings.Blend.TransitionSeconds);
             sendElapsed += seconds;
             if (sendElapsed < 1f / 60f) return;

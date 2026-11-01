@@ -4,15 +4,15 @@ using System.Text.Json.Nodes;
 
 namespace SizeChange;
 
-internal sealed class ProfileBlendCompatibilityException(string message) : InvalidOperationException(message);
-
 // Pure profile composition. No IPC, live actor state, native memory or profile ownership.
 internal sealed class CustomizeProfileBlend
 {
     private readonly JsonObject source;
     private readonly JsonObject target;
     private sealed record BoneMix(string Name, JsonObject Template, float[] Start, float[] Delta,
-        bool[] Flags, bool NormalizeScale, float SourceCoupling, float TargetCoupling);
+        bool[] SourceFlags, bool[] TargetFlags, bool NormalizeScale, bool BridgeScale,
+        bool BridgeTranslation, bool BridgeRotation, float SourceCoupling, float TargetCoupling);
+    public string? Notice { get; }
     private readonly List<BoneMix> mixes = new();
     private readonly Dictionary<string, BoneMix> byName = new(StringComparer.Ordinal);
     private static readonly string[] Vectors = { "Translation", "Rotation", "Scaling", "ChildScaling" };
@@ -27,6 +27,7 @@ internal sealed class CustomizeProfileBlend
         var seen = new HashSet<string>(StringComparer.Ordinal);
         foreach (var pair in (JsonObject)source["Bones"]!) seen.Add(pair.Key);
         foreach (var pair in (JsonObject)target["Bones"]!) seen.Add(pair.Key);
+        int bridges = 0;
         foreach (string name in seen)
         {
             var a = source["Bones"]![name] as JsonObject;
@@ -47,27 +48,19 @@ internal sealed class CustomizeProfileBlend
                 sourceFlags[f] = a?[Flags[f]]?.GetValue<bool>() ?? false;
                 targetFlags[f] = b?[Flags[f]]?.GetValue<bool>() ?? false;
             }
-            // Position/rotation have no separate child transform in the IPC DTO.
-            // Do not silently change their inheritance halfway or promise an
-            // equivalent interpolation that this representation cannot express.
-            for (int f = 1; f <= 2; f++)
-                if (sourceFlags[f] != targetFlags[f])
-                    throw new ProfileBlendCompatibilityException($"Blend paused: match {Flags[f]} on {name} in both profiles.");
-
-            bool normalize = (sourceFlags[3] || targetFlags[3]) &&
+            // Root height/scale are applied separately by Customize+; its child
+            // propagation flags do not control the ordinary ModelBone path.
+            bool root = name == "n_root";
+            bool normalize = !root && (sourceFlags[3] || targetFlags[3]) &&
                 (sourceFlags[0] != targetFlags[0] || sourceFlags[3] != targetFlags[3]);
-            var stableFlags = (bool[])sourceFlags.Clone();
+            bool sourcePropagates = sourceFlags[1] || sourceFlags[2] || sourceFlags[3];
+            bool targetPropagates = targetFlags[1] || targetFlags[2] || targetFlags[3];
+            bool bridgeTranslation = !root && (sourceFlags[1] != targetFlags[1] || sourcePropagates != targetPropagates);
+            bool bridgeRotation = !root && sourceFlags[2] != targetFlags[2];
+            bool bridgeScale = normalize && (WouldActivateTranslation(sourceFlags, start, delta, false) ||
+                WouldActivateTranslation(targetFlags, start, delta, true));
             if (normalize)
             {
-                // ModelBone.ApplyModelTransform enters a different path when ANY
-                // propagation flag is set. That path also moves descendants for
-                // a nonzero local translation, even with PropagateTranslation off.
-                // Enabling it at an endpoint with a position offset is therefore
-                // not equivalent; leave that pair alone and explain the mismatch.
-                if (WouldActivateTranslation(sourceFlags, start, delta, false) ||
-                    WouldActivateTranslation(targetFlags, start, delta, true))
-                    throw new ProfileBlendCompatibilityException($"Blend paused: match child propagation on {name}; its position offset cannot be blended independently.");
-
                 for (int axis = 0; axis < 3; axis++)
                 {
                     float childA = !sourceFlags[3] ? 1 : sourceFlags[0] ? start[9 + axis] : start[6 + axis];
@@ -76,18 +69,37 @@ internal sealed class CustomizeProfileBlend
                     start[9 + axis] = childA;
                     delta[9 + axis] = childB - childA;
                 }
-                // An explicit child scale represents BOTH endpoints without a
-                // boolean handoff: off = identity; coupled = the parent's scale.
-                stableFlags[0] = true;
-                stableFlags[3] = true;
             }
-            var mix = new BoneMix(name, (a ?? b)!, start, delta, stableFlags, normalize,
+            if (bridgeTranslation || bridgeRotation || bridgeScale) bridges++;
+            var mix = new BoneMix(name, (a ?? b)!, start, delta, sourceFlags, targetFlags, normalize,
+                bridgeScale, bridgeTranslation, bridgeRotation,
                 sourceFlags[3] && !sourceFlags[0] ? 1 : 0,
                 targetFlags[3] && !targetFlags[0] ? 1 : 0);
             mixes.Add(mix);
             byName.Add(name, mix);
         }
+        if (bridges > 0) Notice = $"Blend ready ({bridges} inheritance transitions)";
     }
+
+    private static float Ease(float value)
+    {
+        float t = Math.Clamp(value, 0, 1);
+        return t * t * t * (t * (6 * t - 15) + 10);
+    }
+
+    // The IPC cannot express fractional translation/rotation propagation. Ease
+    // just that component to identity, change its flag at identity, then ease
+    // to the target. This is continuous in both directions, with zero slope at
+    // the handoff. Other bones and the bone's own size keep blending normally.
+    private static float ThroughNeutral(float start, float end, float amount) =>
+        amount < .5f ? start * (1 - Ease(amount * 2)) : end * Ease(amount * 2 - 1);
+
+    private static float ChildProgress(BoneMix mix, float amount) => !mix.BridgeScale ? amount :
+        mix.SourceFlags[3] ? Ease(amount * 2) : Ease(amount * 2 - 1);
+
+    public float JawLayerWeight(float amount) => amount <= 0 || amount >= 1 ||
+        !byName.TryGetValue("j_f_ago", out var mix) || !mix.BridgeRotation
+        ? 1 : ThroughNeutral(1, 1, amount);
 
     private static bool WouldActivateTranslation(bool[] flags, float[] start, float[] delta, bool target)
     {
@@ -102,7 +114,7 @@ internal sealed class CustomizeProfileBlend
     public void LayerScale(string name, JsonObject baseline, JsonObject output, float amount)
     {
         if (amount <= 0 || amount >= 1 || !byName.TryGetValue(name, out var mix) || !mix.NormalizeScale) return;
-        float coupling = float.Lerp(mix.SourceCoupling, mix.TargetCoupling, amount);
+        float coupling = float.Lerp(mix.SourceCoupling, mix.TargetCoupling, ChildProgress(mix, amount));
         var original = baseline["Bones"]![name]!;
         var bone = output["Bones"]![name]!;
         for (int axis = 0; axis < 3; axis++)
@@ -173,13 +185,20 @@ internal sealed class CustomizeProfileBlend
                     // Customize+ represents rotation as degrees. Take the short
                     // arc per Euler axis rather than rotating 340 degrees.
                     int i = v * 3 + axis;
-                    float mixed = mix.Start[i] + mix.Delta[i] * amount;
+                    float progress = v == 3 ? ChildProgress(mix, amount) : amount;
+                    float mixed = (v == 0 && mix.BridgeTranslation || v == 1 && mix.BridgeRotation)
+                        ? ThroughNeutral(mix.Start[i], mix.Start[i] + mix.Delta[i], amount)
+                        : mix.Start[i] + mix.Delta[i] * progress;
                     if (v == 1) mixed = MathF.IEEERemainder(mixed, 360);
                     if (value[Axes[axis]]?.GetValue<float>() != mixed) value[Axes[axis]] = mixed;
                 }
             }
+            var flags = amount < .5f ? mix.SourceFlags : mix.TargetFlags;
             for (int f = 0; f < Flags.Length; f++)
-                if (bone[Flags[f]]?.GetValue<bool>() != mix.Flags[f]) bone[Flags[f]] = mix.Flags[f];
+            {
+                bool flag = (mix.NormalizeScale && (f == 0 || (f == 3 && !mix.BridgeScale))) || flags[f];
+                if (bone[Flags[f]]?.GetValue<bool>() != flag) bone[Flags[f]] = flag;
+            }
         }
     }
 }

@@ -10,7 +10,7 @@ internal sealed class BoneHeartbeatProfile
 {
     private JsonObject baseline;
     private readonly CustomizeProfileBlend? blend;
-    public string? BlendError { get; }
+    public string? BlendNotice => blend?.Notice;
     private float lastBlend;
     private JsonObject? working;
     private bool jawTouched;
@@ -27,12 +27,8 @@ internal sealed class BoneHeartbeatProfile
             throw new InvalidOperationException("Customize+ profile has no Bones object.");
         if (targetJson != null)
         {
-            try
-            {
-                blend = new CustomizeProfileBlend(baseline, targetJson);
-                baseline = (JsonObject)baseline.DeepClone();
-            }
-            catch (ProfileBlendCompatibilityException ex) { BlendError = ex.Message; }
+            blend = new CustomizeProfileBlend(baseline, targetJson);
+            baseline = (JsonObject)baseline.DeepClone();
         }
     }
 
@@ -76,8 +72,8 @@ internal sealed class BoneHeartbeatProfile
             target.Scale["Z"] = ApplyScale(target.Z, growth, offset);
             blend?.LayerScale(bone.Name, baseline, working!, blendProgress);
         }
-        ApplyJaw(jawAngle, jawAxis);
-        // Blend-only offsets must not leak into fallback when a pair is invalid.
+        ApplyJaw(jawAngle * (blend?.JawLayerWeight(blendProgress) ?? 1), jawAxis);
+        // Blend-only offsets must not leak into fallback when a target is absent.
         float blendHeight = blend != null && float.IsFinite(blendHeightOffset) ? blendHeightOffset : 0;
         ApplyRootHeight(rootHeightOffset + blendHeight);
         return working!.ToJsonString();

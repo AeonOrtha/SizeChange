@@ -1163,7 +1163,7 @@ public class ConfigWindow : Window, IDisposable
         }
         if (DrawCustomizeProfileChoice("Target Profile", blend.TargetProfileId, "Choose target", out var target))
         { blend.TargetProfileId = target; changed = true; }
-        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Use compatible skeletons. Effective child scaling blends continuously, with no halfway switch. Incompatible position/rotation inheritance pauses only the blend and names the bone below.");
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Use compatible skeletons. Child scale blends continuously. If inheritance flags differ, affected position/rotation components ease through neutral while the body keeps blending.");
         if (ImGui.SmallButton("Refresh choices")) plugin.BoneHeartbeat.RefreshProfiles();
         ImGui.SameLine();
         if (ImGui.SmallButton("Retry blend"))

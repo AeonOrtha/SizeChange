@@ -30,7 +30,7 @@ internal sealed class AddedPlayerEffects : IDisposable
     private readonly Func<float> flatHeight;
     private readonly CustomizeBlendInputs blendInputs;
     public string BlendStatus => !settings().Blend.Enabled ? "Blend disabled" :
-        states.Values.Select(s => s.Profile?.BlendError).FirstOrDefault(e => e != null) ?? blendInputs.Status;
+        states.Values.Select(s => s.Profile?.BlendNotice).FirstOrDefault(e => e != null) ?? blendInputs.Status;
     public void RetryBlend() => blendInputs.Retry();
     public AddedPlayerEffects(Func<BoneHeartbeatSettings> settings, Func<float> flatHeight, ICustomizeHeartbeatApi api)
     { this.settings = settings; this.flatHeight = flatHeight; blendInputs = new(api); }
