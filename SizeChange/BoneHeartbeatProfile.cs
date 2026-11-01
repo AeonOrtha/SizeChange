@@ -8,7 +8,9 @@ namespace SizeChange;
 // rebuilt from cached baseline coordinates, never the previous pulse frame.
 internal sealed class BoneHeartbeatProfile
 {
-    private readonly JsonObject baseline;
+    private JsonObject baseline;
+    private readonly CustomizeProfileBlend? blend;
+    private float lastBlend;
     private JsonObject? working;
     private bool jawTouched;
     private bool rootTouched;
@@ -16,16 +18,39 @@ internal sealed class BoneHeartbeatProfile
     private readonly List<Target> targets = new();
     private readonly record struct Target(int Index, JsonObject Scale, float X, float Y, float Z);
 
-    public BoneHeartbeatProfile(string json)
+    public BoneHeartbeatProfile(string json, string? targetJson = null)
     {
         baseline = JsonNode.Parse(json) as JsonObject
             ?? throw new InvalidOperationException("Customize+ returned an invalid profile.");
         if (baseline["Bones"] is not JsonObject)
             throw new InvalidOperationException("Customize+ profile has no Bones object.");
+        if (targetJson != null)
+        {
+            blend = new CustomizeProfileBlend(baseline, targetJson);
+            baseline = (JsonObject)baseline.DeepClone();
+        }
     }
 
-    public string Build(IReadOnlyList<HeartbeatBone> selectedBones, float pulse, float strength, double? phase = null, float jawAngle = 0f, int jawAxis = 0, float rootHeightOffset = 0f)
+    public string Build(IReadOnlyList<HeartbeatBone> selectedBones, float pulse, float strength, double? phase = null, float jawAngle = 0f, int jawAxis = 0, float rootHeightOffset = 0f, float blendProgress = 0f)
     {
+        blendProgress = float.IsFinite(blendProgress) ? Math.Clamp(blendProgress, 0, 1) : 0;
+        if (blend != null && blendProgress != lastBlend)
+        {
+            blend.ApplyTo(baseline, blendProgress);
+            if (blendProgress is 0 or 1 || lastBlend is 0 or 1) working = null;
+            else if (working != null)
+            {
+                blend.ApplyTo(working, blendProgress);
+                for (int i = 0; i < targets.Count; i++)
+                {
+                    var target = targets[i];
+                    var scale = baseline["Bones"]![names[target.Index]]?["Scaling"];
+                    targets[i] = target with { X = scale?["X"]?.GetValue<float>() ?? 1,
+                        Y = scale?["Y"]?.GetValue<float>() ?? 1, Z = scale?["Z"]?.GetValue<float>() ?? 1 };
+                }
+            }
+            lastBlend = blendProgress;
+        }
         bool changed = working == null || names.Count != selectedBones.Count;
         for (int i = 0; !changed && i < names.Count; i++)
             changed = names[i] != selectedBones[i].Name;

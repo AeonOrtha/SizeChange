@@ -18,6 +18,7 @@ internal sealed class AddedPlayerEffects : IDisposable
         public float Envelope, JawEnvelope, JawAngle, RootHeight, Scale = 1, Seconds;
         public BoneHeartbeatSettings Settings = new();
         public string? Original;
+        public string? Target;
         public BoneHeartbeatProfile? Profile;
         public readonly HeartbeatScdVoice Loop = new(), First = new(), Second = new();
         public HeartbeatSoundPlayer? Sound;
@@ -26,11 +27,18 @@ internal sealed class AddedPlayerEffects : IDisposable
     private readonly Dictionary<PlayerProfileHeightHook.Actor, State> states = new();
     private readonly Func<BoneHeartbeatSettings> settings;
     private readonly Func<float> flatHeight;
-    public AddedPlayerEffects(Func<BoneHeartbeatSettings> settings, Func<float> flatHeight)
-    { this.settings = settings; this.flatHeight = flatHeight; }
+    private readonly CustomizeBlendInputs blendInputs;
+    public string BlendStatus => blendInputs.Status;
+    public void RetryBlend() => blendInputs.Retry();
+    public AddedPlayerEffects(Func<BoneHeartbeatSettings> settings, Func<float> flatHeight, ICustomizeHeartbeatApi api)
+    { this.settings = settings; this.flatHeight = flatHeight; blendInputs = new(api); }
     public string SoundStatus => states.Values.Select(s => s.Sound?.Status).FirstOrDefault(s => !string.IsNullOrEmpty(s)) ?? string.Empty;
     public void RetrySounds() { foreach (var state in states.Values) state.Sound?.Retry(); }
-    public void BeginFrame() { foreach (var state in states.Values) state.Seen = false; }
+    public void BeginFrame()
+    {
+        blendInputs.Refresh(settings(), true);
+        foreach (var state in states.Values) state.Seen = false;
+    }
     public void EndFrame()
     {
         foreach (var pair in states.ToArray())
@@ -77,13 +85,18 @@ internal sealed class AddedPlayerEffects : IDisposable
             // A sync can arrive just before the actor's first growth update.
             return PlayerProfileHeightJson.Add(original, flatHeight());
         if (!state.Allowed) return original;
-        if (state.Original != original)
+        // Turning blending off restores the latest intercepted source, not a
+        // selected base from an earlier blend or a frame we previously modified.
+        string source = state.Settings.Blend.Enabled ? blendInputs.BaseJson ?? original : original;
+        string? target = state.Settings.Blend.Enabled ? blendInputs.TargetJson : null;
+        if (state.Original != source || state.Target != target)
         {
-            state.Profile = new BoneHeartbeatProfile(original);
-            state.Original = original;
+            state.Profile = new BoneHeartbeatProfile(source, target);
+            state.Original = source;
+            state.Target = target;
         }
         return state.Profile!.Build(state.Bones, state.Envelope, state.Settings.Strength,
-            state.Phase, state.JawAngle, 2, state.RootHeight);
+            state.Phase, state.JawAngle, 2, state.RootHeight, state.Settings.Blend.Progress(state.Scale));
     }
     public void UpdateSounds(Func<PlayerProfileHeightHook.Actor, bool> captured)
     {

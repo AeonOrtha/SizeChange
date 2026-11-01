@@ -12,6 +12,7 @@ public class GrowthSettings
 
     public ActionGrowthSettings ActionGrowth { get; set; } = new();
     public EmoteGrowthSettings EmoteGrowth { get; set; } = new();
+    public ChatGrowthSettings ChatGrowth { get; set; } = new();
     public SizeDrainSettings SizeDrain { get; set; } = new();
     public DigestionSettings Digestion { get; set; } = new();
     public bool AetherProximityGrowth { get; set; }
@@ -108,6 +109,8 @@ public class GrowthSettings
         ActionGrowth.Validate();
         EmoteGrowth ??= new();
         EmoteGrowth.Validate();
+        ChatGrowth ??= new();
+        ChatGrowth.Validate();
         SizeDrain ??= new();
         SizeDrain.Validate();
         Digestion ??= new();
@@ -189,6 +192,7 @@ public class GrowthSettings
         {
             ActionGrowth = ActionGrowthSettings.CopyOf(settings.ActionGrowth),
             EmoteGrowth = EmoteGrowthSettings.CopyOf(settings.EmoteGrowth),
+            ChatGrowth = ChatGrowthSettings.CopyOf(settings.ChatGrowth),
             SizeDrain = SizeDrainSettings.CopyOf(settings.SizeDrain),
             Digestion = DigestionSettings.CopyOf(settings.Digestion),
             AetherActorSound = AetherSoundSettings.CopyOf(settings.AetherActorSound),

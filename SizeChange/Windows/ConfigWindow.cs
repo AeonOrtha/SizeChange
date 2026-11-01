@@ -199,7 +199,7 @@ public class ConfigWindow : Window, IDisposable
 
         if (addedPlayers)
         {
-            ImGui.TextDisabled("Base: intercepted profile");
+            ImGui.TextDisabled(settings.Blend.Enabled && settings.BaseProfileId != Guid.Empty ? "Base: selected blend profile" : "Base: intercepted profile");
             if (ImGui.IsItemHovered()) ImGui.SetTooltip("Enable profile interception and select each player above. Their synced profile stays the baseline.");
         }
         else
@@ -230,6 +230,8 @@ public class ConfigWindow : Window, IDisposable
             }
 
         }
+
+        DrawProfileBlend(settings, addedPlayers);
 
         float bpm = settings.BeatsPerMinute;
         if (ImGui.SliderFloat("Heartbeat BPM", ref bpm, 30f, 180f, "%.0f"))
@@ -1128,6 +1130,116 @@ public class ConfigWindow : Window, IDisposable
         ImGui.PopID();
     }
 
+    private bool DrawCustomizeProfileChoice(string label, Guid current, string emptyLabel, out Guid selected)
+    {
+        selected = current;
+        string preview = current == Guid.Empty ? emptyLabel : current.ToString();
+        foreach (var profile in plugin.BoneHeartbeat.Profiles)
+            if (profile.Id == current) preview = profile.Name;
+        bool changed = false;
+        if (ImGui.BeginCombo(label, preview))
+        {
+            if (ImGui.Selectable(emptyLabel, current == Guid.Empty)) { selected = Guid.Empty; changed = true; }
+            foreach (var profile in plugin.BoneHeartbeat.Profiles)
+                if (ImGui.Selectable($"{profile.Name}##{profile.Id}", current == profile.Id))
+                { selected = profile.Id; changed = true; }
+            ImGui.EndCombo();
+        }
+        return changed;
+    }
+
+    private void DrawProfileBlend(BoneHeartbeatSettings settings, bool addedPlayers)
+    {
+        if (!ImGui.TreeNode("Size-driven profile blend")) return;
+        var blend = settings.Blend;
+        bool changed = false, enabled = blend.Enabled;
+        if (ImGui.Checkbox("Enable blend", ref enabled)) { blend.Enabled = enabled; changed = true; }
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Blend the base toward the target using settled size, excluding growth overshoot. Bone growth, reserve, heartbeat, jaw and height are applied on top. Independent of Enable Bone Heartbeat.");
+        if (addedPlayers)
+        {
+            if (DrawCustomizeProfileChoice("Base Profile", settings.BaseProfileId, "Intercepted profile (Auto)", out var source))
+            { settings.BaseProfileId = source; changed = true; }
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Auto uses each player's incoming synced profile. An explicit choice uses that local profile while blending is enabled. Interception must be enabled for the player.");
+        }
+        if (DrawCustomizeProfileChoice("Target Profile", blend.TargetProfileId, "Choose target", out var target))
+        { blend.TargetProfileId = target; changed = true; }
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Use compatible skeletons. Unedited bones blend to or from their default transform. Child-scale/propagation switches change halfway; keep these flags alike for a smooth transition.");
+        if (ImGui.SmallButton("Refresh choices")) plugin.BoneHeartbeat.RefreshProfiles();
+        ImGui.SameLine();
+        if (ImGui.SmallButton("Retry blend"))
+        { if (addedPlayers) plugin.PlayerEffects.RetryBlend(); else plugin.BoneHeartbeat.Retry(); }
+        float start = blend.StartScale, end = blend.EndScale;
+        ImGui.SetNextItemWidth(100f);
+        if (ImGui.InputFloat("Base at size", ref start, 0, 0, "%.3f")) { blend.StartScale = start; changed = true; }
+        ImGui.SetNextItemWidth(100f);
+        if (ImGui.InputFloat("Target at size", ref end, 0, 0, "%.3f")) { blend.EndScale = end; changed = true; }
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Size multiplier: 1 is starting size. Beyond this size the blend stays at the target; shrinking reverses the blend.");
+        if (changed) { blend.Validate(); configuration.Save(); }
+        if (enabled) ImGui.TextWrapped(addedPlayers ? plugin.PlayerEffects.BlendStatus : plugin.BoneHeartbeat.BlendStatus);
+        ImGui.TreePop();
+    }
+
+    private void DrawChatGrowth(ChatGrowthSettings settings, string id)
+    {
+        if (!ImGui.CollapsingHeader($"Chat triggers##{id}")) return;
+        ImGui.PushID("chat-growth-" + id);
+        bool changed = false, enabled = settings.Enabled;
+        if (ImGui.Checkbox("Enabled", ref enabled)) { settings.Enabled = enabled; changed = true; }
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Incoming chat can grow each living character selected by this profile. Requires delta growth. All matching words and repeated occurrences stack into one immediate pulse per message; pending damage stays queued.");
+        int speaker = (int)settings.Speaker;
+        if (ImGui.Combo("Speaker", ref speaker, "Anyone\0Yourself\0Others\0"))
+        { settings.Speaker = (GrowthChatSpeaker)speaker; changed = true; }
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Yourself means the local player running Delta Suite, across all profile tabs. Others excludes that player. Unknown senders only match Anyone.");
+        if (ImGui.TreeNode("Channels"))
+        {
+            foreach (var channel in Enum.GetValues<GrowthChatChannels>())
+            {
+                if (channel is GrowthChatChannels.None or GrowthChatChannels.All) continue;
+                bool use = (settings.Channels & channel) != 0;
+                string label = channel switch { GrowthChatChannels.FreeCompany => "Free Company", GrowthChatChannels.CrossLinkshell => "Cross-world linkshells", GrowthChatChannels.Linkshell => "Linkshells", GrowthChatChannels.Emote => "Custom /em text", _ => channel.ToString() };
+                if (ImGui.Checkbox(label, ref use))
+                { settings.Channels = use ? settings.Channels | channel : settings.Channels & ~channel; changed = true; }
+            }
+            ImGui.TreePop();
+        }
+        bool whole = settings.WholeWords, bypass = settings.BypassSizeLimit;
+        if (ImGui.Checkbox("Whole words", ref whole)) { settings.WholeWords = whole; changed = true; }
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Case is ignored. Whole words matches grow in 'grow bigger', but not in 'growing'. Phrases are literal. Each row and each occurrence stacks.");
+        ImGui.SameLine();
+        if (ImGui.Checkbox("Bypass size limit", ref bypass)) { settings.BypassSizeLimit = bypass; changed = true; }
+        float cooldown = settings.CooldownSeconds;
+        ImGui.SetNextItemWidth(100f);
+        if (ImGui.InputFloat("Cooldown (s)", ref cooldown, 0, 0, "%.2f")) { settings.CooldownSeconds = cooldown; changed = true; }
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Shared across speakers for this profile. 0 accepts every matching message. Messages during cooldown are discarded.");
+        if (ImGui.BeginTable("words", 3, ImGuiTableFlags.SizingStretchProp))
+        {
+            ImGui.TableSetupColumn("Word / phrase", ImGuiTableColumnFlags.WidthStretch);
+            ImGui.TableSetupColumn("Growth", ImGuiTableColumnFlags.WidthFixed, 85f);
+            ImGui.TableSetupColumn("", ImGuiTableColumnFlags.WidthFixed, 30f);
+            ImGui.TableHeadersRow();
+            for (int i = 0; i < settings.Rules.Count; i++)
+            {
+                var rule = settings.Rules[i];
+                ImGui.PushID(i); ImGui.TableNextRow(); ImGui.TableNextColumn(); ImGui.SetNextItemWidth(-1);
+                string text = rule.Text;
+                if (ImGui.InputText("##word", ref text, 128)) { rule.Text = text; changed = true; }
+                ImGui.TableNextColumn(); ImGui.SetNextItemWidth(-1);
+                float amount = rule.Growth;
+                if (ImGui.InputFloat("##growth", ref amount, 0, 0, "%.3f")) { rule.Growth = amount; changed = true; }
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Extra size per occurrence. 0.05 adds +0.05x.");
+                ImGui.TableNextColumn(); bool remove = ImGui.SmallButton("X"); ImGui.PopID();
+                if (remove) { settings.Rules.RemoveAt(i--); changed = true; }
+            }
+            ImGui.EndTable();
+        }
+        ImGui.BeginDisabled(settings.Rules.Count >= 128);
+        if (ImGui.Button("+")) { settings.Rules.Add(new()); changed = true; }
+        ImGui.EndDisabled();
+        if (changed) { settings.Validate(); configuration.Save(); }
+        if (enabled) ImGui.TextWrapped(plugin.ChatGrowthStatus);
+        ImGui.PopID();
+    }
+
     private void DrawEmoteGrowth(EmoteGrowthSettings settings, string id)
     {
         if (!ImGui.CollapsingHeader($"Emotes##{id}")) return;
@@ -1351,6 +1463,7 @@ public class ConfigWindow : Window, IDisposable
         if (!settings.GrowthFromDelta) return;
         DrawActionGrowth(settings.ActionGrowth, id);
         DrawEmoteGrowth(settings.EmoteGrowth, id);
+        DrawChatGrowth(settings.ChatGrowth, id);
 
         ImGui.PushID("accumulation-" + id);
         DrawAccumulatingEffects(settings.AccumulatingEffects);

@@ -28,6 +28,7 @@ public sealed class BoneHeartbeatSettings
     public BoneHeartbeatMode Mode { get; set; } = BoneHeartbeatMode.WhileAccumulating;
     // Empty means the normal Customize+ profile currently active on self.
     public Guid BaseProfileId { get; set; }
+    public ProfileBlendSettings Blend { get; set; } = new();
     public float BeatsPerMinute { get; set; } = 72f;
     public bool DamageDrivenBpm { get; set; }
     public float MaximumBeatsPerMinute { get; set; } = 180f;
@@ -100,6 +101,8 @@ public sealed class BoneHeartbeatSettings
 
     public void Validate()
     {
+        Blend ??= new();
+        Blend.Validate();
         if (!Enum.IsDefined(Mode)) Mode = BoneHeartbeatMode.WhileAccumulating;
         BeatsPerMinute = float.IsFinite(BeatsPerMinute) ? Math.Clamp(BeatsPerMinute, 30f, 180f) : 72f;
         MaximumBeatsPerMinute = float.IsFinite(MaximumBeatsPerMinute)

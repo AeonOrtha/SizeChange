@@ -20,6 +20,9 @@ internal sealed class BoneHeartbeatPlayer : IDisposable
     private Guid? ownedProfile;
     private BoneHeartbeatProfile? baseline;
     private string? baselineJson;
+    private string? targetJson;
+    private readonly CustomizeBlendInputs blendInputs;
+    public string BlendStatus => blendInputs.Status;
     private Guid requestedProfile;
     private nint actorAddress;
     private uint entityId;
@@ -34,6 +37,7 @@ internal sealed class BoneHeartbeatPlayer : IDisposable
     private bool wasJawEnabled;
     private bool wasGrowthEnabled;
     private bool wasHeightEnabled;
+    private bool wasBlendEnabled;
     private double jawPhase;
     private float jawEnvelope;
     private string? lastSent;
@@ -46,7 +50,8 @@ internal sealed class BoneHeartbeatPlayer : IDisposable
     public string Status { get; private set; } = "Disabled.";
     public IReadOnlyList<(Guid Id, string Name)> Profiles { get; private set; } = Array.Empty<(Guid, string)>();
 
-    public BoneHeartbeatPlayer(ICustomizeHeartbeatApi api) => this.api = api;
+    public BoneHeartbeatPlayer(ICustomizeHeartbeatApi api)
+    { this.api = api; blendInputs = new(api); }
 
     public void RefreshProfiles()
     {
@@ -60,6 +65,7 @@ internal sealed class BoneHeartbeatPlayer : IDisposable
 
     public void Retry()
     {
+        blendInputs.Retry();
         if (!Release()) return;
         faulted = false;
         baselineElapsed = 1f;
@@ -75,9 +81,11 @@ internal sealed class BoneHeartbeatPlayer : IDisposable
         seconds = float.IsFinite(seconds) ? Math.Clamp(seconds, 0f, 1f) : 0f;
         cleanupElapsed += seconds;
         bool heightEnabled = float.IsFinite(rootHeightOffset) && rootHeightOffset != 0f;
+        bool blendEnabled = settings.Blend.Enabled;
         bool growthEnabled = (reserveAddition > 0f && !string.IsNullOrWhiteSpace(reserveBone)) || (settings.CustomGrowthEnabled && settings.Bones.Count > 0 &&
             settings.Bones.Exists(bone => (bone.GrowthPerScale ?? settings.CustomGrowthPerScale) > 0f && (bone.GrowthLimit ?? settings.CustomGrowthLimit) > 0f)) || settings.Chains.Exists(chain => chain.GrowthEnabled && chain.GrowthPerScale > 0f && chain.GrowthLimit > 0f);
-        if ((heightEnabled && !wasHeightEnabled || growthEnabled && !wasGrowthEnabled || settings.Enabled && !wasEnabled || settings.Jaw.Enabled && !wasJawEnabled) && faulted) Retry();
+        if ((blendEnabled && !wasBlendEnabled || heightEnabled && !wasHeightEnabled || growthEnabled && !wasGrowthEnabled || settings.Enabled && !wasEnabled || settings.Jaw.Enabled && !wasJawEnabled) && faulted) Retry();
+        wasBlendEnabled = blendEnabled;
         wasHeightEnabled = heightEnabled;
         wasGrowthEnabled = growthEnabled;
         wasEnabled = settings.Enabled;
@@ -99,7 +107,7 @@ internal sealed class BoneHeartbeatPlayer : IDisposable
         bool growthRun = resolvedBones.Exists(bone => bone.GrowthOffset != 0f);
         bool bonesEnabled = settings.Enabled && settings.Strength > 0f && resolvedBones.Exists(bone => bone.Strength > 0f);
         bool jawEnabled = settings.Jaw.Enabled && settings.Jaw.OpeningDegrees > 0f;
-        if (!allowed || address == 0 || (!bonesEnabled && !jawEnabled && !growthRun && !heightEnabled))
+        if (!allowed || address == 0 || (!bonesEnabled && !jawEnabled && !growthRun && !heightEnabled && !blendEnabled))
         {
             if (faulted && ownedProfile.HasValue && cleanupElapsed < 1f) return;
             if (Release()) Status = settings.Enabled ? "Inactive (self unavailable, disabled, or no bones/strength)." : "Disabled.";
@@ -121,7 +129,7 @@ internal sealed class BoneHeartbeatPlayer : IDisposable
         jawEnvelope = Math.Clamp(jawEnvelope + (jawRun ? seconds : -seconds) / 0.25f, 0f, 1f);
         if (envelope <= 0f && phase != 0) { PhaseGeneration++; phase = 0; }
         if (jawEnvelope <= 0f) jawPhase = 0;
-        if (!run && !jawRun && !growthRun && !heightEnabled && envelope <= 0f && jawEnvelope <= 0f)
+        if (!run && !jawRun && !growthRun && !heightEnabled && !blendEnabled && envelope <= 0f && jawEnvelope <= 0f)
         {
             if (Release()) Status = "Waiting for accumulated damage.";
             return;
@@ -129,6 +137,12 @@ internal sealed class BoneHeartbeatPlayer : IDisposable
 
         try
         {
+            blendInputs.Refresh(settings, false);
+            if (targetJson != blendInputs.TargetJson)
+            {
+                targetJson = blendInputs.TargetJson;
+                baseline = null;
+            }
             baselineElapsed += seconds;
             if (baseline == null || baselineElapsed >= 1f)
             {
@@ -136,9 +150,9 @@ internal sealed class BoneHeartbeatPlayer : IDisposable
                 Guid id = settings.BaseProfileId == Guid.Empty
                     ? api.GetActiveProfile(objectIndex) : settings.BaseProfileId;
                 string json = api.GetProfile(id);
-                if (json != baselineJson)
+                if (baseline == null || json != baselineJson)
                 {
-                    baseline = new BoneHeartbeatProfile(json);
+                    baseline = new BoneHeartbeatProfile(json, targetJson);
                     baselineJson = json;
                     lastSent = null;
                 }
@@ -155,7 +169,8 @@ internal sealed class BoneHeartbeatPlayer : IDisposable
             if (sendElapsed < 1f / 60f) return;
             sendElapsed %= 1f / 60f;
             float jawAngle = -settings.Jaw.SampleCycle(jawPhase) * settings.Jaw.OpeningDegrees * jawEnvelope;
-            string frame = baseline!.Build(resolvedBones, envelope, settings.Strength, phase, jawAngle, 2, rootHeightOffset);
+            string frame = baseline!.Build(resolvedBones, envelope, settings.Strength, phase, jawAngle, 2, rootHeightOffset,
+                settings.Blend.Progress(settledScale));
             if (frame != lastSent)
             {
                 if (!ownedProfile.HasValue && api.HasTemporaryProfile(objectIndex))
@@ -163,7 +178,7 @@ internal sealed class BoneHeartbeatPlayer : IDisposable
                 ownedProfile = api.SetTemporary(objectIndex, frame);
                 lastSent = frame;
             }
-            Status = run ? $"Heartbeat active — {bpm:0} BPM." : jawRun ? "Jaw breathing active." : growthRun ? "Bone growth active." : heightEnabled ? "Height offset active." : "Returning to baseline.";
+            Status = run ? $"Heartbeat active — {bpm:0} BPM." : jawRun ? "Jaw breathing active." : growthRun ? "Bone growth active." : heightEnabled ? "Height offset active." : blendEnabled ? blendInputs.Status : "Returning to baseline.";
         }
         catch (Exception ex)
         {

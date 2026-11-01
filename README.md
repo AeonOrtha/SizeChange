@@ -48,6 +48,14 @@ For automatic confirmed triggers, open **Skills & Actions** in any profile, enab
 
 Multiple action IDs can share a name; those all match that name. Duplicate rule names use the first matching row. This observes action-effect events; periodic status/ground-effect ticks are not separate skill casts. Skill rules are included in profile exports and Self ↔ Added Players imports.
 
+## Chat triggers
+
+In any profile, open **Chat triggers**, enable it, then use **+** to add words or phrases and a decimal growth amount. Every matching occurrence stacks: `grow` at +0.05 and `bigger` at +0.10 makes “grow grow bigger” contribute +0.20 in one immediate pulse. Different matching rows also stack, including overlapping word/phrase rules. Matching ignores case; **Whole words** is on by default. Turning it off allows substrings such as `grow` in `growing`.
+
+Select chat channels and **Anyone**, **Yourself**, or **Others** as speaker. Yourself always means the local player running the plugin. Unknown senders match Anyone only. Say, Tell and Party are selected by default; custom `/em` text can be enabled separately. Echo, system messages and automatic emote log lines are excluded. Only messages delivered to your client are observed.
+
+Growth goes to living characters selected by that profile: Self, tracked Added Players, or tracked Monsters. It requires **Growth From Delta**, uses the existing pulse/effects, and leaves pending damage and its timer untouched. A profile-wide cooldown can discard matching messages for a configured interval; zero accepts every message. **Bypass size limit** is optional and off by default. These settings are included in profile imports/exports. Chat text is processed locally and is not saved or transmitted by this feature.
+
 ## Other growth and effects
 
 - **Aetherytes and size drain:** nearby crystals or configured players/NPCs can contribute simulated damage, including outside combat. Proximity growth can exceed the normal damage-growth limit. Size drain has separate duty controls.
@@ -61,9 +69,19 @@ Bone effects require **Customize+**. Self uses your selected base profile. For s
 
 Effects are calculated from each captured original profile and each player's own growth state. They remain **local to your view**. **Base Height Offset** is under Synced Profile Effects; the growth-driven addition is under **Shrink & Height**.
 
+### Size-driven profile blend
+
+Under **Bones & Heartbeat → Size-driven profile blend**, select a base and target Customize+ profile, then set **Base at size** and **Target at size**. Defaults are 1× and 3×: at 2×, the transforms are halfway between them. Blending is independent of the Enable Bone Heartbeat checkbox. Use **Refresh choices** to load the available profiles.
+
+Self's **Base Profile** selection is above the blend section; Auto uses the active persistent Customize+ profile. Added Players can use **Intercepted profile (Auto)** for each player's incoming synced appearance or select an explicit local base for the blend. They still require enabled interception and a captured incoming profile. A new incoming sync replaces the saved source; generated frames never become the source.
+
+The blend uses settled size, excluding visual overshoot. It interpolates bone scale, child scale, position and rotation, then applies size-driven bone growth, custom overrides, reservoir additions, heartbeat pulses, jaw movement and height offsets on top. Shrinking reverses the blend; growth beyond the end size keeps the target shape. Missing bones blend to/from their identity transform. Rotations follow the shorter arc per Euler axis. Use profiles for compatible skeletons; keep inheritance/propagation flags alike for smooth transitions, since those boolean flags switch halfway.
+
+Source profiles are read-only and refreshed about once per second. Missing or invalid blend inputs report **Blend unavailable** and fall back to the normal baseline and existing effects. Turning blending off removes the blend while preserving enabled effects. Disabling the feature/actor still uses the existing temporary-profile ownership and restoration rules.
+
 ## Import and export
 
-Each tab supports JSON import/export. **Self and Added Players exports work in both directions**, including custom bone names and effect settings. Cross-tab imports preserve destination player selections, enable switches and base-profile selection. Same-tab imports replace that tab's configuration. Imports reset its live growth and preview; older exports remain supported. Monster exports stay separate.
+Each tab supports JSON import/export. **Self and Added Players exports work in both directions**, including custom bone names and effect settings. Cross-tab imports preserve destination player selections and enable switches. Normal heartbeat imports retain the destination base-profile selection; an enabled profile blend carries its explicit base/target choices and range. Profile choices are local Customize+ IDs, so the referenced profiles must exist on the importing machine. Same-tab imports replace that tab's configuration. Imports reset its live growth and preview; older exports remain supported, with chat triggers and profile blending off. Monster exports stay separate.
 
 ## License
 

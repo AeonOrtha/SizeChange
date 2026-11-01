@@ -112,15 +112,15 @@ internal sealed class ProfileSettingsFile
         switch (group)
         {
             case SCActorGroup.Self:
-                // A remote player's intercepted baseline must never replace the
-                // local user's selected Customize+ base profile.
-                if (cross) bones.BaseProfileId = config.SelfBoneHeartbeat.BaseProfileId;
+                // Normal heartbeat imports retain the local base choice. An
+                // enabled blend explicitly carries its pair of local profile IDs.
+                if (cross && !bones.Blend.Enabled) bones.BaseProfileId = config.SelfBoneHeartbeat.BaseProfileId;
                 config.SelfSettings = growth;
                 if (!cross) config.AffectSelf = AffectSelf ?? true;
                 config.SelfFlatHeightOffset = height; config.SelfBoneHeartbeat = bones;
                 break;
             case SCActorGroup.Player:
-                if (cross) bones.BaseProfileId = config.PlayerBoneHeartbeat.BaseProfileId;
+                if (cross && !bones.Blend.Enabled) bones.BaseProfileId = config.PlayerBoneHeartbeat.BaseProfileId;
                 config.PlayerSettings = growth; config.PlayerBoneHeartbeat = bones;
                 if (!cross)
                 {

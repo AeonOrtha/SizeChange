@@ -111,6 +111,10 @@ public sealed class Plugin : IDalamudPlugin
     };
 
     private readonly ImmediateGrowth immediateGrowth = new();
+    private readonly ChatGrowthObserver chatGrowth;
+    private readonly ChatGrowthCooldown[] chatCooldowns = { new(), new(), new() };
+    private uint chatTerritory;
+    internal string ChatGrowthStatus { get; private set; } = "Off";
     private readonly EmoteGrowthTracker emoteGrowth = new();
     private readonly ReceivedEmoteObserver receivedEmotes;
     private readonly Dictionary<EmoteGrowthTracker.Actor, (uint Emote, ulong Target)> receivedEmoteTargets = new();
@@ -172,7 +176,8 @@ public sealed class Plugin : IDalamudPlugin
             address => vfxActorModels.TryGetValue(address, out var model) ? model : 0,
             message => Log.Debug("VFX: {Event}", message));
         BoneHeartbeat = new BoneHeartbeatPlayer(new CustomizeHeartbeatApi(PluginInterface));
-        PlayerEffects = new(() => Configuration.PlayerBoneHeartbeat, () => Configuration.PlayerProfileHeight.Offset);
+        PlayerEffects = new(() => Configuration.PlayerBoneHeartbeat, () => Configuration.PlayerProfileHeight.Offset,
+            new CustomizeHeartbeatApi(PluginInterface));
         PlayerProfileHeight = new PlayerProfileHeightCompatibility(
             () => Configuration.PlayerProfileHeight,
             ResolveHeightActor,
@@ -183,6 +188,7 @@ public sealed class Plugin : IDalamudPlugin
         ActionObserver = new(GameInteropProvider, message => Log.Warning("Action growth: {Message}", message));
         PeriodicObserver = new(GameInteropProvider, message => Log.Warning("Periodic growth: {Message}", message));
         receivedEmotes = new(GameInteropProvider);
+        chatGrowth = new(Chat);
         ConfigWindow = new ConfigWindow(this);
         WindowSystem.AddWindow(ConfigWindow);
 
@@ -212,6 +218,7 @@ public sealed class Plugin : IDalamudPlugin
         ActionObserver.Dispose();
         PeriodicObserver.Dispose();
         receivedEmotes.Dispose();
+        chatGrowth.Dispose();
         receivedEmoteTargets.Clear();
         emoteGrowth.Clear();
         emoteSpeed.BeginFrame(ClientState.IsLoggedIn && !Condition[ConditionFlag.BetweenAreas] && !Condition[ConditionFlag.BetweenAreas51], ClientState.TerritoryType);
@@ -246,6 +253,7 @@ public sealed class Plugin : IDalamudPlugin
         try { PluginInterface.SavePluginConfig(Configuration); }
         catch { previous.Apply(Configuration, group); throw; }
         GetPreview(group).Enabled = false;
+        chatCooldowns[(int)group].Clear();
         foreach (var pair in new List<KeyValuePair<uint, SCCharacterState>>(CharacterIdToLastScaleMap))
         {
             if (pair.Value.ActorGroup != group) continue;
@@ -387,6 +395,45 @@ public sealed class Plugin : IDalamudPlugin
             if (!allowed) continue;
             QueueActionGrowth(ObjectTable.SearchByEntityId(tick.Target),
                 tick.Healing ? "Healing tick" : "Damage tick", 0, ActionGrowthTrigger.OverTime);
+        }
+    }
+
+    private void ReadChatGrowth(bool allowed)
+    {
+        var local = ObjectTable.LocalPlayer;
+        allowed &= local != null;
+        uint territory = ClientState.TerritoryType;
+        GrowthSettings[] profiles = { Configuration.SelfSettings, Configuration.PlayerSettings, Configuration.MonsterSettings };
+        bool enabled = allowed && Array.Exists(profiles, p => p.GrowthFromDelta && p.ChatGrowth.Enabled);
+        chatGrowth.Context(enabled, territory, local?.Name.TextValue ?? string.Empty, local?.HomeWorld.RowId ?? 0);
+        if (!enabled || territory != chatTerritory)
+            foreach (var cooldown in chatCooldowns) cooldown.Clear();
+        chatTerritory = territory;
+        for (int i = 0; i < profiles.Length; i++)
+            if (!profiles[i].ChatGrowth.Enabled || !profiles[i].GrowthFromDelta) chatCooldowns[i].Clear();
+        ChatGrowthStatus = !enabled ? "Off" : chatGrowth.Error is { } error ? "Chat unavailable: " + error : "Listening";
+        while (chatGrowth.TryRead(out var message))
+        {
+            var amounts = new float[3];
+            var applied = new bool[3];
+            for (int i = 0; i < profiles.Length; i++)
+            {
+                var config = profiles[i].ChatGrowth;
+                if (profiles[i].GrowthFromDelta && config.Accepts(message.Channel, message.LocalSpeaker) &&
+                    chatCooldowns[i].Ready(message.ReceivedAt, config.CooldownSeconds))
+                    amounts[i] = config.GrowthFor(message.Text);
+            }
+            if (!Array.Exists(amounts, amount => amount > 0)) continue;
+            foreach (var obj in ObjectTable)
+            {
+                if (!TryGetGrowthRecipient(obj, out var actor, out var profile)) continue;
+                int group = ReferenceEquals(profile, Configuration.SelfSettings) ? 0 : ReferenceEquals(profile, Configuration.PlayerSettings) ? 1 : 2;
+                if (amounts[group] <= 0) continue;
+                immediateGrowth.Add(actor.EntityId, actor.Address, amounts[group], profile.ChatGrowth.BypassSizeLimit);
+                applied[group] = true;
+            }
+            for (int i = 0; i < applied.Length; i++)
+                if (applied[i]) chatCooldowns[i].Accept(message.ReceivedAt);
         }
     }
 
@@ -612,6 +659,12 @@ public sealed class Plugin : IDalamudPlugin
                 !Condition[ConditionFlag.BetweenAreas] && !Condition[ConditionFlag.BetweenAreas51]);
         }
         catch (Exception ex) { PeriodicObserver.Fail(ex); }
+        try
+        {
+            ReadChatGrowth(Configuration.Enable && ClientState.IsLoggedIn && !ClientState.IsPvP &&
+                !Condition[ConditionFlag.BetweenAreas] && !Condition[ConditionFlag.BetweenAreas51]);
+        }
+        catch (Exception ex) { ChatGrowthStatus = "Chat unavailable: " + ex.GetBaseException().Message; }
         try
         {
             ReadEmoteGrowth(Configuration.Enable && ClientState.IsLoggedIn && !ClientState.IsPvP &&
