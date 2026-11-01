@@ -4,13 +4,17 @@ using System.Text.Json.Nodes;
 
 namespace SizeChange;
 
+internal sealed class ProfileBlendCompatibilityException(string message) : InvalidOperationException(message);
+
 // Pure profile composition. No IPC, live actor state, native memory or profile ownership.
 internal sealed class CustomizeProfileBlend
 {
     private readonly JsonObject source;
     private readonly JsonObject target;
-    private sealed record BoneMix(string Name, JsonObject Template, float[] Start, float[] Delta, bool[] SourceFlags, bool[] TargetFlags);
+    private sealed record BoneMix(string Name, JsonObject Template, float[] Start, float[] Delta,
+        bool[] Flags, bool NormalizeScale, float SourceCoupling, float TargetCoupling);
     private readonly List<BoneMix> mixes = new();
+    private readonly Dictionary<string, BoneMix> byName = new(StringComparer.Ordinal);
     private static readonly string[] Vectors = { "Translation", "Rotation", "Scaling", "ChildScaling" };
     private static readonly string[] Axes = { "X", "Y", "Z" };
     private static readonly string[] Flags = { "ChildScaleIndependent", "PropagateTranslation", "PropagateRotation", "PropagateScale" };
@@ -43,7 +47,70 @@ internal sealed class CustomizeProfileBlend
                 sourceFlags[f] = a?[Flags[f]]?.GetValue<bool>() ?? false;
                 targetFlags[f] = b?[Flags[f]]?.GetValue<bool>() ?? false;
             }
-            mixes.Add(new(name, (a ?? b)!, start, delta, sourceFlags, targetFlags));
+            // Position/rotation have no separate child transform in the IPC DTO.
+            // Do not silently change their inheritance halfway or promise an
+            // equivalent interpolation that this representation cannot express.
+            for (int f = 1; f <= 2; f++)
+                if (sourceFlags[f] != targetFlags[f])
+                    throw new ProfileBlendCompatibilityException($"Blend paused: match {Flags[f]} on {name} in both profiles.");
+
+            bool normalize = (sourceFlags[3] || targetFlags[3]) &&
+                (sourceFlags[0] != targetFlags[0] || sourceFlags[3] != targetFlags[3]);
+            var stableFlags = (bool[])sourceFlags.Clone();
+            if (normalize)
+            {
+                // ModelBone.ApplyModelTransform enters a different path when ANY
+                // propagation flag is set. That path also moves descendants for
+                // a nonzero local translation, even with PropagateTranslation off.
+                // Enabling it at an endpoint with a position offset is therefore
+                // not equivalent; leave that pair alone and explain the mismatch.
+                if (WouldActivateTranslation(sourceFlags, start, delta, false) ||
+                    WouldActivateTranslation(targetFlags, start, delta, true))
+                    throw new ProfileBlendCompatibilityException($"Blend paused: match child propagation on {name}; its position offset cannot be blended independently.");
+
+                for (int axis = 0; axis < 3; axis++)
+                {
+                    float childA = !sourceFlags[3] ? 1 : sourceFlags[0] ? start[9 + axis] : start[6 + axis];
+                    float childB = !targetFlags[3] ? 1 : targetFlags[0]
+                        ? start[9 + axis] + delta[9 + axis] : start[6 + axis] + delta[6 + axis];
+                    start[9 + axis] = childA;
+                    delta[9 + axis] = childB - childA;
+                }
+                // An explicit child scale represents BOTH endpoints without a
+                // boolean handoff: off = identity; coupled = the parent's scale.
+                stableFlags[0] = true;
+                stableFlags[3] = true;
+            }
+            var mix = new BoneMix(name, (a ?? b)!, start, delta, stableFlags, normalize,
+                sourceFlags[3] && !sourceFlags[0] ? 1 : 0,
+                targetFlags[3] && !targetFlags[0] ? 1 : 0);
+            mixes.Add(mix);
+            byName.Add(name, mix);
+        }
+    }
+
+    private static bool WouldActivateTranslation(bool[] flags, float[] start, float[] delta, bool target)
+    {
+        if (flags[1] || flags[2] || flags[3]) return false;
+        for (int axis = 0; axis < 3; axis++)
+            if (start[axis] + (target ? delta[axis] : 0) != 0) return true;
+        return false;
+    }
+
+    // Existing pulse/growth additions follow the parent's influence on children.
+    // Recompute from the blended baseline, never the previous animated frame.
+    public void LayerScale(string name, JsonObject baseline, JsonObject output, float amount)
+    {
+        if (amount <= 0 || amount >= 1 || !byName.TryGetValue(name, out var mix) || !mix.NormalizeScale) return;
+        float coupling = float.Lerp(mix.SourceCoupling, mix.TargetCoupling, amount);
+        var original = baseline["Bones"]![name]!;
+        var bone = output["Bones"]![name]!;
+        for (int axis = 0; axis < 3; axis++)
+        {
+            string key = Axes[axis];
+            float addition = bone["Scaling"]![key]!.GetValue<float>() - original["Scaling"]![key]!.GetValue<float>();
+            float child = original["ChildScaling"]![key]!.GetValue<float>() + coupling * addition;
+            bone["ChildScaling"]![key] = Math.Clamp(child, -512f, 512f);
         }
     }
 
@@ -111,10 +178,8 @@ internal sealed class CustomizeProfileBlend
                     if (value[Axes[axis]]?.GetValue<float>() != mixed) value[Axes[axis]] = mixed;
                 }
             }
-            // Boolean inheritance modes cannot interpolate; endpoints remain exact.
-            var flags = amount < .5f ? mix.SourceFlags : mix.TargetFlags;
             for (int f = 0; f < Flags.Length; f++)
-                if (bone[Flags[f]]?.GetValue<bool>() != flags[f]) bone[Flags[f]] = flags[f];
+                if (bone[Flags[f]]?.GetValue<bool>() != mix.Flags[f]) bone[Flags[f]] = mix.Flags[f];
         }
     }
 }

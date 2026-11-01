@@ -10,6 +10,7 @@ internal sealed class BoneHeartbeatProfile
 {
     private JsonObject baseline;
     private readonly CustomizeProfileBlend? blend;
+    public string? BlendError { get; }
     private float lastBlend;
     private JsonObject? working;
     private bool jawTouched;
@@ -26,12 +27,16 @@ internal sealed class BoneHeartbeatProfile
             throw new InvalidOperationException("Customize+ profile has no Bones object.");
         if (targetJson != null)
         {
-            blend = new CustomizeProfileBlend(baseline, targetJson);
-            baseline = (JsonObject)baseline.DeepClone();
+            try
+            {
+                blend = new CustomizeProfileBlend(baseline, targetJson);
+                baseline = (JsonObject)baseline.DeepClone();
+            }
+            catch (ProfileBlendCompatibilityException ex) { BlendError = ex.Message; }
         }
     }
 
-    public string Build(IReadOnlyList<HeartbeatBone> selectedBones, float pulse, float strength, double? phase = null, float jawAngle = 0f, int jawAxis = 0, float rootHeightOffset = 0f, float blendProgress = 0f)
+    public string Build(IReadOnlyList<HeartbeatBone> selectedBones, float pulse, float strength, double? phase = null, float jawAngle = 0f, int jawAxis = 0, float rootHeightOffset = 0f, float blendProgress = 0f, float blendHeightOffset = 0f)
     {
         blendProgress = float.IsFinite(blendProgress) ? Math.Clamp(blendProgress, 0, 1) : 0;
         if (blend != null && blendProgress != lastBlend)
@@ -69,9 +74,12 @@ internal sealed class BoneHeartbeatProfile
             target.Scale["X"] = ApplyScale(target.X, growth, offset);
             target.Scale["Y"] = ApplyScale(target.Y, growth, offset);
             target.Scale["Z"] = ApplyScale(target.Z, growth, offset);
+            blend?.LayerScale(bone.Name, baseline, working!, blendProgress);
         }
         ApplyJaw(jawAngle, jawAxis);
-        ApplyRootHeight(rootHeightOffset);
+        // Blend-only offsets must not leak into fallback when a pair is invalid.
+        float blendHeight = blend != null && float.IsFinite(blendHeightOffset) ? blendHeightOffset : 0;
+        ApplyRootHeight(rootHeightOffset + blendHeight);
         return working!.ToJsonString();
     }
 

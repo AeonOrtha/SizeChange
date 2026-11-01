@@ -22,7 +22,8 @@ internal sealed class BoneHeartbeatPlayer : IDisposable
     private string? baselineJson;
     private string? targetJson;
     private readonly CustomizeBlendInputs blendInputs;
-    public string BlendStatus => blendInputs.Status;
+    private readonly ProfileBlendTransition blendTransition = new();
+    public string BlendStatus => baseline?.BlendError ?? blendInputs.Status;
     private Guid requestedProfile;
     private nint actorAddress;
     private uint entityId;
@@ -165,12 +166,15 @@ internal sealed class BoneHeartbeatPlayer : IDisposable
                 : settings.BeatsPerMinute;
             if (envelope > 0f) phase += seconds * bpm / 60.0;
             if (jawEnvelope > 0f) jawPhase = (jawPhase + seconds / settings.Jaw.CycleSeconds) % 1.0;
+            if (!blendEnabled || targetJson == null || baseline!.BlendError != null) blendTransition.Reset();
+            else blendTransition.Update(settings.Blend.Progress(settledScale), seconds, settings.Blend.TransitionSeconds);
             sendElapsed += seconds;
             if (sendElapsed < 1f / 60f) return;
             sendElapsed %= 1f / 60f;
             float jawAngle = -settings.Jaw.SampleCycle(jawPhase) * settings.Jaw.OpeningDegrees * jawEnvelope;
+            float blendProgress = blendTransition.Current;
             string frame = baseline!.Build(resolvedBones, envelope, settings.Strength, phase, jawAngle, 2, rootHeightOffset,
-                settings.Blend.Progress(settledScale));
+                blendProgress, settings.Blend.HeightOffset(blendProgress));
             if (frame != lastSent)
             {
                 if (!ownedProfile.HasValue && api.HasTemporaryProfile(objectIndex))
@@ -178,7 +182,7 @@ internal sealed class BoneHeartbeatPlayer : IDisposable
                 ownedProfile = api.SetTemporary(objectIndex, frame);
                 lastSent = frame;
             }
-            Status = run ? $"Heartbeat active — {bpm:0} BPM." : jawRun ? "Jaw breathing active." : growthRun ? "Bone growth active." : heightEnabled ? "Height offset active." : blendEnabled ? blendInputs.Status : "Returning to baseline.";
+            Status = run ? $"Heartbeat active — {bpm:0} BPM." : jawRun ? "Jaw breathing active." : growthRun ? "Bone growth active." : heightEnabled ? "Height offset active." : blendEnabled ? BlendStatus : "Returning to baseline.";
         }
         catch (Exception ex)
         {
@@ -215,6 +219,7 @@ internal sealed class BoneHeartbeatPlayer : IDisposable
         envelope = 0;
         jawPhase = 0;
         jawEnvelope = 0;
+        blendTransition.Reset();
         sendElapsed = 0;
         lastSent = null;
         baselineElapsed = 1f;

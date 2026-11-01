@@ -20,6 +20,7 @@ internal sealed class AddedPlayerEffects : IDisposable
         public string? Original;
         public string? Target;
         public BoneHeartbeatProfile? Profile;
+        public readonly ProfileBlendTransition BlendTransition = new();
         public readonly HeartbeatScdVoice Loop = new(), First = new(), Second = new();
         public HeartbeatSoundPlayer? Sound;
         public void Dispose() { Sound?.Dispose(); }
@@ -28,7 +29,8 @@ internal sealed class AddedPlayerEffects : IDisposable
     private readonly Func<BoneHeartbeatSettings> settings;
     private readonly Func<float> flatHeight;
     private readonly CustomizeBlendInputs blendInputs;
-    public string BlendStatus => blendInputs.Status;
+    public string BlendStatus => !settings().Blend.Enabled ? "Blend disabled" :
+        states.Values.Select(s => s.Profile?.BlendError).FirstOrDefault(e => e != null) ?? blendInputs.Status;
     public void RetryBlend() => blendInputs.Retry();
     public AddedPlayerEffects(Func<BoneHeartbeatSettings> settings, Func<float> flatHeight, ICustomizeHeartbeatApi api)
     { this.settings = settings; this.flatHeight = flatHeight; blendInputs = new(api); }
@@ -58,6 +60,8 @@ internal sealed class AddedPlayerEffects : IDisposable
         state.Seen = true; state.Allowed = allowed; state.Settings = config;
         state.Seconds = float.IsFinite(seconds) ? Math.Clamp(seconds, 0f, 1f) : 0;
         state.Scale = scale; state.RootHeight = allowed ? height : 0;
+        if (!allowed || !config.Blend.Enabled || blendInputs.TargetJson == null) state.BlendTransition.Reset();
+        else state.BlendTransition.Update(config.Blend.Progress(scale), state.Seconds, config.Blend.TransitionSeconds);
         config.ResolveBones(state.Bones, scale, reserveBone, allowed ? reserveAddition : 0);
         bool bones = allowed && config.Enabled && config.Strength > 0 && state.Bones.Exists(b => b.Strength > 0);
         bool jaw = allowed && config.Jaw.Enabled && config.Jaw.OpeningDegrees > 0;
@@ -95,8 +99,9 @@ internal sealed class AddedPlayerEffects : IDisposable
             state.Original = source;
             state.Target = target;
         }
+        float progress = state.BlendTransition.Current;
         return state.Profile!.Build(state.Bones, state.Envelope, state.Settings.Strength,
-            state.Phase, state.JawAngle, 2, state.RootHeight, state.Settings.Blend.Progress(state.Scale));
+            state.Phase, state.JawAngle, 2, state.RootHeight, progress, state.Settings.Blend.HeightOffset(progress));
     }
     public void UpdateSounds(Func<PlayerProfileHeightHook.Actor, bool> captured)
     {

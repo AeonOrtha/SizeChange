@@ -1163,7 +1163,7 @@ public class ConfigWindow : Window, IDisposable
         }
         if (DrawCustomizeProfileChoice("Target Profile", blend.TargetProfileId, "Choose target", out var target))
         { blend.TargetProfileId = target; changed = true; }
-        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Use compatible skeletons. Unedited bones blend to or from their default transform. Child-scale/propagation switches change halfway; keep these flags alike for a smooth transition.");
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Use compatible skeletons. Effective child scaling blends continuously, with no halfway switch. Incompatible position/rotation inheritance pauses only the blend and names the bone below.");
         if (ImGui.SmallButton("Refresh choices")) plugin.BoneHeartbeat.RefreshProfiles();
         ImGui.SameLine();
         if (ImGui.SmallButton("Retry blend"))
@@ -1174,6 +1174,20 @@ public class ConfigWindow : Window, IDisposable
         ImGui.SetNextItemWidth(100f);
         if (ImGui.InputFloat("Target at size", ref end, 0, 0, "%.3f")) { blend.EndScale = end; changed = true; }
         if (ImGui.IsItemHovered()) ImGui.SetTooltip("Size multiplier: 1 is starting size. Beyond this size the blend stays at the target; shrinking reverses the blend.");
+        float transition = blend.TransitionSeconds;
+        ImGui.SetNextItemWidth(100f);
+        if (ImGui.InputFloat("Blend transition time (s)", ref transition, 0, 0, "%.3f"))
+        { blend.TransitionSeconds = transition; changed = true; }
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Smooths bone shape and profile height offsets after each size change, including shrinking. Roughly 99% complete in this time. Does not delay growth or change pulse timing. Range 0.05–10 seconds.");
+        float baseHeight = blend.BaseHeightOffset, targetHeight = blend.TargetHeightOffset;
+        ImGui.SetNextItemWidth(100f);
+        if (ImGui.InputFloat("Base profile height offset", ref baseHeight, 0, 0, "%.3f"))
+        { blend.BaseHeightOffset = baseHeight; changed = true; }
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Extra root Y at the base profile. Blends toward the target offset as size increases. Negative lowers. Existing profile root position and flat/growth/pose offsets remain additive.");
+        ImGui.SetNextItemWidth(100f);
+        if (ImGui.InputFloat("Target profile height offset", ref targetHeight, 0, 0, "%.3f"))
+        { blend.TargetHeightOffset = targetHeight; changed = true; }
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Extra root Y at the target profile. Uses the same blend progress as the bones, reverses while shrinking, and is capped at this value above Target at size.");
         if (changed) { blend.Validate(); configuration.Save(); }
         if (enabled) ImGui.TextWrapped(addedPlayers ? plugin.PlayerEffects.BlendStatus : plugin.BoneHeartbeat.BlendStatus);
         ImGui.TreePop();
