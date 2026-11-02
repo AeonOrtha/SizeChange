@@ -39,6 +39,12 @@ public class GrowthSettings
     public float DeltaMaxScaleMultiplier { get; set; } = 5.0f;
     public float AccumulatorDelaySeconds { get; set; }
     public float AccumulatorDelayVariationSeconds { get; set; }
+    public float? AccumulatorEarlierSeconds { get; set; }
+    public float? AccumulatorLaterSeconds { get; set; }
+    internal float EarlierVariation => ValidVariation(AccumulatorEarlierSeconds ?? AccumulatorDelayVariationSeconds);
+    internal float LaterVariation => ValidVariation(AccumulatorLaterSeconds ?? AccumulatorDelayVariationSeconds);
+    private static float ValidVariation(float value) => float.IsFinite(value) ? Math.Clamp(value, 0, 60) : 0;
+    public float GrowthBridgePercent { get; set; } = 25f;
     public AccumulatingEffectSettings AccumulatingEffects { get; set; } = new();
     public float GrowthOvershootSmallBoost { get; set; } = 5f;
     public float GrowthOvershootBoostRangePercent { get; set; } = 5f;
@@ -144,6 +150,9 @@ public class GrowthSettings
         AccumulatorDelaySeconds = Math.Clamp(AccumulatorDelaySeconds, 0f, 60f);
         AccumulatorDelayVariationSeconds = float.IsFinite(AccumulatorDelayVariationSeconds)
             ? Math.Clamp(AccumulatorDelayVariationSeconds, 0f, 60f) : 0f;
+        AccumulatorEarlierSeconds = EarlierVariation;
+        AccumulatorLaterSeconds = LaterVariation;
+        GrowthBridgePercent = float.IsFinite(GrowthBridgePercent) ? Math.Clamp(GrowthBridgePercent, 0, 500) : 0;
         GrowthOvershootSmallBoost = Math.Clamp(GrowthOvershootSmallBoost, 1f, 100f);
         GrowthOvershootBoostRangePercent = Math.Clamp(GrowthOvershootBoostRangePercent, 0.01f, 100f);
         GrowthOvershootPercent = Math.Clamp(GrowthOvershootPercent, 0f, 500f);
@@ -232,6 +241,9 @@ public class GrowthSettings
             DeltaMaxScaleMultiplier = settings.DeltaMaxScaleMultiplier,
             AccumulatorDelaySeconds = settings.AccumulatorDelaySeconds,
             AccumulatorDelayVariationSeconds = settings.AccumulatorDelayVariationSeconds,
+            AccumulatorEarlierSeconds = settings.EarlierVariation,
+            AccumulatorLaterSeconds = settings.LaterVariation,
+            GrowthBridgePercent = settings.GrowthBridgePercent,
             GrowthOvershootSmallBoost = settings.GrowthOvershootSmallBoost,
             GrowthOvershootBoostRangePercent = settings.GrowthOvershootBoostRangePercent,
             GrowthOvershootPercent = settings.GrowthOvershootPercent,

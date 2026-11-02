@@ -1767,19 +1767,32 @@ public class ConfigWindow : Window, IDisposable
                     Math.Clamp(accumulatorDelaySeconds, 0f, 60f);
                 configuration.Save();
             }
-            float variation = settings.AccumulatorDelayVariationSeconds;
-            if (ImGui.InputFloat($"Delay variation (± s)##{id}", ref variation, 0, 0, "%.3f"))
+            float earlier = settings.EarlierVariation, later = settings.LaterVariation;
+            if (ImGui.InputFloat($"Earlier (− s)##{id}", ref earlier, 0, 0, "%.3f"))
             {
-                settings.AccumulatorDelayVariationSeconds = float.IsFinite(variation)
-                    ? Math.Clamp(variation, 0f, 60f) : 0f;
+                settings.AccumulatorEarlierSeconds = float.IsFinite(earlier) ? Math.Clamp(earlier, 0, 60) : 0;
                 configuration.Save();
             }
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Random variation per accumulator window. 0 = fixed timing. With variation, intervals stay within 0.05–60 seconds. Release Interval 0 and immediate commands stay immediate. Overshoot duration is independent; overlapping pulses add together.");
-            if (settings.AccumulatorDelayVariationSeconds > 0 && settings.AccumulatorDelaySeconds > 0)
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("How much a release can be shortened. 0 = never earlier.");
+            if (ImGui.InputFloat($"Later (+ s)##{id}", ref later, 0, 0, "%.3f"))
             {
-                var range = GrowthReleaseTiming.Bounds(settings.AccumulatorDelaySeconds, settings.AccumulatorDelayVariationSeconds);
+                settings.AccumulatorLaterSeconds = float.IsFinite(later) ? Math.Clamp(later, 0, 60) : 0;
+                configuration.Save();
+            }
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("How much a release can be lengthened. 0 = never later. Random timing does not change overshoot duration.");
+            if ((settings.EarlierVariation > 0 || settings.LaterVariation > 0) && settings.AccumulatorDelaySeconds > 0)
+            {
+                var range = GrowthReleaseTiming.ForSettings(settings);
                 ImGui.TextDisabled($"Release range: {range.Minimum:0.00}–{range.Maximum:0.00} s");
             }
+
+            float bridge = settings.GrowthBridgePercent;
+            if (ImGui.InputFloat($"Bridge growth (%)##{id}", ref bridge, 0, 0, "%.1f"))
+            {
+                settings.GrowthBridgePercent = float.IsFinite(bridge) ? Math.Clamp(bridge, 0, 500) : 0;
+                configuration.Save();
+            }
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Extra earned growth: a small anticipation before release, then a slower tail from the overshoot peak onward. 25% adds 0.25x for a 1x contribution. 0 = off. Follows the source's size-limit rules; does not trigger extra pulses.");
 
 
         }
