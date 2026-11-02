@@ -1774,7 +1774,13 @@ public class ConfigWindow : Window, IDisposable
                     ? Math.Clamp(variation, 0f, 60f) : 0f;
                 configuration.Save();
             }
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Random variation per accumulator window. 0 = fixed timing. With variation, intervals stay within 0.05–60 seconds. Release Interval 0 and immediate commands stay immediate. Overshoot fits the shortest possible interval.");
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Random variation per accumulator window. 0 = fixed timing. With variation, intervals stay within 0.05–60 seconds. Release Interval 0 and immediate commands stay immediate. Overshoot duration is independent; overlapping pulses add together.");
+            if (settings.AccumulatorDelayVariationSeconds > 0 && settings.AccumulatorDelaySeconds > 0)
+            {
+                var range = GrowthReleaseTiming.Bounds(settings.AccumulatorDelaySeconds, settings.AccumulatorDelayVariationSeconds);
+                ImGui.TextDisabled($"Release range: {range.Minimum:0.00}–{range.Maximum:0.00} s");
+            }
+
 
         }
 
@@ -1794,7 +1800,7 @@ public class ConfigWindow : Window, IDisposable
                 configuration.Save();
             }
 
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Temporary surge on top of continuous growth. Speed controls the underlying size lerp; rise and settle shape the added pulse.");
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Temporary surge on top of continuous growth. Speed controls the underlying size lerp. Duration controls the whole added pulse.");
 
             if (settings.GrowthOvershootPercent > 0f)
             {
@@ -1815,42 +1821,22 @@ public class ConfigWindow : Window, IDisposable
                 if (ImGui.IsItemHovered())
                     ImGui.SetTooltip("New growth as % of the growth reference size where the extra boost is halved. Higher extends the boost to larger releases.");
 
-                float riseSeconds = settings.GrowthOvershootRiseSeconds;
-                if (ImGui.DragFloat($"Rise Time (s)##{id}",
-                        ref riseSeconds, 0.05f, 0.05f, 10f, "%.2f"))
+                float duration = settings.OvershootDuration;
+                if (ImGui.InputFloat($"Overshoot duration (s)##{id}", ref duration, 0, 0, "%.3f"))
                 {
-                    settings.GrowthOvershootRiseSeconds = Math.Clamp(riseSeconds, 0.05f, 10f);
+                    settings.GrowthOvershootDurationSeconds = float.IsFinite(duration) ? Math.Clamp(duration, .1f, 20f) : .7f;
                     configuration.Save();
                 }
-
-                float growthOvershootSettleSeconds =
-                    settings.GrowthOvershootSettleSeconds;
-                if (ImGui.DragFloat(
-                        $"Settle Time (s)##{id}",
-                        ref growthOvershootSettleSeconds,
-                        0.05f,
-                        0.05f,
-                        10.00f,
-                        "%.2f"))
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Total rise and return time. New pulses add to those still playing; release interval and variation never shorten this animation.");
+                float risePortion = settings.GrowthOvershootRisePercent;
+                if (ImGui.InputFloat($"Rise portion (%)##{id}", ref risePortion, 0, 0, "%.1f"))
                 {
-                    settings.GrowthOvershootSettleSeconds =
-                        Math.Clamp(growthOvershootSettleSeconds, 0.05f, 10f);
+                    settings.GrowthOvershootRisePercent = float.IsFinite(risePortion) ? Math.Clamp(risePortion, 1f, 99f) : 30f;
                     configuration.Save();
                 }
-
-                float riseCurve = settings.GrowthOvershootRiseCurve;
-                if (ImGui.SliderFloat($"Rise Curve##{id}", ref riseCurve, -2f, 2f, "%.2f"))
-                {
-                    settings.GrowthOvershootRiseCurve = riseCurve;
-                    configuration.Save();
-                }
-                float returnCurve = settings.GrowthOvershootReturnCurve;
-                if (ImGui.SliderFloat($"Return Curve##{id}", ref returnCurve, -2f, 2f, "%.2f"))
-                {
-                    settings.GrowthOvershootReturnCurve = returnCurve;
-                    configuration.Save();
-                }
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Negative shifts the curve earlier; positive shifts it later. The peak may exceed the size limit.");
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Share of total duration used to rise, from 1–99%. Return always uses the remaining time. Default: 30% rise, 70% return.");
+                float riseTime = settings.OvershootDuration * settings.GrowthOvershootRisePercent / 100f;
+                ImGui.TextDisabled($"Rise: {riseTime:0.000} s | Return: {settings.OvershootDuration - riseTime:0.000} s");
 
 
             }

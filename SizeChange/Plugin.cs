@@ -920,7 +920,7 @@ public sealed class Plugin : IDalamudPlugin
                 TryResolveActionTimeline, accumulatingMonster,
                 MonsterIdleActivity.Interval(GrowthReleaseTiming.Bounds(monsterSettings.AccumulatorDelaySeconds,
                     monsterSettings.AccumulatorDelayVariationSeconds).Maximum,
-                    monsterSettings.GrowthOvershootRiseSeconds, monsterSettings.GrowthOvershootSettleSeconds),
+                    monsterSettings.OvershootDuration, 0f),
                 monsterSettings.GrowthFromDelta);
             if (!globallyDisabled && !drainTransition)
                 foreach (string filter in new List<string>(monsterAnimationTests.Keys))
@@ -1425,15 +1425,7 @@ public sealed class Plugin : IDalamudPlugin
                 charState.PlayerScale * pulseReference * GrowthOvershootPulse.BoostSmallRelease(
                     pulseGrowthAmount / pulseReference, settings.GrowthOvershootSmallBoost,
                     settings.GrowthOvershootBoostRangePercent) * settings.GrowthOvershootPercent / 100f,
-                settings.GrowthOvershootRiseSeconds,
-                settings.GrowthOvershootSettleSeconds,
-                settings.GrowthOvershootRiseCurve,
-                settings.GrowthOvershootReturnCurve,
-                // Fit before even the shortest possible next window. This
-                // changes the visual duration, never the release deadline.
-                immediateAmount > 0 ? 0f : GrowthReleaseTiming.Bounds(settings.AccumulatorDelaySeconds,
-                    settings.AccumulatorDelayVariationSeconds).Minimum,
-                deltaSeconds);
+                settings.OvershootDuration, settings.GrowthOvershootRisePercent);
         }
 
         scale = charState.GrowthVisual.Update(previousScale, intendedTargetScale,

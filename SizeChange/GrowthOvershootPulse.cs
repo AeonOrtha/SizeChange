@@ -2,8 +2,7 @@ using System;
 
 namespace SizeChange;
 
-// Visual-only curve, also used for an additive offset returning to zero.
-// It never changes earned growth or the accumulator clock.
+// One finite additive envelope. Timing is independent of release cadence.
 internal struct GrowthOvershootPulse
 {
     // Multiplier approaches 1 as releases grow. The resulting amplitude stays
@@ -16,75 +15,36 @@ internal struct GrowthOvershootPulse
         return growth * (1f + (boost - 1f) * range / (range + growth));
     }
 
-    public bool IsActive { get; private set; }
-    private bool rising;
-    private float startScale;
-    private float overshootScale;
-    private float peakScale;
-    private float elapsed;
-    private float riseSeconds;
-    private float settleSeconds;
-    private float riseCurve;
-    private float returnCurve;
+    private double elapsed;
+    private double duration;
+    private double amplitude;
+    private double riseFraction;
+    public bool IsActive => duration > 0 && elapsed < duration;
+    internal bool CanCombine(float seconds, float risePercent) => elapsed == 0 && duration == seconds && riseFraction == RiseFraction(risePercent);
+    private static double RiseFraction(float percent) => float.IsFinite(percent) ? Math.Clamp(percent, 1f, 99f) / 100d : .3;
+    internal void Combine(float extraScale) => amplitude += extraScale;
 
-    public void Start(float visibleScale, float extraScale, float riseTime,
-        float settleTime, float riseCurveBias, float returnCurveBias,
-        float accumulatorDelay, float frameSeconds)
+    public void Start(float extraScale, float seconds, float risePercent = 30)
     {
-        startScale = visibleScale;
-        overshootScale = extraScale;
-        riseSeconds = riseTime;
-        settleSeconds = settleTime;
-        riseCurve = Math.Clamp(riseCurveBias, -2f, 2f);
-        returnCurve = Math.Clamp(returnCurveBias, -2f, 2f);
-        if (accumulatorDelay > 0f)
-        {
-            // Fit the animation to the clock, never the clock to the animation.
-            // Reserve two updates for phase rounding and the settled frame.
-            float budget = Math.Max(frameSeconds, accumulatorDelay - 2f * frameSeconds);
-            float fit = Math.Min(1f, budget / (riseSeconds + settleSeconds));
-            riseSeconds *= fit;
-            settleSeconds *= fit;
-        }
-        elapsed = 0f;
-        rising = true;
-        IsActive = true;
+        elapsed = 0;
+        duration = float.IsFinite(seconds) && seconds > 0 ? Math.Clamp(seconds, .1f, 20f) : .7f;
+        amplitude = float.IsFinite(extraScale) ? Math.Max(0, extraScale) : 0;
+        riseFraction = RiseFraction(risePercent);
     }
 
-    public float Update(float frameSeconds, float intendedScale)
+    public double Update(float frameSeconds)
     {
-        elapsed += Math.Max(0f, frameSeconds);
-        if (rising)
-        {
-            peakScale = intendedScale + overshootScale;
-            float t = riseSeconds <= 0f ? 1f : Math.Clamp(elapsed / riseSeconds, 0f, 1f);
-            float visibleScale = float.Lerp(startScale, peakScale, EasePulse(t, riseCurve));
-            if (t >= 1f)
-            {
-                // Render the actual peak for this update before returning.
-                rising = false;
-                elapsed = 0f;
-            }
-            return visibleScale;
-        }
-
-        float settleT = settleSeconds <= 0f ? 1f : Math.Clamp(elapsed / settleSeconds, 0f, 1f);
-        float result = float.Lerp(peakScale, intendedScale, EasePulse(settleT, returnCurve));
-        if (settleT >= 1f)
-            IsActive = false;
-        return result;
+        if (!IsActive) return 0;
+        if (float.IsFinite(frameSeconds)) elapsed += Math.Max(0, frameSeconds);
+        if (!IsActive) return 0;
+        double progress = elapsed / duration;
+        // A rounded rise and gentle return using the remaining time. Both have
+        // zero velocity and acceleration at their endpoints, including peak.
+        double value = progress < riseFraction
+            ? Ease(progress / riseFraction)
+            : 1 - Ease((progress - riseFraction) / (1 - riseFraction));
+        return amplitude * value;
     }
 
-    // Quintic easing gives zero velocity and acceleration at both ends.
-    // The rise rounds into the peak and the return rounds into the settled
-    // size, instead of reversing a constant-speed lerp abruptly.
-    private static float EasePulse(float t, float curveBias)
-    {
-        // Negative bias puts more movement early in the phase; positive bias
-        // delays it. Warping before easing preserves the rounded endpoints for
-        // every setting, including the shared rise/return peak.
-        float bias = MathF.Pow(2f, curveBias);
-        t /= bias + (1f - bias) * t;
-        return Math.Clamp(t * t * t * (t * (6f * t - 15f) + 10f), 0f, 1f);
-    }
+    private static double Ease(double t) => Math.Clamp(t * t * t * (t * (6 * t - 15) + 10), 0, 1);
 }

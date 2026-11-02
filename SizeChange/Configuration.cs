@@ -43,6 +43,13 @@ public class GrowthSettings
     public float GrowthOvershootSmallBoost { get; set; } = 5f;
     public float GrowthOvershootBoostRangePercent { get; set; } = 5f;
     public float GrowthOvershootPercent { get; set; }
+    // Zero/missing migrates old profiles to the sum of their rise and settle.
+    public float GrowthOvershootDurationSeconds { get; set; }
+    public float GrowthOvershootRisePercent { get; set; } = 30f;
+    internal float OvershootDuration => float.IsFinite(GrowthOvershootDurationSeconds) && GrowthOvershootDurationSeconds > 0
+        ? Math.Clamp(GrowthOvershootDurationSeconds, .1f, 20f)
+        : Math.Clamp((float.IsFinite(GrowthOvershootRiseSeconds) ? GrowthOvershootRiseSeconds : .35f) +
+            (float.IsFinite(GrowthOvershootSettleSeconds) ? GrowthOvershootSettleSeconds : .35f), .1f, 20f);
     public float GrowthOvershootRiseSeconds { get; set; } = 0.35f;
     public float GrowthOvershootRiseCurve { get; set; }
     public float GrowthOvershootReturnCurve { get; set; }
@@ -140,6 +147,8 @@ public class GrowthSettings
         GrowthOvershootSmallBoost = Math.Clamp(GrowthOvershootSmallBoost, 1f, 100f);
         GrowthOvershootBoostRangePercent = Math.Clamp(GrowthOvershootBoostRangePercent, 0.01f, 100f);
         GrowthOvershootPercent = Math.Clamp(GrowthOvershootPercent, 0f, 500f);
+        GrowthOvershootDurationSeconds = OvershootDuration;
+        GrowthOvershootRisePercent = float.IsFinite(GrowthOvershootRisePercent) ? Math.Clamp(GrowthOvershootRisePercent, 1f, 99f) : 30f;
         GrowthOvershootRiseSeconds = Math.Clamp(GrowthOvershootRiseSeconds, 0.05f, 10f);
         GrowthOvershootRiseCurve = Math.Clamp(GrowthOvershootRiseCurve, -2f, 2f);
         GrowthOvershootReturnCurve = Math.Clamp(GrowthOvershootReturnCurve, -2f, 2f);
@@ -226,6 +235,8 @@ public class GrowthSettings
             GrowthOvershootSmallBoost = settings.GrowthOvershootSmallBoost,
             GrowthOvershootBoostRangePercent = settings.GrowthOvershootBoostRangePercent,
             GrowthOvershootPercent = settings.GrowthOvershootPercent,
+            GrowthOvershootDurationSeconds = settings.OvershootDuration,
+            GrowthOvershootRisePercent = settings.GrowthOvershootRisePercent,
             GrowthOvershootRiseSeconds = settings.GrowthOvershootRiseSeconds,
             GrowthOvershootRiseCurve = settings.GrowthOvershootRiseCurve,
             GrowthOvershootReturnCurve = settings.GrowthOvershootReturnCurve,
