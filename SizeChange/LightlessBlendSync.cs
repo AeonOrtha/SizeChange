@@ -85,6 +85,8 @@ internal sealed class LightlessBlendSync : IDisposable
     public string Status { get; private set; } = "Off";
     public string CaptureStatus { get; private set; } = "No snapshot";
     public string RuntimeVersion { get; private set; } = string.Empty;
+    public string CompatibilityDetails { get; private set; } = "No Lightless runtime inspected yet.";
+    public string Diagnostics => $"SizeChange {typeof(LightlessBlendSync).Assembly.GetName().Version}\n{Status}\n{Counters}\n{CompatibilityDetails}";
     public string Counters => $"Reads: {Interlocked.Read(ref reads)} | Served: {Interlocked.Read(ref served)} | Last snapshot: {Interlocked.Read(ref lastRevision)}";
     public long SnapshotRevision => snapshot.Revision;
     public bool Installed => method != null && accepting;
@@ -131,6 +133,8 @@ internal sealed class LightlessBlendSync : IDisposable
                 if (types.Length != 1)
                 {
                     Stop(); Status = $"Lightless runtime types: {types.Length}; expected 1";
+                    CompatibilityDetails = $"Expected type: {CallerTypeName}\nMatches: {types.Length}\n" +
+                        string.Join("\n", types.Select(t => t.Assembly.GetName().FullName));
                 }
                 else if (!Installed || callerType != types[0])
                 { Stop(); Install(types[0]!); }
@@ -156,23 +160,60 @@ internal sealed class LightlessBlendSync : IDisposable
             accepting = false; snapshot.Observe(null, Environment.TickCount64); failed = true;
             if (!enabled) cleanupFailed = true;
             Status = "Unavailable: " + ex.GetBaseException().Message;
-            log(Status);
+            CaptureStatus = "Hook not installed; copy diagnostics";
+            log(Diagnostics);
         }
     }
 
     internal static (MethodInfo Method, PropertyInfo Available) CheckSignature(Type type)
     {
-        var candidate = type.GetMethod("GetScaleAsync", BindingFlags.Public | BindingFlags.Instance,
-            null, new[] { typeof(nint) }, null);
+        var candidates = type.GetMethods(BindingFlags.Public | BindingFlags.Instance)
+            .Where(m => m.Name == "GetScaleAsync" && !m.IsGenericMethod &&
+                m.GetParameters().Length == 1 && m.GetParameters()[0].ParameterType == typeof(nint)).ToArray();
+        if (candidates.Length != 1)
+            throw new NotSupportedException($"Expected public GetScaleAsync(IntPtr); found {candidates.Length} matching methods. Copy diagnostics.");
+        var candidate = candidates[0];
+        if (candidate.ReturnType != typeof(Task<string>))
+            throw new NotSupportedException($"GetScaleAsync returns {TypeName(candidate.ReturnType)}; expected Task<String>. Copy diagnostics.");
         var available = type.GetProperty("APIAvailable", BindingFlags.Public | BindingFlags.Instance);
-        if (candidate == null || candidate.ReturnType != typeof(Task<string>) || candidate.IsGenericMethod ||
-            available?.PropertyType != typeof(bool) || available.GetMethod == null || available.GetIndexParameters().Length != 0)
-            throw new NotSupportedException("Lightless Customize+ reader signature changed.");
+        if (available == null)
+            throw new NotSupportedException("Missing public APIAvailable property. Copy diagnostics.");
+        if (available.PropertyType != typeof(bool) || available.GetMethod?.IsPublic != true || available.GetIndexParameters().Length != 0)
+            throw new NotSupportedException("APIAvailable must have a public Boolean getter. Copy diagnostics.");
         return (candidate, available);
+    }
+
+    private static string TypeName(Type type) => type.IsGenericType
+        ? (type.GetGenericTypeDefinition().FullName ?? type.Name).Split('`')[0] + "<" +
+            string.Join(", ", type.GetGenericArguments().Select(TypeName)) + ">"
+        : type.FullName ?? type.Name;
+
+    // Inspect metadata only: never invoke unknown methods/getters or log JSON,
+    // actor identities, credentials, or runtime field values.
+    internal static string DescribeRuntime(Type type)
+    {
+        const BindingFlags flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static;
+        var text = new StringBuilder();
+        text.AppendLine("Assembly: " + type.Assembly.GetName().FullName);
+        text.AppendLine("Type: " + type.FullName);
+        text.AppendLine("Expected: public Task<String> GetScaleAsync(IntPtr); public Boolean APIAvailable { get; }");
+        text.AppendLine("Observed methods:");
+        foreach (var m in type.GetMethods(flags).Where(m => m.DeclaringType != typeof(object) && !m.IsSpecialName)
+                     .OrderBy(m => m.Name, StringComparer.Ordinal).ThenBy(m => m.GetParameters().Length).Take(64))
+            text.AppendLine($"  {(m.IsPublic ? "public" : "non-public")} {(m.IsStatic ? "static" : "instance")} {TypeName(m.ReturnType)} {m.Name}" +
+                (m.IsGenericMethod ? "<generic>" : "") + "(" + string.Join(", ", m.GetParameters().Select(p => TypeName(p.ParameterType) + " " + p.Name)) + ")");
+        text.AppendLine("Observed availability members:");
+        foreach (var p in type.GetProperties(flags).Where(p => p.Name.Contains("Available", StringComparison.OrdinalIgnoreCase)).Take(16))
+            text.AppendLine($"  property {TypeName(p.PropertyType)} {p.Name}; getter: {(p.GetMethod == null ? "none" : p.GetMethod.IsPublic ? "public" : "non-public")}");
+        foreach (var f in type.GetFields(flags).Where(f => f.Name.Contains("Available", StringComparison.OrdinalIgnoreCase)).Take(16))
+            text.AppendLine($"  field {TypeName(f.FieldType)} {f.Name}; {(f.IsPublic ? "public" : "non-public")}");
+        return text.ToString();
     }
 
     internal void Install(Type type)
     {
+        RuntimeVersion = type.Assembly.GetName().Name + " " + type.Assembly.GetName().Version;
+        CompatibilityDetails = DescribeRuntime(type);
         var signature = CheckSignature(type);
         if (active != null && active != this) throw new InvalidOperationException("Another outgoing blend hook is active.");
         runtime ??= new("SizeChange.Self.LightlessBlendSnapshot", assemblyPath);
@@ -186,7 +227,6 @@ internal sealed class LightlessBlendSync : IDisposable
             accepting = false; throw;
         }
         accepting = true;
-        RuntimeVersion = type.Assembly.GetName().Name + " " + type.Assembly.GetName().Version;
         Status = "Hook ready (manual resync)";
     }
 

@@ -101,6 +101,8 @@ The outgoing hook is optional and off by default. It wraps the managed `Lightles
 
 The candidate was verified in public Lightless commit `dc0265f` (1.11.4, 2025-08-30). The current Lightless source host could not be accessed, so installed-version compatibility and delivery still require the in-game test above. Continuous updates and receiver interpolation are deliberately deferred until that test succeeds.
 
+If the hook is unavailable, **Copy Diagnostics** in **Blend Sync (Test)** captures the exact loaded Lightless assembly version, reader method signatures, availability-member types and failure reason. It works while Capture is disabled; **Compatibility Details** shows the same metadata in a collapsed section. The diagnostic reads metadata only, with no profile contents, player identities or runtime field values. Retry reruns the check; it cannot adapt an incompatible method by itself. A missing reader, changed return type and missing availability property now have distinct messages.
+
 ## Import and export
 
 Each tab supports JSON import/export. **Self and Added Players exports work in both directions**, including custom bone names and effect settings. Cross-tab imports preserve destination player selections and enable switches. Normal heartbeat imports retain the destination base-profile selection; an enabled profile blend carries its explicit base/target choices and range. Profile choices are local Customize+ IDs, so the referenced profiles must exist on the importing machine. Same-tab imports replace that tab's configuration. Imports reset its live growth and preview; older exports remain supported, with chat triggers and profile blending off. Monster exports stay separate.

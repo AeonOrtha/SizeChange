@@ -205,6 +205,13 @@ public class ConfigWindow : Window, IDisposable
         ImGui.EndDisabled();
         ImGui.SameLine();
         if (ImGui.Button("Retry##outgoing-blend")) sync.Retry();
+        if (ImGui.Button("Copy Diagnostics##outgoing-blend")) ImGui.SetClipboardText(sync.Diagnostics);
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Copies the loaded Lightless version, observed method signatures and failure reason. Available even when capture is disabled. No profile contents or player details.");
+        if (ImGui.TreeNode("Compatibility Details##outgoing-blend"))
+        {
+            ImGui.TextWrapped(sync.CompatibilityDetails);
+            ImGui.TreePop();
+        }
         ImGui.TextWrapped(sync.CaptureStatus);
         ImGui.TextUnformatted(sync.Counters);
         if (ImGui.IsItemHovered()) ImGui.SetTooltip("Served confirms that Lightless read a snapshot, not that the server delivered it. Last snapshot identifies the revision it read. " + sync.RuntimeVersion);
