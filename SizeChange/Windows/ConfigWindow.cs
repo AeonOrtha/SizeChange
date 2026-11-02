@@ -136,6 +136,7 @@ public class ConfigWindow : Window, IDisposable
         DrawGrowthSettings(configuration.SelfSettings, "self");
         DrawBoneHeartbeat();
         DrawOutgoingBlendSync();
+        DrawSelfWeaponFollow();
         if (ImGui.TreeNode("Transform Values##self"))
         {
             ImGui.TextWrapped(plugin.TransformDiagnostics(SCActorGroup.Self));
@@ -150,11 +151,30 @@ public class ConfigWindow : Window, IDisposable
             configuration.SelfSettings = GrowthSettings.Defaults();
             configuration.SelfBoneHeartbeat = new BoneHeartbeatSettings();
             configuration.SelfProfileSync = new OutgoingBlendSyncSettings();
+            configuration.SelfWeaponFollow = new SelfWeaponFollowSettings();
             plugin.OutgoingBlendSync.ClearSnapshot();
             configuration.Save();
         }
 
         ImGui.EndTabItem();
+    }
+
+    private void DrawSelfWeaponFollow()
+    {
+        if (!ImGui.CollapsingHeader("Weapon Attachment (Test)")) return;
+        bool enabled = configuration.SelfWeaponFollow.Enabled;
+        if (ImGui.Checkbox("Follow Self hands", ref enabled))
+        {
+            configuration.SelfWeaponFollow.Enabled = enabled;
+            configuration.Save();
+        }
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Experimental. Drawn weapons only. Follows Customize+ hand changes while keeping the existing grip offset and weapon scale. Does not edit .atch files. Turn off to stop and restore the last owned correction. Not tested in-game.");
+        ImGui.TextWrapped(plugin.WeaponFollow.Status);
+        if (enabled)
+        {
+            ImGui.TextUnformatted(plugin.WeaponFollow.Counters);
+            if (ImGui.Button("Retry##self-weapons")) plugin.WeaponFollow.Retry();
+        }
     }
 
     private void DrawGrowthPreview(GrowthSettings settings, SCActorGroup group)

@@ -154,6 +154,7 @@ public sealed class Plugin : IDalamudPlugin
     private readonly GrowthVfxPlayer GrowthVfxPlayer;
     internal BoneHeartbeatPlayer BoneHeartbeat { get; }
     internal LightlessBlendSync OutgoingBlendSync { get; }
+    internal SelfWeaponFollow WeaponFollow { get; }
     internal PlayerProfileHeightCompatibility PlayerProfileHeight { get; }
     internal AddedPlayerEffects PlayerEffects { get; }
     private bool drainInDuty;
@@ -179,6 +180,9 @@ public sealed class Plugin : IDalamudPlugin
         BoneHeartbeat = new BoneHeartbeatPlayer(new CustomizeHeartbeatApi(PluginInterface));
         OutgoingBlendSync = new(PluginInterface.AssemblyLocation.FullName,
             message => Log.Warning("Outgoing blend sync: {Message}", message));
+        WeaponFollow = new(PluginInterface.AssemblyLocation.FullName,
+            message => Log.Warning("Self weapon follow: {Message}", message),
+            new SelfWeaponFollowNative(() => Configuration.Enable && Configuration.AffectSelf && Configuration.SelfWeaponFollow.Enabled));
         PlayerEffects = new(() => Configuration.PlayerBoneHeartbeat, () => Configuration.PlayerProfileHeight.Offset,
             new CustomizeHeartbeatApi(PluginInterface), () => Configuration.PlayerProfileHeight.FollowIncomingAppearance);
         PlayerProfileHeight = new PlayerProfileHeightCompatibility(
@@ -219,6 +223,7 @@ public sealed class Plugin : IDalamudPlugin
         disposed = true;
         Framework.Update -= OnFrameworkUpdate;
         OutgoingBlendSync.Dispose();
+        WeaponFollow.Dispose();
         ActionObserver.Dispose();
         PeriodicObserver.Dispose();
         receivedEmotes.Dispose();
@@ -641,6 +646,9 @@ public sealed class Plugin : IDalamudPlugin
         finally
         {
             UpdateOutgoingBlendSync(completed);
+            WeaponFollow.Tick(Configuration.SelfWeaponFollow.Enabled,
+                completed && Configuration.Enable && Configuration.AffectSelf && ClientState.IsLoggedIn && !ClientState.IsPvP &&
+                !Condition[ConditionFlag.BetweenAreas] && !Condition[ConditionFlag.BetweenAreas51]);
             monsterAnimations.EndFrame();
             immediateGrowth.Clear();
             monsterAnimationTests.Clear();

@@ -24,6 +24,7 @@ internal sealed class ProfileSettingsFile
     public Dictionary<string, List<MonsterAnimationSlot>>? MonsterAnimations { get; set; }
     public PlayerProfileHeightSettings? LocalHeight { get; set; }
     public OutgoingBlendSyncSettings? OutgoingBlendSync { get; set; }
+    public SelfWeaponFollowSettings? WeaponFollow { get; set; }
 
     private static readonly JsonSerializerOptions Options = new()
     {
@@ -48,6 +49,7 @@ internal sealed class ProfileSettingsFile
         MonsterAnimations = group == SCActorGroup.Monster ? config.MonsterAnimations : null,
         LocalHeight = group == SCActorGroup.Player ? config.PlayerProfileHeight : null,
         OutgoingBlendSync = group == SCActorGroup.Self ? config.SelfProfileSync : null,
+        WeaponFollow = group == SCActorGroup.Self ? config.SelfWeaponFollow : null,
     };
     internal string ToJson() => JsonSerializer.Serialize(this, Options);
     internal static ProfileSettingsFile Parse(string json, SCActorGroup group)
@@ -120,6 +122,7 @@ internal sealed class ProfileSettingsFile
                 config.SelfSettings = growth;
                 if (!cross) config.AffectSelf = AffectSelf ?? true;
                 if (!cross) config.SelfProfileSync = Copy(OutgoingBlendSync ?? new());
+                if (!cross) config.SelfWeaponFollow = Copy(WeaponFollow ?? new());
                 config.SelfFlatHeightOffset = height; config.SelfBoneHeartbeat = bones;
                 break;
             case SCActorGroup.Player:

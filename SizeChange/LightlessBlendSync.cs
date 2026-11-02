@@ -66,6 +66,7 @@ internal sealed class OutgoingBlendSnapshot
 internal sealed class LightlessBlendSync : IDisposable
 {
     internal const string CallerTypeName = "LightlessSync.Interop.Ipc.IpcCallerCustomize";
+    internal const string CaptureInterfaceName = "LightlessSync.Interop.Ipc.ICustomizePlusCharacterIpc";
     private static LightlessBlendSync? active;
     private readonly string assemblyPath;
     private readonly Action<string> log;
@@ -167,14 +168,42 @@ internal sealed class LightlessBlendSync : IDisposable
 
     internal static (MethodInfo Method, PropertyInfo Available) CheckSignature(Type type)
     {
-        var candidates = type.GetMethods(BindingFlags.Public | BindingFlags.Instance)
-            .Where(m => m.Name == "GetScaleAsync" && !m.IsGenericMethod &&
-                m.GetParameters().Length == 1 && m.GetParameters()[0].ParameterType == typeof(nint)).ToArray();
-        if (candidates.Length != 1)
-            throw new NotSupportedException($"Expected public GetScaleAsync(IntPtr); found {candidates.Length} matching methods. Copy diagnostics.");
-        var candidate = candidates[0];
-        if (candidate.ReturnType != typeof(Task<string>))
-            throw new NotSupportedException($"GetScaleAsync returns {TypeName(candidate.ReturnType)}; expected Task<String>. Copy diagnostics.");
+        MethodInfo candidate;
+        var contracts = type.GetInterfaces().Where(i => i.FullName == CaptureInterfaceName).ToArray();
+        if (contracts.Length != 0)
+        {
+            if (contracts.Length != 1) throw new NotSupportedException("Ambiguous Customize+ capture interface. Copy diagnostics.");
+            // Lightless 3.3.1.1 explicitly implements this interface. Resolve its
+            // concrete target instead of patching the abstract interface or
+            // guessing a private method by a substring of its name.
+            var contract = contracts[0];
+            var captures = contract.GetMethods().Where(m => m.Name == "CaptureScaleAsync" && !m.IsGenericMethod &&
+                m.ReturnType == typeof(ValueTask<string>) && m.GetParameters().Length == 2 &&
+                m.GetParameters()[0].ParameterType == typeof(nint) &&
+                m.GetParameters()[1].ParameterType == typeof(CancellationToken)).ToArray();
+            if (captures.Length != 1)
+                throw new NotSupportedException("Expected ValueTask<String> ICustomizePlusCharacterIpc.CaptureScaleAsync(IntPtr, CancellationToken). Copy diagnostics.");
+            var map = type.GetInterfaceMap(contract);
+            int index = Array.IndexOf(map.InterfaceMethods, captures[0]);
+            if (index < 0) throw new NotSupportedException("Customize+ capture interface target is missing. Copy diagnostics.");
+            candidate = map.TargetMethods[index];
+            if (candidate.IsAbstract || candidate.IsStatic || candidate.ContainsGenericParameters || candidate.DeclaringType?.IsInterface == true ||
+                candidate.ReturnType != typeof(ValueTask<string>) || candidate.GetMethodBody() == null)
+                throw new NotSupportedException("Customize+ capture implementation cannot be patched. Copy diagnostics.");
+        }
+        else
+        {
+            // Retain the older Lightless reader without accepting unverified
+            // overloads or return types.
+            var candidates = type.GetMethods(BindingFlags.Public | BindingFlags.Instance)
+                .Where(m => m.Name == "GetScaleAsync" && !m.IsGenericMethod &&
+                    m.GetParameters().Length == 1 && m.GetParameters()[0].ParameterType == typeof(nint)).ToArray();
+            if (candidates.Length != 1)
+                throw new NotSupportedException($"No supported capture interface; expected public GetScaleAsync(IntPtr), found {candidates.Length} matching methods. Copy diagnostics.");
+            candidate = candidates[0];
+            if (candidate.ReturnType != typeof(Task<string>))
+                throw new NotSupportedException($"GetScaleAsync returns {TypeName(candidate.ReturnType)}; expected Task<String>. Copy diagnostics.");
+        }
         var available = type.GetProperty("APIAvailable", BindingFlags.Public | BindingFlags.Instance);
         if (available == null)
             throw new NotSupportedException("Missing public APIAvailable property. Copy diagnostics.");
@@ -196,7 +225,7 @@ internal sealed class LightlessBlendSync : IDisposable
         var text = new StringBuilder();
         text.AppendLine("Assembly: " + type.Assembly.GetName().FullName);
         text.AppendLine("Type: " + type.FullName);
-        text.AppendLine("Expected: public Task<String> GetScaleAsync(IntPtr); public Boolean APIAvailable { get; }");
+        text.AppendLine("Supported: ValueTask<String> ICustomizePlusCharacterIpc.CaptureScaleAsync(IntPtr, CancellationToken), or public Task<String> GetScaleAsync(IntPtr); public Boolean APIAvailable { get; }");
         text.AppendLine("Observed methods:");
         foreach (var m in type.GetMethods(flags).Where(m => m.DeclaringType != typeof(object) && !m.IsSpecialName)
                      .OrderBy(m => m.Name, StringComparer.Ordinal).ThenBy(m => m.GetParameters().Length).Take(64))
@@ -215,11 +244,13 @@ internal sealed class LightlessBlendSync : IDisposable
         RuntimeVersion = type.Assembly.GetName().Name + " " + type.Assembly.GetName().Version;
         CompatibilityDetails = DescribeRuntime(type);
         var signature = CheckSignature(type);
+        CompatibilityDetails += $"Selected: {TypeName(signature.Method.ReturnType)} {signature.Method.Name}\n";
         if (active != null && active != this) throw new InvalidOperationException("Another outgoing blend hook is active.");
         runtime ??= new("SizeChange.Self.LightlessBlendSnapshot", assemblyPath);
         callerType = type; apiAvailable = signature.Available; method = signature.Method;
         active = this;
-        var prefix = typeof(LightlessBlendSync).GetMethod(nameof(BeforeRead), BindingFlags.NonPublic | BindingFlags.Static)!;
+        bool valueTask = method.ReturnType == typeof(ValueTask<string>);
+        var prefix = typeof(LightlessBlendSync).GetMethod(valueTask ? nameof(BeforeCapture) : nameof(BeforeRead), BindingFlags.NonPublic | BindingFlags.Static)!;
         try { runtime.Patch(method, prefix); }
         catch
         {
@@ -227,22 +258,38 @@ internal sealed class LightlessBlendSync : IDisposable
             accepting = false; throw;
         }
         accepting = true;
-        Status = "Hook ready (manual resync)";
+        Status = $"Hook ready: {(valueTask ? "CaptureScaleAsync" : "GetScaleAsync")} (manual resync)";
     }
 
     private static bool BeforeRead(object __instance, nint __0, ref Task<string?> __result)
     {
+        if (!TrySnapshot(__instance, __0, CancellationToken.None, out string encoded)) return true;
+        __result = Task.FromResult<string?>(encoded);
+        return false;
+    }
+
+    private static bool BeforeCapture(object __instance, nint __0, CancellationToken __1, ref ValueTask<string?> __result)
+    {
+        if (!TrySnapshot(__instance, __0, __1, out string encoded)) return true;
+        __result = new ValueTask<string?>(encoded);
+        return false;
+    }
+
+    private static bool TrySnapshot(object instance, nint address, CancellationToken cancellationToken, out string encoded)
+    {
+        encoded = string.Empty;
         var owner = active;
-        if (owner == null || !owner.accepting) return true;
+        if (owner == null || !owner.accepting) return false;
         Interlocked.Increment(ref owner.reads);
         try
         {
-            if (owner.apiAvailable?.GetValue(__instance) is not true ||
-                !owner.snapshot.TryRead(__0, Environment.TickCount64, out string encoded, out long revision)) return true;
-            __result = Task.FromResult<string?>(encoded);
+            // Leave cancellation to Lightless's own implementation; never turn
+            // an already-cancelled capture into a successful snapshot read.
+            if (cancellationToken.IsCancellationRequested || owner.apiAvailable?.GetValue(instance) is not true ||
+                !owner.snapshot.TryRead(address, Environment.TickCount64, out encoded, out long revision)) return false;
             Interlocked.Increment(ref owner.served);
             Interlocked.Exchange(ref owner.lastRevision, revision);
-            return false;
+            return true;
         }
         catch
         {
@@ -250,7 +297,7 @@ internal sealed class LightlessBlendSync : IDisposable
             owner.accepting = false;
             owner.failed = true;
             owner.Status = "Outgoing hook failed; normal Lightless reads resumed. Retry.";
-            return true;
+            return false;
         }
     }
 
