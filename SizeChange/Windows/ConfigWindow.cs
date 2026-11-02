@@ -1767,6 +1767,14 @@ public class ConfigWindow : Window, IDisposable
                     Math.Clamp(accumulatorDelaySeconds, 0f, 60f);
                 configuration.Save();
             }
+            float variation = settings.AccumulatorDelayVariationSeconds;
+            if (ImGui.InputFloat($"Delay variation (± s)##{id}", ref variation, 0, 0, "%.3f"))
+            {
+                settings.AccumulatorDelayVariationSeconds = float.IsFinite(variation)
+                    ? Math.Clamp(variation, 0f, 60f) : 0f;
+                configuration.Save();
+            }
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Random variation per accumulator window. 0 = fixed timing. With variation, intervals stay within 0.05–60 seconds. Release Interval 0 and immediate commands stay immediate. Overshoot fits the shortest possible interval.");
 
         }
 
@@ -1785,6 +1793,8 @@ public class ConfigWindow : Window, IDisposable
                     Math.Clamp(growthOvershootPercent, 0f, 500f);
                 configuration.Save();
             }
+
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Temporary surge on top of continuous growth. Speed controls the underlying size lerp; rise and settle shape the added pulse.");
 
             if (settings.GrowthOvershootPercent > 0f)
             {

@@ -50,7 +50,7 @@ struct SCCharacterState
     public SizeDrainSettings? ActiveDrainMode;
     public List<AetherSources.Hit>? AetherHits;
     public float AccumulatorRemainingSeconds;
-    public GrowthOvershootPulse OvershootPulse;
+    public GrowthVisualScale GrowthVisual;
     public bool HasPreviousHealth;
     public bool WasPreviewing;
     public float BaseDrawOffsetY;
@@ -581,7 +581,7 @@ public sealed class Plugin : IDalamudPlugin
         if (!TryBindTransforms(actor, draw, out charState.Transform)) return;
         charState.PlayerScale = charState.Transform.Y.Baseline;
         charState.PreviousScale = charState.ObservedScale = draw->Scale.Y;
-        charState.OvershootPulse = default;
+        charState.GrowthVisual = default;
         CharacterIdToLastScaleMap[actor->EntityId] = charState;
     }
 
@@ -843,7 +843,7 @@ public sealed class Plugin : IDalamudPlugin
             accumulating || (boneGrowthState.AfterglowActive && !boneGrowthState.Transform.ScaleConflict),
             deltaSeconds,
             accumulating || (TryGetCharacterState(localActor, out var jawState) &&
-                (jawState.OvershootPulse.IsActive || jawState.PreviousScale > scaleBeforeUpdate + 0.00001f)),
+                (jawState.GrowthVisual.IsPulsing || jawState.PreviousScale > scaleBeforeUpdate + 0.00001f)),
             pendingDamage, Configuration.SelfSettings.MaximumHealthLossRatioPerTrigger,
             settledSelfScale, boneGrowthState.SelfRootHeightOffset,
             Configuration.SelfSettings.Digestion.BoneName,
@@ -890,7 +890,7 @@ public sealed class Plugin : IDalamudPlugin
                 float settled = hasState ? Configuration.PlayerSettings.GrowthFromDelta ? playerState.GrowthMultiplier :
                     playerState.PlayerScale > 0 ? playerState.PreviousScale / playerState.PlayerScale : 1f : 1f;
                 bool growing = accumulatingPlayer || (hasState && !playerState.Transform.ScaleConflict &&
-                    (playerState.OvershootPulse.IsActive || playerState.PreviousScale > previous + 0.00001f));
+                    (playerState.GrowthVisual.IsPulsing || playerState.PreviousScale > previous + 0.00001f));
                 PlayerEffects.Update(identity, allowed,
                     accumulatingPlayer || (hasState && playerState.AfterglowActive && !playerState.Transform.ScaleConflict), growing,
                     deltaSeconds, hasState ? playerState.PendingDamageRatio : 0f, Configuration.PlayerSettings.MaximumHealthLossRatioPerTrigger,
@@ -918,7 +918,8 @@ public sealed class Plugin : IDalamudPlugin
             var monsterSettings = Configuration.MonsterSettings;
             monsterAnimations.Tick(actor, monsterChoices, !globallyDisabled && !drainTransition && actor->Health > 0,
                 TryResolveActionTimeline, accumulatingMonster,
-                MonsterIdleActivity.Interval(monsterSettings.AccumulatorDelaySeconds,
+                MonsterIdleActivity.Interval(GrowthReleaseTiming.Bounds(monsterSettings.AccumulatorDelaySeconds,
+                    monsterSettings.AccumulatorDelayVariationSeconds).Maximum,
                     monsterSettings.GrowthOvershootRiseSeconds, monsterSettings.GrowthOvershootSettleSeconds),
                 monsterSettings.GrowthFromDelta);
             if (!globallyDisabled && !drainTransition)
@@ -1184,7 +1185,9 @@ public sealed class Plugin : IDalamudPlugin
             if (addedGrowth <= 0f) return;
             bool released = GrowthContribution.Queue(ref charState.GrowthMultiplier, ref charState.PendingGrowth,
                 ref charState.PendingDamageRatio, ref charState.AccumulatorRemainingSeconds,
-                addedGrowth, healthLostRatio, settings.AccumulatorDelaySeconds, immediate);
+                addedGrowth, healthLostRatio, GrowthReleaseTiming.ForQueue(charState.AccumulatorRemainingSeconds,
+                    settings.AccumulatorDelaySeconds, settings.AccumulatorDelayVariationSeconds,
+                    immediate, Random.Shared.NextDouble), immediate);
             if (released)
             {
                 if (aether) charState.Aether.Bonus += addedGrowth;
@@ -1252,11 +1255,12 @@ public sealed class Plugin : IDalamudPlugin
                 settings.AccumulatorDelaySeconds <= 0f || (inactiveForCombat && charState.Aether.PendingGrowth <= 0f);
             if (!releasePendingGrowth)
             {
-                // If the configured delay is shortened while a window is open,
-                // do not retain a timer longer than the new setting.
+                // Preserve random windows longer than the nominal interval.
+                // A settings edit can still shorten them to the new range.
                 charState.AccumulatorRemainingSeconds = Math.Min(
                     charState.AccumulatorRemainingSeconds,
-                    settings.AccumulatorDelaySeconds);
+                    GrowthReleaseTiming.Bounds(settings.AccumulatorDelaySeconds,
+                        settings.AccumulatorDelayVariationSeconds).Maximum);
                 charState.AccumulatorRemainingSeconds = Math.Max(
                     0f,
                     charState.AccumulatorRemainingSeconds - deltaSeconds);
@@ -1361,14 +1365,14 @@ public sealed class Plugin : IDalamudPlugin
         }
 
         if (!settings.GrowthFromDelta || disable || settings.GrowthOvershootPercent <= 0f)
-            charState.OvershootPulse = default;
+            charState.GrowthVisual.CancelPulse();
 
         // Ambient decay is exclusive to Growth From Delta.
         if (settings.GrowthFromDelta &&
             !charState.AfterglowActive &&
             !proximityActive && !digesting &&
             charState.PendingGrowth <= 0f &&
-            !charState.OvershootPulse.IsActive &&
+            !charState.GrowthVisual.IsPulsing &&
             !triggerOvershoot && immediateAmount <= 0f &&
             charState.GrowthMultiplier > 1.0f)
         {
@@ -1417,8 +1421,7 @@ public sealed class Plugin : IDalamudPlugin
         {
             float pulseReference = settings.ScaleGrowthWithSize
                 ? Math.Max(1f, growthMultiplierBeforeRelease) : 1f;
-            charState.OvershootPulse.Start(
-                previousScale,
+            charState.GrowthVisual.StartPulse(
                 charState.PlayerScale * pulseReference * GrowthOvershootPulse.BoostSmallRelease(
                     pulseGrowthAmount / pulseReference, settings.GrowthOvershootSmallBoost,
                     settings.GrowthOvershootBoostRangePercent) * settings.GrowthOvershootPercent / 100f,
@@ -1426,21 +1429,17 @@ public sealed class Plugin : IDalamudPlugin
                 settings.GrowthOvershootSettleSeconds,
                 settings.GrowthOvershootRiseCurve,
                 settings.GrowthOvershootReturnCurve,
-                immediateAmount > 0 ? 0f : settings.AccumulatorDelaySeconds,
+                // Fit before even the shortest possible next window. This
+                // changes the visual duration, never the release deadline.
+                immediateAmount > 0 ? 0f : GrowthReleaseTiming.Bounds(settings.AccumulatorDelaySeconds,
+                    settings.AccumulatorDelayVariationSeconds).Minimum,
                 deltaSeconds);
         }
 
-        if (charState.OvershootPulse.IsActive)
-        {
-            // The peak may exceed the cap; only its settled target is capped.
-            scale = charState.OvershootPulse.Update(deltaSeconds, intendedTargetScale);
-        }
-        else
-        {
-            scale = float.Lerp(previousScale, intendedTargetScale, settings.Speed / 100f);
-            scale = Math.Min(scale, maximumAllowedScale);
-        }
-        if (settings.GrowthFromDelta) scale = Math.Max(charState.PlayerScale, scale);
+        scale = charState.GrowthVisual.Update(previousScale, intendedTargetScale,
+            settings.Speed / 100f, maximumAllowedScale,
+            settings.GrowthFromDelta ? charState.PlayerScale : float.NegativeInfinity,
+            deltaSeconds);
         float appliedMultiplier = scale / charState.PlayerScale;
         draw->Scale = new Vector3(
             charState.Transform.X.Apply(draw->Scale.X, charState.Transform.X.Baseline * appliedMultiplier),
@@ -1925,7 +1924,7 @@ public sealed class Plugin : IDalamudPlugin
             state.PreviousScale = state.ObservedScale = draw->Scale.Y;
             // Resume smoothly from the current visible value. Keep earned and
             // pending growth, but cancel the interrupted visual-only pulse.
-            state.OvershootPulse = default;
+            state.GrowthVisual = default;
             CharacterIdToLastScaleMap[entry.Key] = state;
         }
     }

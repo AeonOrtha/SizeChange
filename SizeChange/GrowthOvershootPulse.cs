@@ -2,7 +2,8 @@ using System;
 
 namespace SizeChange;
 
-// Visual-only pulse. It never changes earned growth or the accumulator clock.
+// Visual-only curve, also used for an additive offset returning to zero.
+// It never changes earned growth or the accumulator clock.
 internal struct GrowthOvershootPulse
 {
     // Multiplier approaches 1 as releases grow. The resulting amplitude stays

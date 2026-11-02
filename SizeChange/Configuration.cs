@@ -38,6 +38,7 @@ public class GrowthSettings
     public bool LimitDeltaGrowth { get; set; }
     public float DeltaMaxScaleMultiplier { get; set; } = 5.0f;
     public float AccumulatorDelaySeconds { get; set; }
+    public float AccumulatorDelayVariationSeconds { get; set; }
     public AccumulatingEffectSettings AccumulatingEffects { get; set; } = new();
     public float GrowthOvershootSmallBoost { get; set; } = 5f;
     public float GrowthOvershootBoostRangePercent { get; set; } = 5f;
@@ -134,6 +135,8 @@ public class GrowthSettings
             Math.Clamp(MaximumHealthLossRatioPerTrigger, 0f, 1f);
         DeltaMaxScaleMultiplier = Math.Max(1f, DeltaMaxScaleMultiplier);
         AccumulatorDelaySeconds = Math.Clamp(AccumulatorDelaySeconds, 0f, 60f);
+        AccumulatorDelayVariationSeconds = float.IsFinite(AccumulatorDelayVariationSeconds)
+            ? Math.Clamp(AccumulatorDelayVariationSeconds, 0f, 60f) : 0f;
         GrowthOvershootSmallBoost = Math.Clamp(GrowthOvershootSmallBoost, 1f, 100f);
         GrowthOvershootBoostRangePercent = Math.Clamp(GrowthOvershootBoostRangePercent, 0.01f, 100f);
         GrowthOvershootPercent = Math.Clamp(GrowthOvershootPercent, 0f, 500f);
@@ -219,6 +222,7 @@ public class GrowthSettings
             LimitDeltaGrowth = settings.LimitDeltaGrowth,
             DeltaMaxScaleMultiplier = settings.DeltaMaxScaleMultiplier,
             AccumulatorDelaySeconds = settings.AccumulatorDelaySeconds,
+            AccumulatorDelayVariationSeconds = settings.AccumulatorDelayVariationSeconds,
             GrowthOvershootSmallBoost = settings.GrowthOvershootSmallBoost,
             GrowthOvershootBoostRangePercent = settings.GrowthOvershootBoostRangePercent,
             GrowthOvershootPercent = settings.GrowthOvershootPercent,
