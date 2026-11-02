@@ -123,6 +123,7 @@ internal sealed class ProfileSettingsFile
                 if (!cross) config.AffectSelf = AffectSelf ?? true;
                 if (!cross) config.SelfProfileSync = Copy(OutgoingBlendSync ?? new());
                 if (!cross) config.SelfWeaponFollow = Copy(WeaponFollow ?? new());
+                if (!cross) config.SelfWeaponFollow.Validate();
                 config.SelfFlatHeightOffset = height; config.SelfBoneHeartbeat = bones;
                 break;
             case SCActorGroup.Player:

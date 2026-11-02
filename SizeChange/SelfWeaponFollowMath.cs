@@ -15,8 +15,8 @@ internal static class SelfWeaponFollowMath
             float.IsFinite(Rotation.LengthSquared()) && Rotation.LengthSquared() > 0.5f && Rotation.LengthSquared() < 1.5f;
     }
 
-    // Carry the existing weapon/grip through the hand's change. Never multiply
-    // weapon size: the game already owns its scale and normal attachment offset.
+    // Carry the existing weapon/grip through the hand's change. Bone-follow
+    // itself preserves weapon size; explicit user adjustments are applied next.
     internal static bool TryCorrect(Pose root, Pose before, Pose after, Pose weapon, out Pose corrected)
     {
         corrected = weapon;
@@ -33,4 +33,23 @@ internal static class SelfWeaponFollowMath
 
     internal static bool Finite(Vector3 value) => float.IsFinite(value.X) && float.IsFinite(value.Y) && float.IsFinite(value.Z) &&
         Math.Abs(value.X) < 10000000 && Math.Abs(value.Y) < 10000000 && Math.Abs(value.Z) < 10000000;
+
+    internal static bool TryAdjust(Pose weapon, SelfWeaponAdjustment.Values adjustment, out Pose result)
+    {
+        result = weapon;
+        if (!weapon.Valid || !float.IsFinite(adjustment.Roll) || !float.IsFinite(adjustment.Pitch) ||
+            !float.IsFinite(adjustment.Yaw) || !float.IsFinite(adjustment.Scale) || adjustment.Scale < .01f || adjustment.Scale > 20) return false;
+        if (adjustment.Neutral) return true;
+        const float radians = MathF.PI / 180;
+        var local = Quaternion.CreateFromYawPitchRoll(adjustment.Yaw * radians, adjustment.Pitch * radians, adjustment.Roll * radians);
+        result = weapon with { Rotation = Quaternion.Normalize(weapon.Rotation * local), Scale = weapon.Scale * adjustment.Scale };
+        return result.Valid;
+    }
+
+    // The engine can refresh position/rotation without refreshing scale. Restore
+    // each still-owned component independently so manual scale never compounds.
+    internal static Pose RestoreOwned(Pose current, Pose original, Pose written) => new(
+        current.Position == written.Position ? original.Position : current.Position,
+        current.Rotation == written.Rotation ? original.Rotation : current.Rotation,
+        current.Scale == written.Scale ? original.Scale : current.Scale);
 }

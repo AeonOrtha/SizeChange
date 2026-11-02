@@ -8,6 +8,37 @@ namespace SizeChange;
 public sealed class SelfWeaponFollowSettings
 {
     public bool Enabled { get; set; }
+    public int Preset { get; set; }
+    public SelfWeaponAdjustment OneHanded { get; set; } = new();
+    public SelfWeaponAdjustment TwoHanded { get; set; } = new();
+
+    internal SelfWeaponAdjustment.Values Current => (Preset == 1 ? TwoHanded : OneHanded)?.Snapshot ?? new SelfWeaponAdjustment.Values(0, 0, 0, 1);
+    public void Validate()
+    {
+        Preset = Preset == 1 ? 1 : 0;
+        OneHanded ??= new(); TwoHanded ??= new();
+        OneHanded.Validate(); TwoHanded.Validate();
+    }
+}
+
+[Serializable]
+public sealed class SelfWeaponAdjustment
+{
+    public float Roll { get; set; }
+    public float Pitch { get; set; }
+    public float Yaw { get; set; }
+    public float Scale { get; set; } = 1;
+    internal readonly record struct Values(float Roll, float Pitch, float Yaw, float Scale)
+    {
+        internal bool Neutral => Roll == 0 && Pitch == 0 && Yaw == 0 && Scale == 1;
+    }
+    internal Values Snapshot => new(Angle(Roll), Angle(Pitch), Angle(Yaw), float.IsFinite(Scale) ? Math.Clamp(Scale, .01f, 20f) : 1);
+    private static float Angle(float value) => float.IsFinite(value) ? Math.Clamp(value, -360f, 360f) : 0;
+    public void Validate()
+    {
+        var value = Snapshot;
+        Roll = value.Roll; Pitch = value.Pitch; Yaw = value.Yaw; Scale = value.Scale;
+    }
 }
 
 // Optional boundary around C+'s render-time bone application. No native detours,

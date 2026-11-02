@@ -182,7 +182,8 @@ public sealed class Plugin : IDalamudPlugin
             message => Log.Warning("Outgoing blend sync: {Message}", message));
         WeaponFollow = new(PluginInterface.AssemblyLocation.FullName,
             message => Log.Warning("Self weapon follow: {Message}", message),
-            new SelfWeaponFollowNative(() => Configuration.Enable && Configuration.AffectSelf && Configuration.SelfWeaponFollow.Enabled));
+            new SelfWeaponFollowNative(() => Configuration.Enable && Configuration.AffectSelf && Configuration.SelfWeaponFollow.Enabled,
+                () => Configuration.SelfWeaponFollow));
         PlayerEffects = new(() => Configuration.PlayerBoneHeartbeat, () => Configuration.PlayerProfileHeight.Offset,
             new CustomizeHeartbeatApi(PluginInterface), () => Configuration.PlayerProfileHeight.FollowIncomingAppearance);
         PlayerProfileHeight = new PlayerProfileHeightCompatibility(

@@ -374,6 +374,7 @@ public class Configuration : IPluginConfiguration
     {
         SelfProfileSync ??= new();
         SelfWeaponFollow ??= new();
+        SelfWeaponFollow.Validate();
         PlayerProfileHeight ??= new();
         PlayerProfileHeight.Validate();
         SelfFlatHeightOffset = float.IsFinite(SelfFlatHeightOffset)

@@ -168,7 +168,30 @@ public class ConfigWindow : Window, IDisposable
             configuration.SelfWeaponFollow.Enabled = enabled;
             configuration.Save();
         }
-        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Experimental. Drawn weapons only. Follows Customize+ hand changes while keeping the existing grip offset and weapon scale. Does not edit .atch files. Turn off to stop and restore the last owned correction. Not tested in-game.");
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Self only. Drawn weapons follow Customize+ hands. Optional local rotation and scale adjustments. Does not edit .atch files. Turn off to restore owned changes.");
+        var weaponSettings = configuration.SelfWeaponFollow;
+        int preset = weaponSettings.Preset;
+        ImGui.PushID("self-weapon-adjustment");
+        bool changed = ImGui.Combo("Active preset", ref preset, "1H\0" + "2H\0");
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Select manually: one-handed or two-handed. Each preset saves its own values and applies to all followed Self weapons, including offhand. No automatic job switching.");
+        if (changed) weaponSettings.Preset = preset;
+        var adjustment = preset == 1 ? weaponSettings.TwoHanded : weaponSettings.OneHanded;
+        float roll = adjustment.Roll, pitch = adjustment.Pitch, yaw = adjustment.Yaw, scale = adjustment.Scale;
+        if (ImGui.InputFloat("Roll (deg)", ref roll, 0, 0, "%.3f")) { adjustment.Roll = roll; changed = true; }
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Local weapon Z rotation. -360 to 360 degrees.");
+        if (ImGui.InputFloat("Pitch (deg)", ref pitch, 0, 0, "%.3f")) { adjustment.Pitch = pitch; changed = true; }
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Local weapon X rotation. -360 to 360 degrees.");
+        if (ImGui.InputFloat("Yaw (deg)", ref yaw, 0, 0, "%.3f")) { adjustment.Yaw = yaw; changed = true; }
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Local weapon Y rotation. -360 to 360 degrees.");
+        if (ImGui.InputFloat("Scale (x)", ref scale, 0, 0, "%.3f")) { adjustment.Scale = scale; changed = true; }
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Multiplier on the weapon's normal scale. 1 = unchanged. Range 0.01 to 20. Applied once, after hand following.");
+        if (ImGui.Button("Reset preset"))
+        {
+            if (preset == 1) weaponSettings.TwoHanded = new(); else weaponSettings.OneHanded = new();
+            changed = true;
+        }
+        if (changed) { weaponSettings.Validate(); configuration.Save(); }
+        ImGui.PopID();
         ImGui.TextWrapped(plugin.WeaponFollow.Status);
         if (enabled)
         {

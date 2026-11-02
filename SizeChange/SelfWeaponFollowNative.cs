@@ -16,15 +16,17 @@ namespace SizeChange;
 internal sealed unsafe class SelfWeaponFollowNative : ISelfWeaponFollowTarget
 {
     private readonly Func<bool> enabled;
+    private readonly Func<SelfWeaponFollowSettings> settings;
     private readonly Dictionary<int, Applied> previous = new();
     private readonly record struct Identity(nint Actor, uint Entity, uint Territory, nint Body, nint Skeleton);
     private sealed record Item(Identity Owner, int Slot, nint Weapon, nint Skeleton, nint Pose,
         int Hand, int Parent, Pose Root, Pose HandBefore, Pose WeaponBefore);
     private sealed record Applied(Item Item, Pose Written);
-    private sealed record Frame(List<Item> Items);
+    private sealed record Frame(List<Item> Items, SelfWeaponAdjustment.Values Adjustment);
     public string Status { get; private set; } = "Waiting for a drawn hand attachment";
 
-    internal SelfWeaponFollowNative(Func<bool> enabled) => this.enabled = enabled;
+    internal SelfWeaponFollowNative(Func<bool> enabled, Func<SelfWeaponFollowSettings> settings)
+    { this.enabled = enabled; this.settings = settings; }
 
     private bool Resolve(out Character* actor, out CharacterBase* body, out Identity identity, bool requireActive)
     {
@@ -100,17 +102,19 @@ internal sealed unsafe class SelfWeaponFollowNative : ISelfWeaponFollowTarget
 
     private static void Write(Skeleton* skeleton, Pose value)
     {
-        // Only position/rotation; retain the engine's weapon scale exactly.
+        // Runtime skeleton transform only. No attachment metadata writes.
         skeleton->Transform.Position = value.Position;
         skeleton->Transform.Rotation = value.Rotation;
+        skeleton->Transform.Scale = value.Scale;
     }
 
     public object Capture()
     {
         Restore();
         var items = new List<Item>(2);
+        var adjustment = settings().Current;
         if (!Resolve(out var actor, out var body, out var owner, true))
-        { Status = "Waiting for Self with weapons drawn"; return new Frame(items); }
+        { Status = "Waiting for Self with weapons drawn"; return new Frame(items, adjustment); }
         for (int slot = 0; slot < 2; slot++)
         {
             if (!WeaponFor(actor, body, slot, out var weapon) || !HandFor(body, weapon, out var pose, out int hand, out int parent)) continue;
@@ -121,7 +125,7 @@ internal sealed unsafe class SelfWeaponFollowNative : ISelfWeaponFollowTarget
             items.Add(new(owner, slot, (nint)weapon, (nint)weapon->Skeleton, (nint)pose, hand, parent, root, before, original));
         }
         Status = items.Count == 0 ? "No supported drawn hand attachment" : "No hand change this frame";
-        return new Frame(items);
+        return new Frame(items, adjustment);
     }
 
     public int Apply(object state)
@@ -138,7 +142,10 @@ internal sealed unsafe class SelfWeaponFollowNative : ISelfWeaponFollowTarget
             // this interval, yield ownership instead of overwriting that change.
             if (Read(weapon->Skeleton->Transform) != item.WeaponBefore || Read(body->Skeleton->Transform) != item.Root) continue;
             var after = ReadHand(pose, hand);
-            if (after == item.HandBefore || !SelfWeaponFollowMath.TryCorrect(item.Root, item.HandBefore, after, item.WeaponBefore, out var corrected)) continue;
+            var corrected = item.WeaponBefore;
+            if (after == item.HandBefore && frame.Adjustment.Neutral) continue;
+            if (after != item.HandBefore && !SelfWeaponFollowMath.TryCorrect(item.Root, item.HandBefore, after, item.WeaponBefore, out corrected)) continue;
+            if (!SelfWeaponFollowMath.TryAdjust(corrected, frame.Adjustment, out corrected)) continue;
             Write(weapon->Skeleton, corrected);
             previous[item.Slot] = new(item, corrected);
             count++;
@@ -156,9 +163,12 @@ internal sealed unsafe class SelfWeaponFollowNative : ISelfWeaponFollowTarget
                 var last = pair.Value;
                 // Re-find via live Self; never dereference the saved pointers.
                 if (owner == last.Item.Owner && WeaponFor(actor, body, pair.Key, out var weapon) &&
-                    (nint)weapon == last.Item.Weapon && (nint)weapon->Skeleton == last.Item.Skeleton &&
-                    Read(weapon->Skeleton->Transform) == last.Written)
-                    Write(weapon->Skeleton, last.Item.WeaponBefore);
+                    (nint)weapon == last.Item.Weapon && (nint)weapon->Skeleton == last.Item.Skeleton)
+                {
+                    var current = Read(weapon->Skeleton->Transform);
+                    var restored = SelfWeaponFollowMath.RestoreOwned(current, last.Item.WeaponBefore, last.Written);
+                    if (restored.Valid && restored != current) Write(weapon->Skeleton, restored);
+                }
             }
         }
         previous.Clear();
