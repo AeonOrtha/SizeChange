@@ -181,9 +181,11 @@ public sealed class Plugin : IDalamudPlugin
         OutgoingBlendSync = new(PluginInterface.AssemblyLocation.FullName,
             message => Log.Warning("Outgoing blend sync: {Message}", message));
         WeaponFollow = new(PluginInterface.AssemblyLocation.FullName,
-            message => Log.Warning("Self weapon follow: {Message}", message),
-            new SelfWeaponFollowNative(() => Configuration.Enable && Configuration.AffectSelf && Configuration.SelfWeaponFollow.Enabled,
-                () => Configuration.SelfWeaponFollow));
+            message => Log.Warning("Weapon follow: {Message}", message),
+            new WeaponFollowTargets(EnumerateWeaponActors, key => new SelfWeaponFollowNative(
+                () => WeaponProfileEnabled(key.Self),
+                () => key.Self ? Configuration.SelfWeaponFollow : Configuration.PlayerWeaponFollow,
+                () => ResolveWeaponActor(key))));
         PlayerEffects = new(() => Configuration.PlayerBoneHeartbeat, () => Configuration.PlayerProfileHeight.Offset,
             new CustomizeHeartbeatApi(PluginInterface), () => Configuration.PlayerProfileHeight.FollowIncomingAppearance);
         PlayerProfileHeight = new PlayerProfileHeightCompatibility(
@@ -647,8 +649,8 @@ public sealed class Plugin : IDalamudPlugin
         finally
         {
             UpdateOutgoingBlendSync(completed);
-            WeaponFollow.Tick(Configuration.SelfWeaponFollow.Enabled,
-                completed && Configuration.Enable && Configuration.AffectSelf && ClientState.IsLoggedIn && !ClientState.IsPvP &&
+            WeaponFollow.Tick(WeaponProfileEnabled(true) || WeaponProfileEnabled(false),
+                completed && Configuration.Enable && ClientState.IsLoggedIn && !ClientState.IsPvP &&
                 !Condition[ConditionFlag.BetweenAreas] && !Condition[ConditionFlag.BetweenAreas51]);
             monsterAnimations.EndFrame();
             immediateGrowth.Clear();
@@ -657,6 +659,37 @@ public sealed class Plugin : IDalamudPlugin
             PlayerProfileHeight.Tick();
             PlayerEffects.UpdateSounds(PlayerProfileHeight.IsCaptured);
         }
+    }
+
+    private bool WeaponProfileEnabled(bool self) => Configuration.Enable && (self
+        ? Configuration.AffectSelf && Configuration.SelfWeaponFollow.Enabled
+        : Configuration.AffectPlayers && Configuration.PlayerWeaponFollow.Enabled);
+
+    private IEnumerable<WeaponFollowTargets.Key> EnumerateWeaponActors()
+    {
+        if (!ClientState.IsLoggedIn || ClientState.IsPvP || ClientState.IsGPosing ||
+            Condition[ConditionFlag.BetweenAreas] || Condition[ConditionFlag.BetweenAreas51]) yield break;
+        var local = ObjectTable.LocalPlayer;
+        if (local == null) yield break;
+        if (WeaponProfileEnabled(true))
+            yield return new(local.ObjectIndex, local.Address, local.EntityId, ClientState.TerritoryType, true);
+        if (!WeaponProfileEnabled(false) || Configuration.TrackedPlayerNames.Count == 0) yield break;
+        var names = new HashSet<string>(Configuration.TrackedPlayerNames, StringComparer.OrdinalIgnoreCase);
+        foreach (var obj in ObjectTable)
+            if (obj is IPlayerCharacter player && player.Address != local.Address &&
+                player.EntityId != 0 && player.EntityId != 0xE0000000 && names.Contains(GetPlayerIdentity(player)))
+                yield return new(player.ObjectIndex, player.Address, player.EntityId, ClientState.TerritoryType, false);
+    }
+
+    private IPlayerCharacter? ResolveWeaponActor(WeaponFollowTargets.Key key)
+    {
+        if (!ClientState.IsLoggedIn || ClientState.TerritoryType != key.Territory ||
+            Condition[ConditionFlag.BetweenAreas] || Condition[ConditionFlag.BetweenAreas51]) return null;
+        var player = ObjectTable[key.Index] as IPlayerCharacter;
+        if (ObjectTable.LocalPlayer == null) return null;
+        if (player == null || player.Address != key.Address || player.EntityId != key.Entity ||
+            (player.Address == ObjectTable.LocalPlayer?.Address) != key.Self) return null;
+        return player;
     }
 
     private void UpdateOutgoingBlendSync(bool completed)

@@ -49,7 +49,7 @@ internal sealed class ProfileSettingsFile
         MonsterAnimations = group == SCActorGroup.Monster ? config.MonsterAnimations : null,
         LocalHeight = group == SCActorGroup.Player ? config.PlayerProfileHeight : null,
         OutgoingBlendSync = group == SCActorGroup.Self ? config.SelfProfileSync : null,
-        WeaponFollow = group == SCActorGroup.Self ? config.SelfWeaponFollow : null,
+        WeaponFollow = group == SCActorGroup.Self ? config.SelfWeaponFollow : group == SCActorGroup.Player ? config.PlayerWeaponFollow : null,
     };
     internal string ToJson() => JsonSerializer.Serialize(this, Options);
     internal static ProfileSettingsFile Parse(string json, SCActorGroup group)
@@ -129,6 +129,7 @@ internal sealed class ProfileSettingsFile
             case SCActorGroup.Player:
                 if (cross && !bones.Blend.Enabled) bones.BaseProfileId = config.PlayerBoneHeartbeat.BaseProfileId;
                 config.PlayerSettings = growth; config.PlayerBoneHeartbeat = bones;
+                if (!cross) { config.PlayerWeaponFollow = Copy(WeaponFollow ?? new()); config.PlayerWeaponFollow.Validate(); }
                 if (!cross)
                 {
                     config.AffectPlayers = AffectPlayers ?? true;

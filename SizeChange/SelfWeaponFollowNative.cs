@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Numerics;
 using Dalamud.Game.ClientState.Conditions;
+using Dalamud.Game.ClientState.Objects.SubKinds;
 using FFXIVClientStructs.FFXIV.Client.Game.Character;
 using FFXIVClientStructs.FFXIV.Client.Graphics.Render;
 using FFXIVClientStructs.FFXIV.Client.Graphics.Scene;
@@ -12,21 +13,25 @@ using Pose = SizeChange.SelfWeaponFollowMath.Pose;
 namespace SizeChange;
 
 // The only unsafe part of the experiment. Never writes attachment definitions,
-// body bones, .atch data, files, or an actor other than the live local player.
+// body bones, .atch data or files. One instance owns exactly one resolved actor.
 internal sealed unsafe class SelfWeaponFollowNative : ISelfWeaponFollowTarget
 {
     private readonly Func<bool> enabled;
     private readonly Func<SelfWeaponFollowSettings> settings;
+    private readonly Func<IPlayerCharacter?> resolvePlayer;
     private readonly Dictionary<int, Applied> previous = new();
     private readonly record struct Identity(nint Actor, uint Entity, uint Territory, nint Body, nint Skeleton);
     private sealed record Item(Identity Owner, int Slot, nint Weapon, nint Skeleton, nint Pose,
-        int Hand, int Parent, Pose Root, Pose HandBefore, Pose WeaponBefore);
+        int Hand, int Parent, Pose Root, Pose HandBefore, Pose WeaponBefore,
+        uint AtchType, SelfWeaponAdjustment.Values Adjustment);
     private sealed record Applied(Item Item, Pose Written);
-    private sealed record Frame(List<Item> Items, SelfWeaponAdjustment.Values Adjustment);
+    private sealed record Frame(List<Item> Items);
+    private uint mainType, offType;
+    internal string TypesDiagnostic => $"Main: {WeaponAtchTypes.Decode(mainType)} | Offhand: {WeaponAtchTypes.Decode(offType)}";
     public string Status { get; private set; } = "Waiting for a drawn hand attachment";
 
-    internal SelfWeaponFollowNative(Func<bool> enabled, Func<SelfWeaponFollowSettings> settings)
-    { this.enabled = enabled; this.settings = settings; }
+    internal SelfWeaponFollowNative(Func<bool> enabled, Func<SelfWeaponFollowSettings> settings, Func<IPlayerCharacter?>? resolvePlayer = null)
+    { this.enabled = enabled; this.settings = settings; this.resolvePlayer = resolvePlayer ?? (() => Plugin.ObjectTable.LocalPlayer); }
 
     private bool Resolve(out Character* actor, out CharacterBase* body, out Identity identity, bool requireActive)
     {
@@ -34,7 +39,7 @@ internal sealed unsafe class SelfWeaponFollowNative : ISelfWeaponFollowTarget
         // Check lifecycle flags before dereferencing any native actor/model.
         if (!Plugin.ClientState.IsLoggedIn || Plugin.Condition[ConditionFlag.BetweenAreas] ||
             Plugin.Condition[ConditionFlag.BetweenAreas51]) return false;
-        var self = Plugin.ObjectTable.LocalPlayer;
+        var self = resolvePlayer();
         if (self == null || self.Address == 0) return false;
         actor = (Character*)self.Address;
         if (actor->DrawObject == null || actor->DrawObject->GetObjectType() != ObjectType.CharacterBase) return false;
@@ -44,7 +49,7 @@ internal sealed unsafe class SelfWeaponFollowNative : ISelfWeaponFollowTarget
         if (!requireActive) return true;
         return enabled() && !Plugin.ClientState.IsPvP && !Plugin.ClientState.IsGPosing && self.CurrentHp > 0 &&
             !Plugin.Condition[ConditionFlag.OccupiedInCutSceneEvent] && !Plugin.Condition[ConditionFlag.WatchingCutscene78] &&
-            !Plugin.Condition[ConditionFlag.Mounted] && actor->IsWeaponDrawn;
+            !actor->IsMounted() && actor->IsWeaponDrawn;
     }
 
     private static bool WeaponFor(Character* actor, CharacterBase* body, int slot, out Weapon* weapon)
@@ -92,6 +97,14 @@ internal sealed unsafe class SelfWeaponFollowNative : ISelfWeaponFollowTarget
     }
 
     private static Pose Read(Transform value) => new(value.Position, value.Rotation, value.Scale);
+    private static uint ReadAtchType(Character* actor, int slot)
+    {
+        // Read-only inline ATCH identifier in DrawData (+0x20), also used by
+        // VFXEditor's AtchFile.DrawCurrentWeapons. Caller validates live ownership.
+        ref var draw = ref actor->DrawData.Weapon((DrawDataContainer.WeaponSlot)slot).DrawData;
+        uint code = *(uint*)((byte*)System.Runtime.CompilerServices.Unsafe.AsPointer(ref draw) + 0x20);
+        return WeaponAtchTypes.IsValid(code) ? code : 0;
+    }
     private static Pose ReadHand(hkaPose* pose, int index)
     {
         var value = pose->ModelPose[index];
@@ -112,9 +125,9 @@ internal sealed unsafe class SelfWeaponFollowNative : ISelfWeaponFollowTarget
     {
         Restore();
         var items = new List<Item>(2);
-        var adjustment = settings().Current;
+        mainType = offType = 0;
         if (!Resolve(out var actor, out var body, out var owner, true))
-        { Status = "Waiting for Self with weapons drawn"; return new Frame(items, adjustment); }
+        { Status = "Waiting for player with weapons drawn"; return new Frame(items); }
         for (int slot = 0; slot < 2; slot++)
         {
             if (!WeaponFor(actor, body, slot, out var weapon) || !HandFor(body, weapon, out var pose, out int hand, out int parent)) continue;
@@ -122,10 +135,13 @@ internal sealed unsafe class SelfWeaponFollowNative : ISelfWeaponFollowTarget
             var before = ReadHand(pose, hand);
             var original = Read(weapon->Skeleton->Transform);
             if (!root.Valid || !before.Valid || !original.Valid) continue;
-            items.Add(new(owner, slot, (nint)weapon, (nint)weapon->Skeleton, (nint)pose, hand, parent, root, before, original));
+            uint type = ReadAtchType(actor, slot);
+            if (slot == 0) mainType = type; else offType = type;
+            items.Add(new(owner, slot, (nint)weapon, (nint)weapon->Skeleton, (nint)pose, hand, parent, root, before, original,
+                type, settings().ForType(type)));
         }
         Status = items.Count == 0 ? "No supported drawn hand attachment" : "No hand change this frame";
-        return new Frame(items, adjustment);
+        return new Frame(items);
     }
 
     public int Apply(object state)
@@ -137,15 +153,15 @@ internal sealed unsafe class SelfWeaponFollowNative : ISelfWeaponFollowTarget
             if (owner != item.Owner || !WeaponFor(actor, body, item.Slot, out var weapon) ||
                 (nint)weapon != item.Weapon || (nint)weapon->Skeleton != item.Skeleton ||
                 !HandFor(body, weapon, out var pose, out int hand, out int parent) || (nint)pose != item.Pose ||
-                hand != item.Hand || parent != item.Parent) continue;
+                hand != item.Hand || parent != item.Parent || ReadAtchType(actor, item.Slot) != item.AtchType) continue;
             // If the game/another plugin changed the weapon or body transform in
             // this interval, yield ownership instead of overwriting that change.
             if (Read(weapon->Skeleton->Transform) != item.WeaponBefore || Read(body->Skeleton->Transform) != item.Root) continue;
             var after = ReadHand(pose, hand);
             var corrected = item.WeaponBefore;
-            if (after == item.HandBefore && frame.Adjustment.Neutral) continue;
+            if (after == item.HandBefore && item.Adjustment.Neutral) continue;
             if (after != item.HandBefore && !SelfWeaponFollowMath.TryCorrect(item.Root, item.HandBefore, after, item.WeaponBefore, out corrected)) continue;
-            if (!SelfWeaponFollowMath.TryAdjust(corrected, frame.Adjustment, out corrected)) continue;
+            if (!SelfWeaponFollowMath.TryAdjust(corrected, item.Adjustment, out corrected)) continue;
             Write(weapon->Skeleton, corrected);
             previous[item.Slot] = new(item, corrected);
             count++;
@@ -161,9 +177,10 @@ internal sealed unsafe class SelfWeaponFollowNative : ISelfWeaponFollowTarget
             foreach (var pair in previous)
             {
                 var last = pair.Value;
-                // Re-find via live Self; never dereference the saved pointers.
+                // Re-find the live actor; never dereference the saved pointers.
                 if (owner == last.Item.Owner && WeaponFor(actor, body, pair.Key, out var weapon) &&
-                    (nint)weapon == last.Item.Weapon && (nint)weapon->Skeleton == last.Item.Skeleton)
+                    (nint)weapon == last.Item.Weapon && (nint)weapon->Skeleton == last.Item.Skeleton &&
+                    ReadAtchType(actor, pair.Key) == last.Item.AtchType)
                 {
                     var current = Read(weapon->Skeleton->Transform);
                     var restored = SelfWeaponFollowMath.RestoreOwned(current, last.Item.WeaponBefore, last.Written);

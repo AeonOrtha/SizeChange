@@ -14,6 +14,7 @@ public class ConfigWindow : Window, IDisposable
     private volatile bool disposed;
     private readonly Plugin plugin;
     private readonly Configuration configuration;
+    private string weaponTypeInput = "";
     private string trackedPlayerNameInput = string.Empty;
     private string trackedPlayerInputError = string.Empty;
     private string trackedMonsterNameInput = string.Empty;
@@ -159,46 +160,90 @@ public class ConfigWindow : Window, IDisposable
         ImGui.EndTabItem();
     }
 
-    private void DrawSelfWeaponFollow()
+    private void DrawSelfWeaponFollow(bool addedPlayers = false)
     {
         if (!ImGui.CollapsingHeader("Weapon Attachment (Test)")) return;
-        bool enabled = configuration.SelfWeaponFollow.Enabled;
-        if (ImGui.Checkbox("Follow Self hands", ref enabled))
+        var weaponSettings = addedPlayers ? configuration.PlayerWeaponFollow : configuration.SelfWeaponFollow;
+        bool enabled = weaponSettings.Enabled;
+        if (ImGui.Checkbox(addedPlayers ? "Follow listed players' hands" : "Follow Self hands", ref enabled))
         {
-            configuration.SelfWeaponFollow.Enabled = enabled;
+            weaponSettings.Enabled = enabled;
             configuration.Save();
         }
-        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Self only. Drawn weapons follow Customize+ hands. Optional local rotation and scale adjustments. Does not edit .atch files. Turn off to restore owned changes.");
-        var weaponSettings = configuration.SelfWeaponFollow;
-        int preset = weaponSettings.Preset;
-        ImGui.PushID("self-weapon-adjustment");
-        bool changed = ImGui.Combo("Active preset", ref preset, "1H\0" + "2H\0");
-        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Select manually: one-handed or two-handed. Each preset saves its own values and applies to all followed Self weapons, including offhand. No automatic job switching.");
-        if (changed) weaponSettings.Preset = preset;
-        var adjustment = preset == 1 ? weaponSettings.TwoHanded : weaponSettings.OneHanded;
-        float roll = adjustment.Roll, pitch = adjustment.Pitch, yaw = adjustment.Yaw, scale = adjustment.Scale;
-        if (ImGui.InputFloat("Roll (deg)", ref roll, 0, 0, "%.3f")) { adjustment.Roll = roll; changed = true; }
-        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Local weapon Z rotation. -360 to 360 degrees.");
-        if (ImGui.InputFloat("Pitch (deg)", ref pitch, 0, 0, "%.3f")) { adjustment.Pitch = pitch; changed = true; }
-        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Local weapon X rotation. -360 to 360 degrees.");
-        if (ImGui.InputFloat("Yaw (deg)", ref yaw, 0, 0, "%.3f")) { adjustment.Yaw = yaw; changed = true; }
-        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Local weapon Y rotation. -360 to 360 degrees.");
-        if (ImGui.InputFloat("Scale (x)", ref scale, 0, 0, "%.3f")) { adjustment.Scale = scale; changed = true; }
-        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Multiplier on the weapon's normal scale. 1 = unchanged. Range 0.01 to 20. Applied once, after hand following.");
-        if (ImGui.Button("Reset preset"))
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Drawn weapons follow Customize+ hands locally. Only actors enabled in this tab. Does not edit .atch files or send weapon changes over sync. Turn off to restore owned changes.");
+        ImGui.PushID(addedPlayers ? "players-weapon-adjustment" : "self-weapon-adjustment");
+        bool changed = false;
+        if (ImGui.BeginCombo("Weapon type", WeaponAtchTypes.Label(weaponTypeInput)))
         {
-            if (preset == 1) weaponSettings.TwoHanded = new(); else weaponSettings.OneHanded = new();
+            foreach (var choice in WeaponAtchTypes.Known)
+                if (ImGui.Selectable(WeaponAtchTypes.Label(choice.Code), weaponTypeInput == choice.Code))
+                    weaponTypeInput = choice.Code;
+            ImGui.EndCombo();
+        }
+        ImGui.InputText("ATCH code", ref weaponTypeInput, 5);
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Exact 3–4 character ATCH moniker. Draw your weapon and open Diagnostics to see detected codes.");
+        string code = weaponTypeInput.Trim().ToLowerInvariant();
+        bool duplicate = weaponSettings.Types.Exists(r => r != null && r.Type == code);
+        ImGui.BeginDisabled(WeaponAtchTypes.Encode(code) == 0 || duplicate);
+        if (ImGui.Button("+ Add type"))
+        {
+            weaponSettings.Types.Add(new() { Type = code });
             changed = true;
         }
+        ImGui.EndDisabled();
+        if (duplicate) { ImGui.SameLine(); ImGui.TextDisabled("Already added"); }
+        int remove = -1;
+        for (int i = 0; i < weaponSettings.Types.Count; i++)
+        {
+            var rule = weaponSettings.Types[i];
+            if (rule == null) continue;
+            ImGui.PushID(i);
+            bool ruleEnabled = rule.Enabled;
+            if (ImGui.Checkbox("##enabled", ref ruleEnabled)) { rule.Enabled = ruleEnabled; changed = true; }
+            ImGui.SameLine();
+            bool open = ImGui.TreeNode(WeaponAtchTypes.Label(rule.Type));
+            if (open)
+            {
+                var adjustment = rule.Adjustment;
+                float roll = adjustment.Roll, pitch = adjustment.Pitch, yaw = adjustment.Yaw, scale = adjustment.Scale;
+                if (ImGui.InputFloat("Roll (deg)", ref roll, 0, 0, "%.3f")) { adjustment.Roll = roll; changed = true; }
+                if (ImGui.InputFloat("Pitch (deg)", ref pitch, 0, 0, "%.3f")) { adjustment.Pitch = pitch; changed = true; }
+                if (ImGui.InputFloat("Yaw (deg)", ref yaw, 0, 0, "%.3f")) { adjustment.Yaw = yaw; changed = true; }
+                if (ImGui.InputFloat("Scale (x)", ref scale, 0, 0, "%.3f")) { adjustment.Scale = scale; changed = true; }
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Multiplier on normal weapon scale, 0.01–20. Applied once. Only this exact ATCH type in this tab.");
+                if (ImGui.Button("Reset")) { rule.Adjustment = new(); changed = true; }
+                ImGui.SameLine();
+                if (ImGui.Button("Remove")) remove = i;
+                if (!weaponSettings.OneHanded.Snapshot.Neutral || !weaponSettings.TwoHanded.Snapshot.Neutral)
+                {
+                    if (ImGui.Button("Copy old 1H")) { rule.Adjustment = CopyWeaponAdjustment(weaponSettings.OneHanded); changed = true; }
+                    ImGui.SameLine();
+                    if (ImGui.Button("Copy old 2H")) { rule.Adjustment = CopyWeaponAdjustment(weaponSettings.TwoHanded); changed = true; }
+                }
+                ImGui.TreePop();
+            }
+            ImGui.PopID();
+        }
+        if (remove >= 0) { weaponSettings.Types.RemoveAt(remove); changed = true; }
+        if (weaponSettings.Types.Count == 0) ImGui.TextDisabled("No type adjustments. Hand following only.");
         if (changed) { weaponSettings.Validate(); configuration.Save(); }
         ImGui.PopID();
-        ImGui.TextWrapped(plugin.WeaponFollow.Status);
+        ImGui.TextWrapped(enabled ? plugin.WeaponFollow.Status : "Off");
         if (enabled)
         {
-            ImGui.TextUnformatted(plugin.WeaponFollow.Counters);
-            if (ImGui.Button("Retry##self-weapons")) plugin.WeaponFollow.Retry();
+            if (ImGui.TreeNode("Diagnostics##weapons"))
+            {
+                ImGui.TextUnformatted(plugin.WeaponFollow.Counters);
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Shared Self/Added Players counters. No frame history is stored or logged.");
+                ImGui.TextUnformatted(plugin.WeaponFollow.TargetDiagnostics);
+                if (ImGui.Button("Retry##weapons")) plugin.WeaponFollow.Retry();
+                ImGui.TreePop();
+            }
         }
     }
+
+    private static SelfWeaponAdjustment CopyWeaponAdjustment(SelfWeaponAdjustment value) => new()
+    { Roll = value.Roll, Pitch = value.Pitch, Yaw = value.Yaw, Scale = value.Scale };
 
     private void DrawGrowthPreview(GrowthSettings settings, SCActorGroup group)
     {
@@ -730,6 +775,7 @@ public class ConfigWindow : Window, IDisposable
         ImGui.Separator();
         DrawGrowthSettings(configuration.PlayerSettings, "players");
         DrawBoneHeartbeat(true);
+        DrawSelfWeaponFollow(true);
         if (ImGui.TreeNode("Transform Values##players"))
         {
             ImGui.TextWrapped(plugin.TransformDiagnostics(SCActorGroup.Player));
@@ -743,6 +789,7 @@ public class ConfigWindow : Window, IDisposable
             configuration.PlayerSettings = GrowthSettings.Defaults();
             configuration.PlayerProfileHeight = new();
             configuration.PlayerBoneHeartbeat = new();
+            configuration.PlayerWeaponFollow = new();
             configuration.Save();
         }
 

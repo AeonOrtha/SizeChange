@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 
@@ -11,6 +12,18 @@ public sealed class SelfWeaponFollowSettings
     public int Preset { get; set; }
     public SelfWeaponAdjustment OneHanded { get; set; } = new();
     public SelfWeaponAdjustment TwoHanded { get; set; } = new();
+    public List<WeaponTypeRule> Types { get; set; } = new();
+    private volatile WeaponTypeValue[] published = Array.Empty<WeaponTypeValue>();
+    private readonly record struct WeaponTypeValue(uint Code, SelfWeaponAdjustment.Values Adjustment);
+
+    // Only immutable snapshots cross from the settings UI to render callbacks.
+    internal SelfWeaponAdjustment.Values ForType(uint code)
+    {
+        if (code != 0)
+            foreach (var rule in published)
+                if (rule.Code == code) return rule.Adjustment;
+        return new(0, 0, 0, 1);
+    }
 
     internal SelfWeaponAdjustment.Values Current => (Preset == 1 ? TwoHanded : OneHanded)?.Snapshot ?? new SelfWeaponAdjustment.Values(0, 0, 0, 1);
     public void Validate()
@@ -18,7 +31,29 @@ public sealed class SelfWeaponFollowSettings
         Preset = Preset == 1 ? 1 : 0;
         OneHanded ??= new(); TwoHanded ??= new();
         OneHanded.Validate(); TwoHanded.Validate();
+        Types ??= new();
+        var seen = new HashSet<uint>();
+        var values = new List<WeaponTypeValue>();
+        foreach (var rule in Types)
+        {
+            if (rule == null) continue;
+            rule.Type = (rule.Type ?? "").Trim().ToLowerInvariant();
+            rule.Adjustment ??= new();
+            rule.Adjustment.Validate();
+            uint code = WeaponAtchTypes.Encode(rule.Type);
+            if (code != 0 && seen.Add(code) && rule.Enabled)
+                values.Add(new(code, rule.Adjustment.Snapshot));
+        }
+        published = values.ToArray();
     }
+}
+
+[Serializable]
+public sealed class WeaponTypeRule
+{
+    public string Type { get; set; } = "";
+    public bool Enabled { get; set; } = true;
+    public SelfWeaponAdjustment Adjustment { get; set; } = new();
 }
 
 [Serializable]
@@ -42,8 +77,8 @@ public sealed class SelfWeaponAdjustment
 }
 
 // Optional boundary around C+'s render-time bone application. No native detours,
-// C+ profile edits, attachment metadata edits or changes to other actors.
-// Remove these three SelfWeaponFollow files and the small Plugin/UI/config wiring
+// C+ profile edits or attachment metadata edits. Targets are explicitly scoped.
+// Remove the SelfWeaponFollow files, WeaponFollowTargets and Plugin/UI/config wiring
 // to remove this experiment. Its Harmony owner is separate from height/blend sync.
 internal sealed class SelfWeaponFollow : IDisposable
 {
@@ -59,6 +94,10 @@ internal sealed class SelfWeaponFollow : IDisposable
     private long nextCheck, frames, corrections;
     public string Status { get; private set; } = "Off";
     public string Counters => $"Frames: {frames} | Corrections: {corrections}";
+    public string TargetDiagnostics
+    {
+        get { lock (gate) return target is WeaponFollowTargets group ? group.Diagnostics : target.Status; }
+    }
 
     internal SelfWeaponFollow(string assemblyPath, Action<string> log, ISelfWeaponFollowTarget target, Func<Type?>? findType = null)
     {
@@ -132,7 +171,7 @@ internal sealed class SelfWeaponFollow : IDisposable
                 owner.frames++;
                 int count = owner.target.Apply(__state);
                 owner.corrections += count;
-                owner.Status = count > 0 ? "Following Self hands" : owner.target.Status;
+                owner.Status = count > 0 ? "Following weapon attachments" : owner.target.Status;
             }
             catch (Exception ex) { owner.Fail(ex); }
         }

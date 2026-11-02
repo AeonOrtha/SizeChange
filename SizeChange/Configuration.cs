@@ -278,6 +278,7 @@ public class Configuration : IPluginConfiguration
     public PlayerProfileHeightSettings PlayerProfileHeight { get; set; } = new();
     public OutgoingBlendSyncSettings SelfProfileSync { get; set; } = new();
     public SelfWeaponFollowSettings SelfWeaponFollow { get; set; } = new();
+    public SelfWeaponFollowSettings PlayerWeaponFollow { get; set; } = new();
     public float SelfFlatHeightOffset { get; set; }
     public BoneHeartbeatSettings SelfBoneHeartbeat { get; set; } = new();
 
@@ -375,6 +376,8 @@ public class Configuration : IPluginConfiguration
         SelfProfileSync ??= new();
         SelfWeaponFollow ??= new();
         SelfWeaponFollow.Validate();
+        PlayerWeaponFollow ??= new();
+        PlayerWeaponFollow.Validate();
         PlayerProfileHeight ??= new();
         PlayerProfileHeight.Validate();
         SelfFlatHeightOffset = float.IsFinite(SelfFlatHeightOffset)
