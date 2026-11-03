@@ -38,6 +38,8 @@ public sealed class BoneHeartbeatSettings
     public float CustomGrowthLimit { get; set; } = 0.4f;
     public List<HeartbeatBone> Bones { get; set; } = new();
 
+    public BoneThrobSettings Throb { get; set; } = new();
+
     public JawBreathingSettings Jaw { get; set; } = new();
 
     public HeartbeatSoundSettings Sound { get; set; } = new();
@@ -110,6 +112,8 @@ public sealed class BoneHeartbeatSettings
         Strength = float.IsFinite(Strength) ? Math.Clamp(Strength, 0f, 5f) : 1f;
         CustomGrowthPerScale = float.IsFinite(CustomGrowthPerScale) ? Math.Clamp(CustomGrowthPerScale, 0f, 5f) : 0.1f;
         CustomGrowthLimit = float.IsFinite(CustomGrowthLimit) ? Math.Clamp(CustomGrowthLimit, 0f, 5f) : 0.4f;
+        Throb ??= new();
+        Throb.Validate();
         Jaw ??= new();
         Jaw.Validate();
         Sound ??= new();

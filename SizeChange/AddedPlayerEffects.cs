@@ -13,7 +13,7 @@ internal sealed class AddedPlayerEffects : IDisposable
     {
         public readonly List<HeartbeatBone> Bones = new();
         public bool Seen, Allowed;
-        public double Phase, JawPhase;
+        public double Phase, JawPhase, ThrobPhase;
         public long Generation;
         public float Envelope, JawEnvelope, JawAngle, RootHeight, Scale = 1, Seconds;
         public BoneHeartbeatSettings Settings = new();
@@ -62,6 +62,7 @@ internal sealed class AddedPlayerEffects : IDisposable
         allowed &= !followIncoming();
         state.Seen = true; state.Allowed = allowed; state.Settings = config;
         state.Seconds = float.IsFinite(seconds) ? Math.Clamp(seconds, 0f, 1f) : 0;
+        state.ThrobPhase = allowed ? BoneThrob.Advance(state.ThrobPhase, state.Seconds, config.Throb) : 0;
         state.Scale = scale; state.RootHeight = allowed ? height : 0;
         if (!allowed || !config.Blend.Enabled || blendInputs.TargetJson == null) state.BlendTransition.Reset();
         else state.BlendTransition.Update(config.Blend.Progress(scale), state.Seconds, config.Blend.TransitionSeconds);
@@ -107,7 +108,7 @@ internal sealed class AddedPlayerEffects : IDisposable
         }
         float progress = state.BlendTransition.Current;
         return state.Profile!.Build(state.Bones, state.Envelope, state.Settings.Strength,
-            state.Phase, state.JawAngle, 2, state.RootHeight, progress, state.Settings.Blend.HeightOffset(progress));
+            state.Phase, state.JawAngle, 2, state.RootHeight, progress, state.Settings.Blend.HeightOffset(progress), state.Settings.Throb, state.ThrobPhase);
     }
     public void UpdateSounds(Func<PlayerProfileHeightHook.Actor, bool> captured)
     {

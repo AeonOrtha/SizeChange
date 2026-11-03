@@ -32,7 +32,7 @@ internal sealed class BoneHeartbeatProfile
         }
     }
 
-    public string Build(IReadOnlyList<HeartbeatBone> selectedBones, float pulse, float strength, double? phase = null, float jawAngle = 0f, int jawAxis = 0, float rootHeightOffset = 0f, float blendProgress = 0f, float blendHeightOffset = 0f)
+    public string Build(IReadOnlyList<HeartbeatBone> selectedBones, float pulse, float strength, double? phase = null, float jawAngle = 0f, int jawAxis = 0, float rootHeightOffset = 0f, float blendProgress = 0f, float blendHeightOffset = 0f, BoneThrobSettings? throb = null, double throbPhase = 0)
     {
         blendProgress = float.IsFinite(blendProgress) ? Math.Clamp(blendProgress, 0, 1) : 0;
         if (blend != null && blendProgress != lastBlend)
@@ -76,7 +76,7 @@ internal sealed class BoneHeartbeatProfile
         // Blend-only offsets must not leak into fallback when a target is absent.
         float blendHeight = blend != null && float.IsFinite(blendHeightOffset) ? blendHeightOffset : 0;
         ApplyRootHeight(rootHeightOffset + blendHeight);
-        return working!.ToJsonString();
+        return BoneThrob.Render(working!, throb, throbPhase);
     }
 
     private static float ApplyScale(float baseline, float growth, float pulse)

@@ -39,6 +39,8 @@ internal sealed class BoneHeartbeatPlayer : IDisposable
     private bool wasGrowthEnabled;
     private bool wasHeightEnabled;
     private bool wasBlendEnabled;
+    private bool wasThrobActive;
+    private double throbPhase;
     private double jawPhase;
     private float jawEnvelope;
     private string? lastSent;
@@ -90,7 +92,9 @@ internal sealed class BoneHeartbeatPlayer : IDisposable
         bool blendEnabled = settings.Blend.Enabled;
         bool growthEnabled = (reserveAddition > 0f && !string.IsNullOrWhiteSpace(reserveBone)) || (settings.CustomGrowthEnabled && settings.Bones.Count > 0 &&
             settings.Bones.Exists(bone => (bone.GrowthPerScale ?? settings.CustomGrowthPerScale) > 0f && (bone.GrowthLimit ?? settings.CustomGrowthLimit) > 0f)) || settings.Chains.Exists(chain => chain.GrowthEnabled && chain.GrowthPerScale > 0f && chain.GrowthLimit > 0f);
-        if ((blendEnabled && !wasBlendEnabled || heightEnabled && !wasHeightEnabled || growthEnabled && !wasGrowthEnabled || settings.Enabled && !wasEnabled || settings.Jaw.Enabled && !wasJawEnabled) && faulted) Retry();
+        bool throb = settings.Throb.Active;
+        if ((throb && !wasThrobActive || blendEnabled && !wasBlendEnabled || heightEnabled && !wasHeightEnabled || growthEnabled && !wasGrowthEnabled || settings.Enabled && !wasEnabled || settings.Jaw.Enabled && !wasJawEnabled) && faulted) Retry();
+        wasThrobActive = throb;
         wasBlendEnabled = blendEnabled;
         wasHeightEnabled = heightEnabled;
         wasGrowthEnabled = growthEnabled;
@@ -113,7 +117,7 @@ internal sealed class BoneHeartbeatPlayer : IDisposable
         bool growthRun = resolvedBones.Exists(bone => bone.GrowthOffset != 0f);
         bool bonesEnabled = settings.Enabled && settings.Strength > 0f && resolvedBones.Exists(bone => bone.Strength > 0f);
         bool jawEnabled = settings.Jaw.Enabled && settings.Jaw.OpeningDegrees > 0f;
-        if (!allowed || address == 0 || (!bonesEnabled && !jawEnabled && !growthRun && !heightEnabled && !blendEnabled))
+        if (!allowed || address == 0 || (!throb && !bonesEnabled && !jawEnabled && !growthRun && !heightEnabled && !blendEnabled))
         {
             if (faulted && ownedProfile.HasValue && cleanupElapsed < 1f) return;
             if (Release()) Status = settings.Enabled ? "Inactive (self unavailable, disabled, or no bones/strength)." : "Disabled.";
@@ -135,7 +139,7 @@ internal sealed class BoneHeartbeatPlayer : IDisposable
         jawEnvelope = Math.Clamp(jawEnvelope + (jawRun ? seconds : -seconds) / 0.25f, 0f, 1f);
         if (envelope <= 0f && phase != 0) { PhaseGeneration++; phase = 0; }
         if (jawEnvelope <= 0f) jawPhase = 0;
-        if (!run && !jawRun && !growthRun && !heightEnabled && !blendEnabled && envelope <= 0f && jawEnvelope <= 0f)
+        if (!throb && !run && !jawRun && !growthRun && !heightEnabled && !blendEnabled && envelope <= 0f && jawEnvelope <= 0f)
         {
             if (Release()) Status = "Waiting for accumulated damage.";
             return;
@@ -169,6 +173,7 @@ internal sealed class BoneHeartbeatPlayer : IDisposable
                 ? BoneHeartbeatMath.DamageBpm(settings.BeatsPerMinute, settings.MaximumBeatsPerMinute,
                     pendingDamageRatio, maximumDamageRatio)
                 : settings.BeatsPerMinute;
+            throbPhase = BoneThrob.Advance(throbPhase, seconds, settings.Throb);
             if (envelope > 0f) phase += seconds * bpm / 60.0;
             if (jawEnvelope > 0f) jawPhase = (jawPhase + seconds / settings.Jaw.CycleSeconds) % 1.0;
             if (!blendEnabled || targetJson == null) blendTransition.Reset();
@@ -179,7 +184,7 @@ internal sealed class BoneHeartbeatPlayer : IDisposable
             float jawAngle = -settings.Jaw.SampleCycle(jawPhase) * settings.Jaw.OpeningDegrees * jawEnvelope;
             float blendProgress = blendTransition.Current;
             string frame = baseline!.Build(resolvedBones, envelope, settings.Strength, phase, jawAngle, 2, rootHeightOffset,
-                blendProgress, settings.Blend.HeightOffset(blendProgress));
+                blendProgress, settings.Blend.HeightOffset(blendProgress), settings.Throb, throbPhase);
             if (frame != lastSent)
             {
                 if (!ownedProfile.HasValue && api.HasTemporaryProfile(objectIndex))
@@ -187,7 +192,7 @@ internal sealed class BoneHeartbeatPlayer : IDisposable
                 ownedProfile = api.SetTemporary(objectIndex, frame);
                 lastSent = frame;
             }
-            Status = run ? $"Heartbeat active — {bpm:0} BPM." : jawRun ? "Jaw breathing active." : growthRun ? "Bone growth active." : heightEnabled ? "Height offset active." : blendEnabled ? BlendStatus : "Returning to baseline.";
+            Status = run ? $"Heartbeat active — {bpm:0} BPM." : throb ? "Bone throb active." : jawRun ? "Jaw breathing active." : growthRun ? "Bone growth active." : heightEnabled ? "Height offset active." : blendEnabled ? BlendStatus : "Returning to baseline.";
         }
         catch (Exception ex)
         {
@@ -222,6 +227,7 @@ internal sealed class BoneHeartbeatPlayer : IDisposable
         if (phase != 0) PhaseGeneration++;
         phase = 0;
         envelope = 0;
+        throbPhase = 0;
         jawPhase = 0;
         jawEnvelope = 0;
         blendTransition.Reset();

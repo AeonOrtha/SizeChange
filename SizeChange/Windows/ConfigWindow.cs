@@ -396,6 +396,7 @@ public class ConfigWindow : Window, IDisposable
             configuration.Save();
         }
 
+        DrawBoneThrob(settings.Throb);
         DrawJawBreathing(settings.Jaw);
         DrawHeartbeatSound(settings.Sound, addedPlayers);
         DrawHeartbeatChains(settings);
@@ -466,6 +467,27 @@ public class ConfigWindow : Window, IDisposable
         ImGui.TextWrapped(addedPlayers ? plugin.PlayerProfileHeight.Status : plugin.BoneHeartbeat.Status);
         ImGui.PopID();
         ImGui.Separator();
+    }
+
+    private void DrawBoneThrob(BoneThrobSettings settings)
+    {
+        if (!ImGui.TreeNode("Erection Throb")) return;
+        bool enabled = settings.Enabled;
+        if (ImGui.Checkbox("Enabled", ref enabled)) { settings.Enabled = enabled; configuration.Save(); }
+        string name = settings.Root;
+        if (ImGui.InputText("Root bone", ref name, 128)) { settings.Root = name.Trim(); configuration.Save(); }
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Exact skeleton bone name. Customize+ carries the motion to its descendants.");
+        if (settings.Enabled && !settings.Active && (settings.Root.Length == 0 || settings.Root.Equals("n_root", StringComparison.OrdinalIgnoreCase)))
+            ImGui.TextDisabled("Choose a branch bone.");
+        int axis = settings.Axis;
+        if (ImGui.Combo("Bob axis", ref axis, "X\0Y\0Z\0")) { settings.Axis = axis; configuration.Save(); }
+        float angle = settings.Degrees, swell = settings.SwellPercent, bpm = settings.Bpm;
+        if (ImGui.SliderFloat("Bob angle", ref angle, -20, 20, "%.1f deg")) { settings.Degrees = angle; configuration.Save(); }
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Use a negative angle to reverse the bob. Existing root-only rotation stays root-only.");
+        if (ImGui.SliderFloat("Chain swell", ref swell, 0, 20, "%.1f%%")) { settings.SwellPercent = swell; configuration.Save(); }
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Peak scale above the current shape. A root-only translation can restrict the effect to the root.");
+        if (ImGui.SliderFloat("Tempo", ref bpm, 30, 150, "%.0f BPM")) { settings.Bpm = bpm; configuration.Save(); }
+        ImGui.TreePop();
     }
 
     private void DrawJawBreathing(JawBreathingSettings settings)
