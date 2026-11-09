@@ -59,7 +59,7 @@ Growth goes to living characters selected by that profile: Self, tracked Added P
 ## Other growth and effects
 
 - **Aetherytes and size drain:** nearby crystals or configured players/NPCs can contribute simulated damage, including outside combat. Proximity growth can exceed the normal damage-growth limit. Size drain has separate duty controls.
-- **Digestion reserve:** stores part of proximity growth and releases it after leaving the sources. An optional bone expands with the stored amount.
+- **Digestion reserve:** adds bonus proximity growth without reducing the original gain. It releases continuously, even while feeding; a fuller reserve grows you faster, then slows as it empties. An optional bone expands with the stored amount.
 - **Height and bones:** base and growth-driven height offsets, size-driven bone chains, custom JP bone names and limits, heartbeat pulses, stagger, inverse neck growth and jaw breathing with open/closed holds.
 - **Sound and visuals:** growth and accumulator VFX layers, heartbeat sounds, size-driven sound volume/playback rate, and weighted growth-animation choices for players.
 

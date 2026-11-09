@@ -1079,21 +1079,21 @@ public class ConfigWindow : Window, IDisposable
         {
             bool enabled = settings.Enabled;
             if (ImGui.Checkbox("Enabled", ref enabled)) { settings.Enabled = enabled; configuration.Save(); }
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Stores part of crystal and size-drain growth. Digests after all contributors stop. Disabling clears the stored reserve.");
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Adds bonus crystal and size-drain growth to the reserve. Releases continuously, including while feeding. Disabling clears the reserve.");
             if (enabled)
             {
                 float percent = settings.StoredPercent;
-                if (ImGui.SliderFloat("Stored Share", ref percent, 0f, 100f, "%.1f%%"))
+                if (ImGui.SliderFloat("Bonus Stored", ref percent, 0f, 100f, "%.1f%%"))
                 { settings.StoredPercent = percent; configuration.Save(); }
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Defers this share of earned proximity growth. Full-reserve overflow grows normally. Damage and preview are unaffected.");
-                float speed = settings.GrowthPerSecond;
-                if (ImGui.DragFloat("Digestion Rate", ref speed, 0.001f, 0.001f, 100f, "%.3f x/s"))
-                { settings.GrowthPerSecond = speed; configuration.Save(); }
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Extra size multiplier per second, fed into the normal accumulator once per second. 0.05 releases +1x over 20 seconds. Pauses near contributors, including lingering targets.");
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Bonus on top of the full original growth. 50% adds +0.5x to the reserve for each +1x earned. A full reserve stops new bonus storage. Damage and preview are unaffected.");
+                float speed = settings.GrowthPerSecond * 100f;
+                if (ImGui.DragFloat("Digestion Rate", ref speed, 0.1f, 0.1f, 10000f, "%.1f%% /s"))
+                { settings.GrowthPerSecond = speed / 100f; configuration.Save(); }
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Current reserve multiplied by this rate gives ambient growth speed. At 5%/s, +1x stored starts at +0.05x/s; +5x starts at +0.25x/s. More stored means faster growth. No accumulator delay or extra pulses.");
                 float maximum = settings.MaximumReserve;
                 if (ImGui.DragFloat("Reserve Limit", ref maximum, 0.1f, 0.001f, 10000f, "%.3f x"))
                 { settings.MaximumReserve = maximum; configuration.Save(); }
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Maximum stored extra size. +5x at 0.05x/s takes 100 seconds to digest. Lowering the limit preserves an existing balance.");
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Maximum stored bonus growth. A larger balance supports faster digestion. Lowering the limit preserves an existing balance.");
                 if (id is "self" or "players")
                 {
                     bool boneEnabled = settings.BoneEnabled;

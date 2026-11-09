@@ -1235,12 +1235,9 @@ public sealed class Plugin : IDalamudPlugin
 
         bool digestionPaused = !settings.GrowthFromDelta || disable || !aliveForDigestion ||
             Condition[ConditionFlag.BetweenAreas] || Condition[ConditionFlag.BetweenAreas51];
-        var digested = charState.Digestion.Advance(proximityActive, digestionPaused, deltaSeconds, settings.Digestion);
-        // Already valued and already subject to the original hit allowance.
-        // It retains proximity's cap bonus and out-of-combat accumulator path.
-        if (digested.Growth > 0) QueueGrowth(digested, true);
+        var digested = charState.Digestion.Advance(digestionPaused, deltaSeconds, settings.Digestion);
         bool digesting = settings.Digestion.Enabled && !digestionPaused &&
-            (charState.Digestion.HasGrowth || digested.Growth > 0);
+            (charState.Digestion.HasGrowth || digested > 0);
 
         if (!settings.GrowthFromDelta || disable)
         {
@@ -1300,6 +1297,12 @@ public sealed class Plugin : IDalamudPlugin
         // character already at the cap can still display a temporary pulse.
         float pulseGrowthAmount = Math.Max(
             0f, charState.GrowthMultiplier - growthMultiplierBeforeRelease);
+
+        // Bonus digestion goes straight into settled growth every frame, even
+        // during feeding. Keep it out of pulse magnitude, damage/BPM, the
+        // accumulator and bridge so it cannot generate recursive bonus growth.
+        charState.GrowthMultiplier += (float)digested;
+        charState.Aether.Bonus += (float)digested;
 
         // Pay bridge growth only after measuring the actual release. It never
         // becomes another hit, pulse, reserve deposit or recursive bridge.

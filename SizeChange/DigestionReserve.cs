@@ -7,6 +7,8 @@ public sealed class DigestionSettings
 {
     public bool Enabled { get; set; }
     public float StoredPercent { get; set; } = 50f;
+    // Retained JSON name for existing profile imports; now a fraction of
+    // the current reserve per second (0.05 = 5%/s), not a fixed size amount.
     public float GrowthPerSecond { get; set; } = 0.05f;
     public float MaximumReserve { get; set; } = 5f;
     public bool BoneEnabled { get; set; }
@@ -30,45 +32,43 @@ public sealed class DigestionSettings
     public static DigestionSettings CopyOf(DigestionSettings settings) => (DigestionSettings)settings.MemberwiseClone();
 }
 
-// Growth is valued once, when absorbed. Damage travels with it only for BPM
-// feedback; digestion must not run the gain formula again at a larger size.
+// Incoming growth is valued once. Only the original hit carries damage/BPM
+// feedback; bonus digestion never becomes another hit or reserve deposit.
 internal readonly record struct EarnedGrowth(double Growth, double DamageRatio);
 
 internal struct DigestionReserve
 {
     public double Growth { get; private set; }
-    private double damageRatio;
-    private double elapsed;
     public bool HasGrowth => Growth > 0;
 
     public EarnedGrowth Absorb(float growth, float damage, DigestionSettings settings)
     {
         if (!float.IsFinite(growth) || growth <= 0f) return default;
         double validDamage = float.IsFinite(damage) ? Math.Max(0f, damage) : 0;
-        if (!settings.Enabled) return new(growth, validDamage);
-        double stored = Math.Min(growth * settings.StoredPercent / 100.0,
-            Math.Max(0.0, settings.MaximumReserve - Growth));
-        double storedDamage = validDamage * (stored / growth);
-        Growth += stored;
-        damageRatio += storedDamage;
-        // A full reserve passes overflow straight through. Reducing capacity
-        // does not destroy an existing balance or trigger a sudden release.
-        return new(growth - stored, validDamage - storedDamage);
+        if (settings.Enabled)
+        {
+            double percent = float.IsFinite(settings.StoredPercent) ? Math.Clamp(settings.StoredPercent, 0, 100) : 0;
+            double capacity = float.IsFinite(settings.MaximumReserve) ? Math.Max(0, settings.MaximumReserve) : 0;
+            double bonus = Math.Min(growth * percent / 100, Math.Max(0, capacity - Growth));
+            Growth += bonus;
+        }
+        // Always grant the whole original hit. A full reserve stops only new
+        // bonus storage; lowering capacity preserves the existing balance.
+        return new(growth, validDamage);
     }
 
-    public EarnedGrowth Advance(bool sourcesActive, bool paused, float seconds, DigestionSettings settings)
+    public double Advance(bool paused, float seconds, DigestionSettings settings)
     {
-        if (!settings.Enabled) { this = default; return default; }
-        if (sourcesActive || paused || !HasGrowth) { elapsed = 0; return default; }
-        elapsed += float.IsFinite(seconds) ? Math.Clamp(seconds, 0f, 1f) : 0;
-        if (elapsed < 1.0) return default;
-        double ticks = Math.Floor(elapsed);
-        elapsed -= ticks;
-        double release = Math.Min(Growth, settings.GrowthPerSecond * ticks);
-        double releasedDamage = damageRatio * (release / Growth);
+        if (!settings.Enabled) { this = default; return 0; }
+        if (paused || !HasGrowth || !float.IsFinite(seconds) || seconds <= 0) return 0;
+        double rate = float.IsFinite(settings.GrowthPerSecond) ? Math.Clamp(settings.GrowthPerSecond, 0.001f, 100f) : 0.05;
+        double dt = Math.Clamp(seconds, 0, 1);
+        // Exact integration of dR/dt = -rate * R. More stored energy means
+        // faster ambient growth, with the same result at different frame rates.
+        double release = Growth * (1 - Math.Exp(-rate * dt));
+        // Pay the tiny tail once so digestion cannot block shrinking forever.
+        if (Growth - release < 0.000001) release = Growth;
         Growth -= release;
-        damageRatio -= releasedDamage;
-        if (!HasGrowth) this = default;
-        return new(release, releasedDamage);
+        return release;
     }
 }
