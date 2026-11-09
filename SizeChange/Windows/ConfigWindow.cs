@@ -1089,11 +1089,15 @@ public class ConfigWindow : Window, IDisposable
                 float speed = settings.GrowthPerSecond * 100f;
                 if (ImGui.DragFloat("Digestion Rate", ref speed, 0.1f, 0.1f, 10000f, "%.1f%% /s"))
                 { settings.GrowthPerSecond = speed / 100f; configuration.Save(); }
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Current reserve multiplied by this rate gives ambient growth speed. At 5%/s, +1x stored starts at +0.05x/s; +5x starts at +0.25x/s. More stored means faster growth. No accumulator delay or extra pulses.");
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Percentage of the current reserve consumed per second. Lower values retain bloat longer. Full Reserve Multiplier increases growth produced without increasing consumption.");
+                float yield = settings.FullReserveMultiplier;
+                if (ImGui.DragFloat("Full Reserve Multiplier", ref yield, 0.1f, 1f, 100f, "%.1fx"))
+                { settings.FullReserveMultiplier = yield; configuration.Save(); }
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Growth per unit digested rises with fullness squared. At 5x: nearly empty = 1x, half full = 2x, full = 5x. No additional reserve consumed. Set 1x for the previous behaviour.");
                 float maximum = settings.MaximumReserve;
                 if (ImGui.DragFloat("Reserve Limit", ref maximum, 0.1f, 0.001f, 10000f, "%.3f x"))
                 { settings.MaximumReserve = maximum; configuration.Save(); }
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Maximum stored bonus growth. A larger balance supports faster digestion. Lowering the limit preserves an existing balance.");
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Maximum stored bonus growth; also defines full for the growth multiplier and reserve bone. Raising this makes the same balance less full. Lowering it preserves the balance and caps the multiplier at its full value.");
                 if (id is "self" or "players")
                 {
                     bool boneEnabled = settings.BoneEnabled;
