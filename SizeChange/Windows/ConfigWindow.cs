@@ -1079,7 +1079,7 @@ public class ConfigWindow : Window, IDisposable
         {
             bool enabled = settings.Enabled;
             if (ImGui.Checkbox("Enabled", ref enabled)) { settings.Enabled = enabled; configuration.Save(); }
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Adds bonus crystal and size-drain growth to the reserve. Releases continuously, including while feeding. Disabling clears the reserve.");
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Adds bonus crystal and size-drain growth to the reserve. Its entire balance directly drives continuous growth. Digestion only reduces that balance. Disabling clears it.");
             if (enabled)
             {
                 float percent = settings.StoredPercent;
@@ -1087,9 +1087,9 @@ public class ConfigWindow : Window, IDisposable
                 { settings.StoredPercent = percent; configuration.Save(); }
                 if (ImGui.IsItemHovered()) ImGui.SetTooltip("Bonus added on top of original growth. 500% stores +5x per +1x earned. No reserve capacity limit. 0% stops new deposits; existing reserve keeps digesting. Damage and preview do not fill it.");
                 float speed = settings.GrowthPerSecond * 100f;
-                if (ImGui.DragFloat("Digestion Rate", ref speed, 0.1f, 0.1f, 10000f, "%.1f%% /s"))
+                if (ImGui.DragFloat("Digestion Rate", ref speed, 0.1f, 0f, 10000f, "%.1f%% /s"))
                 { settings.GrowthPerSecond = speed / 100f; configuration.Save(); }
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Continuously converts a percentage of the entire stored balance into growth, even while feeding. A larger balance releases more per second. Lower rates retain bloat longer.");
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Drains the reserve and deflates the stomach. Growth speed equals the current reserve: +2x stored means +2x/s. This rate does not multiply growth output. Zero stops digestion; stored reserve keeps driving growth.");
                 if (id is "self" or "players")
                 {
                     bool boneEnabled = settings.BoneEnabled;
