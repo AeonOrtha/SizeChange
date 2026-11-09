@@ -7,6 +7,8 @@ public sealed class DigestionSettings
 {
     public bool Enabled { get; set; }
     public float StoredPercent { get; set; } = 50f;
+    public float DepositBalancePercent { get; set; } = 100f;
+    public float DepositBalancePoint { get; set; } = 0.1f;
     // Legacy JSON name: fraction of reserve digested per second (0.05 = 5%/s).
     // This controls depletion only, never the instantaneous growth speed.
     public float GrowthPerSecond { get; set; } = 0.05f;
@@ -26,9 +28,25 @@ public sealed class DigestionSettings
         BoneName = BoneName?.Trim() ?? string.Empty;
         if (BoneName.Equals("n_root", StringComparison.OrdinalIgnoreCase)) BoneName = string.Empty;
         BoneMaximumAddition = float.IsFinite(BoneMaximumAddition) ? Math.Clamp(BoneMaximumAddition, 0f, 5f) : 0.4f;
+        DepositBalancePercent = float.IsFinite(DepositBalancePercent) ? Math.Clamp(DepositBalancePercent, 0f, 100f) : 100f;
+        DepositBalancePoint = float.IsFinite(DepositBalancePoint) ? Math.Clamp(DepositBalancePoint, 0.000001f, 10000f) : 0.1f;
         StoredPercent = float.IsFinite(StoredPercent) ? Math.Clamp(StoredPercent, 0f, 500f) : 50f;
         GrowthPerSecond = float.IsFinite(GrowthPerSecond) ? Math.Clamp(GrowthPerSecond, 0f, 100f) : 0.05f;
         MaximumReserve = float.IsFinite(MaximumReserve) ? Math.Clamp(MaximumReserve, 0.001f, 10000f) : 5f;
+    }
+
+    internal double DepositFor(float growth)
+    {
+        if (!Enabled || !float.IsFinite(growth) || growth <= 0) return 0;
+        double bonusPercent = float.IsFinite(StoredPercent) ? Math.Clamp(StoredPercent, 0, 500) : 0;
+        if (bonusPercent <= 0) return 0;
+        double balance = float.IsFinite(DepositBalancePercent) ? Math.Clamp(DepositBalancePercent, 0, 100) : 100;
+        double point = float.IsFinite(DepositBalancePoint) ? Math.Clamp(DepositBalancePoint, 0.000001f, 10000f) : 0.1;
+        // Compress each original contribution around the balance point BEFORE
+        // applying Bonus Stored. Zero remains zero; bigger hits always deposit
+        // more, with no hard clamp, threshold discontinuity or reserve feedback.
+        double shaped = balance == 0 ? growth : point * Math.Pow(growth / point, 1 - balance / 200);
+        return shaped * bonusPercent / 100;
     }
 
     public static DigestionSettings CopyOf(DigestionSettings settings) => (DigestionSettings)settings.MemberwiseClone();
@@ -51,8 +69,7 @@ internal struct DigestionReserve
         double validDamage = float.IsFinite(damage) ? Math.Max(0f, damage) : 0;
         if (settings.Enabled)
         {
-            double percent = float.IsFinite(settings.StoredPercent) ? Math.Clamp(settings.StoredPercent, 0, 500) : 0;
-            double bonus = growth * percent / 100;
+            double bonus = settings.DepositFor(growth);
             // No gameplay capacity; only avoid numeric infinity at double's
             // representational boundary.
             Growth = Math.Min(Growth, double.MaxValue - bonus) + bonus;

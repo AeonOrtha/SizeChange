@@ -1085,7 +1085,18 @@ public class ConfigWindow : Window, IDisposable
                 float percent = settings.StoredPercent;
                 if (ImGui.SliderFloat("Bonus Stored", ref percent, 0f, 500f, "%.1f%%"))
                 { settings.StoredPercent = percent; configuration.Save(); }
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Bonus added on top of original growth. 500% stores +5x per +1x earned. No reserve capacity limit. 0% stops new deposits; existing reserve keeps digesting. Damage and preview do not fill it.");
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Bonus applied after deposit balancing. 500% stores five times the balanced contribution. Original growth is unchanged. Zero stops deposits; existing reserve keeps driving growth. Only crystal and size-drain hits fill it.");
+                float balance = settings.DepositBalancePercent;
+                if (ImGui.SliderFloat("Deposit Balancing", ref balance, 0f, 100f, "%.0f%%"))
+                { settings.DepositBalancePercent = balance; configuration.Save(); }
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Boosts small deposits and dampens large ones. 0% restores linear deposits; 100% uses a square-root curve. Larger hits still deposit more.");
+                float balancePoint = settings.DepositBalancePoint;
+                if (ImGui.InputFloat("Balance Point", ref balancePoint, 0f, 0f, "%.6f"))
+                {
+                    settings.DepositBalancePoint = float.IsFinite(balancePoint) ? Math.Clamp(balancePoint, 0.000001f, 10000f) : 0.1f;
+                    configuration.Save();
+                }
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Original growth per hit: values below this are boosted; values above are dampened. Applied before Bonus Stored, without changing original growth or pulse strength.");
                 float speed = settings.GrowthPerSecond * 100f;
                 if (ImGui.DragFloat("Digestion Rate", ref speed, 0.1f, 0f, 10000f, "%.1f%% /s"))
                 { settings.GrowthPerSecond = speed / 100f; configuration.Save(); }
