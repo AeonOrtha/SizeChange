@@ -10,7 +10,8 @@ public sealed class DigestionSettings
     // Retained JSON name for existing profile imports; now a fraction of
     // the current reserve per second (0.05 = 5%/s), not a fixed size amount.
     public float GrowthPerSecond { get; set; } = 0.05f;
-    public float FullReserveMultiplier { get; set; } = 5f;
+    // Legacy JSON name retained for imports: visual bone fullness ONLY.
+    // This never limits storage or affects digestion output.
     public float MaximumReserve { get; set; } = 5f;
     public bool BoneEnabled { get; set; }
     public string BoneName { get; set; } = string.Empty;
@@ -25,9 +26,8 @@ public sealed class DigestionSettings
         BoneName = BoneName?.Trim() ?? string.Empty;
         if (BoneName.Equals("n_root", StringComparison.OrdinalIgnoreCase)) BoneName = string.Empty;
         BoneMaximumAddition = float.IsFinite(BoneMaximumAddition) ? Math.Clamp(BoneMaximumAddition, 0f, 5f) : 0.4f;
-        StoredPercent = float.IsFinite(StoredPercent) ? Math.Clamp(StoredPercent, 0f, 100f) : 50f;
+        StoredPercent = float.IsFinite(StoredPercent) ? Math.Clamp(StoredPercent, 0f, 500f) : 50f;
         GrowthPerSecond = float.IsFinite(GrowthPerSecond) ? Math.Clamp(GrowthPerSecond, 0.001f, 100f) : 0.05f;
-        FullReserveMultiplier = float.IsFinite(FullReserveMultiplier) ? Math.Clamp(FullReserveMultiplier, 1f, 100f) : 5f;
         MaximumReserve = float.IsFinite(MaximumReserve) ? Math.Clamp(MaximumReserve, 0.001f, 10000f) : 5f;
     }
 
@@ -49,13 +49,14 @@ internal struct DigestionReserve
         double validDamage = float.IsFinite(damage) ? Math.Max(0f, damage) : 0;
         if (settings.Enabled)
         {
-            double percent = float.IsFinite(settings.StoredPercent) ? Math.Clamp(settings.StoredPercent, 0, 100) : 0;
-            double capacity = float.IsFinite(settings.MaximumReserve) ? Math.Max(0, settings.MaximumReserve) : 0;
-            double bonus = Math.Min(growth * percent / 100, Math.Max(0, capacity - Growth));
-            Growth += bonus;
+            double percent = float.IsFinite(settings.StoredPercent) ? Math.Clamp(settings.StoredPercent, 0, 500) : 0;
+            double bonus = growth * percent / 100;
+            // No gameplay capacity; only avoid numeric infinity at double's
+            // representational boundary.
+            Growth = Math.Min(Growth, double.MaxValue - bonus) + bonus;
         }
-        // Always grant the whole original hit. A full reserve stops only new
-        // bonus storage; lowering capacity preserves the existing balance.
+        // Always grant the whole original hit. The visual fullness threshold
+        // does not restrict bonus deposits, even when the bone looks full.
         return new(growth, validDamage);
     }
 
@@ -70,29 +71,7 @@ internal struct DigestionReserve
         double release = Growth * (1 - Math.Exp(-rate * dt));
         // Pay the tiny tail once so digestion cannot block shrinking forever.
         if (Growth - release < 0.000001) release = Growth;
-        double before = Growth;
         Growth -= release;
-        return ProducedGrowth(before, Growth, settings);
-    }
-
-    // Integrate yield over the consumed reserve, rather than sampling fullness
-    // once per frame. Changing FPS cannot change total growth from a balance.
-    // Yield = 1 + (fullMultiplier - 1) * min(reserve/capacity, 1)^2.
-    internal static double ProducedGrowth(double before, double after, DigestionSettings settings)
-    {
-        double consumed = before - after;
-        if (consumed <= 0) return 0;
-        double multiplier = float.IsFinite(settings.FullReserveMultiplier)
-            ? Math.Clamp(settings.FullReserveMultiplier, 1, 100) : 5;
-        double capacity = float.IsFinite(settings.MaximumReserve) && settings.MaximumReserve > 0
-            ? settings.MaximumReserve : 5;
-        double high = Math.Min(before, capacity);
-        double low = Math.Min(after, capacity);
-        // Above capacity (after lowering the limit), yield stays capped.
-        double above = Math.Max(0, before - Math.Max(after, capacity));
-        double upper = high / capacity, lower = low / capacity;
-        double weighted = above + (high - low) *
-            (upper * upper + upper * lower + lower * lower) / 3;
-        return consumed + (multiplier - 1) * weighted;
+        return release;
     }
 }

@@ -1301,8 +1301,8 @@ public sealed class Plugin : IDalamudPlugin
         // Bonus digestion goes straight into settled growth every frame, even
         // during feeding. Keep it out of pulse magnitude, damage/BPM, the
         // accumulator and bridge so it cannot generate recursive bonus growth.
-        charState.GrowthMultiplier += (float)digested;
-        charState.Aether.Bonus += (float)digested;
+        charState.GrowthMultiplier = (float)Math.Min(float.MaxValue, (double)charState.GrowthMultiplier + digested);
+        charState.Aether.Bonus = (float)Math.Min(float.MaxValue, (double)charState.Aether.Bonus + digested);
 
         // Pay bridge growth only after measuring the actual release. It never
         // becomes another hit, pulse, reserve deposit or recursive bridge.

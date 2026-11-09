@@ -1083,21 +1083,13 @@ public class ConfigWindow : Window, IDisposable
             if (enabled)
             {
                 float percent = settings.StoredPercent;
-                if (ImGui.SliderFloat("Bonus Stored", ref percent, 0f, 100f, "%.1f%%"))
+                if (ImGui.SliderFloat("Bonus Stored", ref percent, 0f, 500f, "%.1f%%"))
                 { settings.StoredPercent = percent; configuration.Save(); }
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Bonus on top of the full original growth. 50% adds +0.5x to the reserve for each +1x earned. A full reserve stops new bonus storage. Damage and preview are unaffected.");
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Bonus added on top of original growth. 500% stores +5x per +1x earned. No reserve capacity limit. 0% stops new deposits; existing reserve keeps digesting. Damage and preview do not fill it.");
                 float speed = settings.GrowthPerSecond * 100f;
                 if (ImGui.DragFloat("Digestion Rate", ref speed, 0.1f, 0.1f, 10000f, "%.1f%% /s"))
                 { settings.GrowthPerSecond = speed / 100f; configuration.Save(); }
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Percentage of the current reserve consumed per second. Lower values retain bloat longer. Full Reserve Multiplier increases growth produced without increasing consumption.");
-                float yield = settings.FullReserveMultiplier;
-                if (ImGui.DragFloat("Full Reserve Multiplier", ref yield, 0.1f, 1f, 100f, "%.1fx"))
-                { settings.FullReserveMultiplier = yield; configuration.Save(); }
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Growth per unit digested rises with fullness squared. At 5x: nearly empty = 1x, half full = 2x, full = 5x. No additional reserve consumed. Set 1x for the previous behaviour.");
-                float maximum = settings.MaximumReserve;
-                if (ImGui.DragFloat("Reserve Limit", ref maximum, 0.1f, 0.001f, 10000f, "%.3f x"))
-                { settings.MaximumReserve = maximum; configuration.Save(); }
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Maximum stored bonus growth; also defines full for the growth multiplier and reserve bone. Raising this makes the same balance less full. Lowering it preserves the balance and caps the multiplier at its full value.");
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Continuously converts a percentage of the entire stored balance into growth, even while feeding. A larger balance releases more per second. Lower rates retain bloat longer.");
                 if (id is "self" or "players")
                 {
                     bool boneEnabled = settings.BoneEnabled;
@@ -1110,8 +1102,12 @@ public class ConfigWindow : Window, IDisposable
                         if (ImGui.InputText("Bone Name", ref boneName, 128))
                         { settings.BoneName = boneName; configuration.Save(); }
                         if (ImGui.IsItemHovered()) ImGui.SetTooltip("Exact JP bone name. n_root is reserved.");
+                        float fullAt = settings.MaximumReserve;
+                        if (ImGui.DragFloat("Full Appearance At", ref fullAt, 0.1f, 0.001f, 10000f, "%.3f x"))
+                        { settings.MaximumReserve = fullAt; configuration.Save(); }
+                        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Stored amount that reaches the maximum bone addition. Visual only: storage and digestion continue above it.");
                         float addition = settings.BoneMaximumAddition;
-                        if (ImGui.DragFloat("Full Reserve Addition", ref addition, 0.005f, 0f, 5f, "%.3f"))
+                        if (ImGui.DragFloat("Maximum Bone Addition", ref addition, 0.005f, 0f, 5f, "%.3f"))
                         { settings.BoneMaximumAddition = addition; configuration.Save(); }
                         if (ImGui.IsItemHovered()) ImGui.SetTooltip("Extra bone scale at a full reserve; half at half-full, zero when empty. Added on top of the base profile, size-driven growth and heartbeat pulse.");
                     }
