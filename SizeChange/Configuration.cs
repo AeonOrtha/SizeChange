@@ -15,10 +15,12 @@ public class GrowthSettings
     public ChatGrowthSettings ChatGrowth { get; set; } = new();
     public SizeDrainSettings SizeDrain { get; set; } = new();
     public DigestionSettings Digestion { get; set; } = new();
+    public GrowthBonusSettings GrowthBonuses { get; set; } = new();
     public bool AetherProximityGrowth { get; set; }
     public float AetherProximityRange { get; set; } = 10f;
     public float AetherShardHitPercent { get; set; } = 0.4f;
     public float AetherLargeHitPercent { get; set; } = 1.2f;
+    public float AetherHitIntervalSeconds { get; set; } = 1f;
     public bool AetherActorVfxEnabled { get; set; }
     public string AetherActorVfxPath { get; set; } = string.Empty;
     public bool AetherSourceVfxEnabled { get; set; }
@@ -133,6 +135,9 @@ public class GrowthSettings
         SizeDrain.Validate();
         Digestion ??= new();
         Digestion.Validate();
+        GrowthBonuses ??= new();
+        GrowthBonuses.Validate();
+        AetherHitIntervalSeconds = float.IsFinite(AetherHitIntervalSeconds) ? Math.Clamp(AetherHitIntervalSeconds, .05f, 60f) : 1f;
         PreviewHitPercent = float.IsFinite(PreviewHitPercent) ? Math.Clamp(PreviewHitPercent, 0f, 100f) : 10f;
         PreviewHitIntervalSeconds = float.IsFinite(PreviewHitIntervalSeconds)
             ? Math.Clamp(PreviewHitIntervalSeconds, 0.1f, 10f) : 1f;
@@ -227,6 +232,8 @@ public class GrowthSettings
             ChatGrowth = ChatGrowthSettings.CopyOf(settings.ChatGrowth),
             SizeDrain = SizeDrainSettings.CopyOf(settings.SizeDrain),
             Digestion = DigestionSettings.CopyOf(settings.Digestion),
+            GrowthBonuses = GrowthBonusSettings.CopyOf(settings.GrowthBonuses),
+            AetherHitIntervalSeconds = settings.AetherHitIntervalSeconds,
             AetherActorSound = AetherSoundSettings.CopyOf(settings.AetherActorSound),
             AetherSourceSound = AetherSoundSettings.CopyOf(settings.AetherSourceSound),
             AetherShardHitPercent = settings.AetherShardHitPercent,

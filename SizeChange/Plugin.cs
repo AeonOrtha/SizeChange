@@ -64,6 +64,8 @@ struct SCCharacterState
     public long LastGrowthReleaseTick;
     public float LastGrowthReleaseIntervalSeconds;
     public ulong GrowthReleaseCount;
+    public int LastChainExtraPulses;
+    public int LastExceptionalPulses;
 }
 
 public sealed class Plugin : IDalamudPlugin
@@ -1121,6 +1123,8 @@ public sealed class Plugin : IDalamudPlugin
         bool releasedGrowth = false;
         bool inactiveForCombat = settings.OnlyActiveInCombat && outOfCombat;
         float growthMultiplierBeforeRelease = charState.GrowthMultiplier;
+        float aetherBonusBeforeRelease = charState.Aether.Bonus;
+        float emoteBonusBeforeRelease = charState.EmoteAllowance.Bonus;
         float deltaSeconds = (float)Framework.UpdateDelta.TotalSeconds;
         float accumulatorDelay = charState.AccumulatorPacing.Delay(settings.AccumulatorDelaySeconds,
             settings.AccumulatorDelayIncreaseSeconds, settings.AccumulatorMaximumDelaySeconds);
@@ -1183,10 +1187,10 @@ public sealed class Plugin : IDalamudPlugin
                         new Vector3(hit.Target.Position.X, hit.Target.Position.Y, hit.Target.Position.Z),
                         attachToSource: true, sizeDrain: true);
         }
-        // Both source types share the existing exposure accumulator, cap bonus
-        // and one-second cadence. Per-receiver lists prevent cross-profile loss.
+        // Source cadence is independent from release timing. Crystals use the
+        // configured interval; size drain retains its own one-second clock.
         bool proximityActive = aetherCount + drainCount > 0;
-        bool proximityHitDue = charState.Aether.Advance(aetherCount + drainCount, deltaSeconds) > 0;
+        var proximityHits = charState.Aether.Advance(aetherCount, drainCount, deltaSeconds, settings.AetherHitIntervalSeconds);
         void QueueGrowth(EarnedGrowth earned, bool aether, bool immediate = false, float emoteBypassFraction = 0)
         {
             float addedGrowth = (float)earned.Growth;
@@ -1233,13 +1237,10 @@ public sealed class Plugin : IDalamudPlugin
             float healthLost = preview != null ? preview.HitRatio * maxhp : charState.PreviousHealth - health;
             if (healthLost > 0f) Accumulate(healthLost / maxhp, false);
         }
-        if (proximityHitDue)
-        {
-            if (nearbyCrystals != null)
-                foreach (var hit in nearbyCrystals) Accumulate(hit.Ratio, true);
-            if (nearbyTargets != null)
-                foreach (var hit in nearbyTargets) Accumulate(hit.Ratio, true);
-        }
+        if (proximityHits.Crystals && nearbyCrystals != null)
+            foreach (var hit in nearbyCrystals) Accumulate(hit.Ratio, true);
+        if (proximityHits.Drain && nearbyTargets != null)
+            foreach (var hit in nearbyTargets) Accumulate(hit.Ratio, true);
 
         bool digestionPaused = !settings.GrowthFromDelta || disable || !aliveForDigestion ||
             Condition[ConditionFlag.BetweenAreas] || Condition[ConditionFlag.BetweenAreas51];
@@ -1306,6 +1307,22 @@ public sealed class Plugin : IDalamudPlugin
         // character already at the cap can still display a temporary pulse.
         float pulseGrowthAmount = Math.Max(
             0f, charState.GrowthMultiplier - growthMultiplierBeforeRelease);
+        GrowthBonusResult pulseBonuses = default;
+        if (releasedGrowth && pulseGrowthAmount > 0 && feedbackAllowed)
+        {
+            pulseBonuses = GrowthBonusRolls.Resolve(pulseGrowthAmount, settings.GrowthBonuses, Random.Shared.NextDouble);
+            // Bonuses inherit the original release's limit permissions. Mixing
+            // proximity/emote bypass with ordinary damage cannot uncap the latter.
+            var extra = pulseBonuses.ExtraForSources(pulseGrowthAmount,
+                charState.Aether.Bonus - aetherBonusBeforeRelease,
+                charState.EmoteAllowance.Bonus - emoteBonusBeforeRelease);
+            charState.GrowthMultiplier = (float)Math.Min(float.MaxValue, (double)charState.GrowthMultiplier + extra.Growth);
+            charState.Aether.Bonus = (float)Math.Min(float.MaxValue, (double)charState.Aether.Bonus + extra.Aether);
+            charState.EmoteAllowance.Bonus = (float)Math.Min(float.MaxValue, (double)charState.EmoteAllowance.Bonus + extra.Emote);
+            pulseGrowthAmount = pulseBonuses.TotalGrowth;
+            charState.LastChainExtraPulses = pulseBonuses.ExtraPulses;
+            charState.LastExceptionalPulses = pulseBonuses.ExceptionalPulses;
+        }
 
         // Reserve-driven ambient growth goes straight into settled size every frame, even
         // during feeding. Keep it out of pulse magnitude, damage/BPM, the
@@ -1340,19 +1357,23 @@ public sealed class Plugin : IDalamudPlugin
         // not create an effect on every framework update.
         if (releasedGrowth && pulseGrowthAmount > 0f)
         {
-            // One step per combined release, not per incoming hit, heartbeat,
-            // or ambient growth frame. Existing window deadlines stay intact.
-            if (aliveForDigestion)
-                charState.AccumulatorPacing.OnGrowthPulse(settings.AccumulatorDelaySeconds,
-                    settings.AccumulatorDelayIncreaseSeconds, settings.AccumulatorMaximumDelaySeconds);
-            // Actual releases slow digestion and restart its quiet-period timer,
-            // even at the size cap. Ambient digestion is never a pulse.
-            if (!digestionPaused) charState.Digestion.OnGrowthPulse(settings.Digestion);
+            // Count the original release and each immediate chain link. These
+            // slow digestion and advance pacing, even at the size cap.
+            for (int link = 0; link <= pulseBonuses.ExtraPulses; link++)
+            {
+                if (aliveForDigestion)
+                    charState.AccumulatorPacing.OnGrowthPulse(settings.AccumulatorDelaySeconds,
+                        settings.AccumulatorDelayIncreaseSeconds, settings.AccumulatorMaximumDelaySeconds);
+                if (!digestionPaused) charState.Digestion.OnGrowthPulse(settings.Digestion);
+            }
+            // Same-frame links share one visual surge and one feedback event.
             long currentTick = Environment.TickCount64;
             if (charState.GrowthReleaseCount > 0)
                 charState.LastGrowthReleaseIntervalSeconds = (currentTick - charState.LastGrowthReleaseTick) / 1000f;
             charState.LastGrowthReleaseTick = currentTick;
             charState.GrowthReleaseCount++;
+            if (pulseBonuses.ExceptionalPulses > 0)
+                TryPlayExceptionalGrowthVfx(actor, settings.GrowthBonuses);
             long soundCooldownMilliseconds =
                 (long)(settings.DeltaGrowthSoundCooldownSeconds * 1000f);
             bool soundCooldownElapsed =
@@ -1693,6 +1714,20 @@ public sealed class Plugin : IDalamudPlugin
         return firstError;
     }
 
+    private unsafe void TryPlayExceptionalGrowthVfx(Character* actor, GrowthBonusSettings settings)
+    {
+        if (actor == null || !settings.ExceptionalVfxEnabled) return;
+        for (int i = 0; i < Math.Min(16, settings.VfxLayers.Count); i++)
+        {
+            var layer = settings.VfxLayers[i];
+            if (layer == null || string.IsNullOrWhiteSpace(layer.Path)) continue;
+            // The existing player validates the actor, model, AVFX path and
+            // duration before creation. Separate channels preserve ordinary VFX.
+            GrowthVfxPlayer.TryPlay((nint)actor, layer.Path, layer.DurationSeconds,
+                i, actor->EntityId, layer.Restart, exceptional: true);
+        }
+    }
+
     internal unsafe string TestDeltaGrowthAnimation(GrowthSettings settings, string? selectedPath = null)
     {
         var localPlayer = ObjectTable.LocalPlayer;
@@ -1978,6 +2013,7 @@ public sealed class Plugin : IDalamudPlugin
                 settings.AccumulatorDelayIncreaseSeconds, settings.AccumulatorMaximumDelaySeconds);
             lines.Add($"{name}: Base {state.PlayerScale:0.000} | Current {state.ObservedScale:0.000} | " +
                 $"Crystals {state.NearbyAetherSources} | Drain sources {state.NearbyDrainSources} | Growth {state.GrowthMultiplier:0.000} | Pending {state.PendingGrowth:0.000} | Reserve {state.Digestion.Growth:0.000} | Next delay {nextDelay:0.000}s | Window remaining {state.AccumulatorRemainingSeconds:0.000}s | Releases {state.GrowthReleaseCount} | Last release interval {(state.GrowthReleaseCount > 1 ? state.LastGrowthReleaseIntervalSeconds.ToString("0.000") + "s" : "n/a")}" +
+                $" | Last surge: {state.LastChainExtraPulses} extra links, {state.LastExceptionalPulses} exceptional pulses" +
                 (group == SCActorGroup.Self ? $" | Customize+ root lift {state.SelfRootHeightOffset:0.000}" : $" | Session height {state.Transform.Height.Baseline:0.000} | Added {(state.Transform.Height.Owned ? state.Transform.Height.LastWritten - state.Transform.Height.Baseline : 0f):0.000}") +
                 (state.Transform.ScaleConflict ? " | Scale paused: external change" : "") +
                 (state.Transform.Height.Conflict ? " | Height paused: external change" : ""));

@@ -129,7 +129,7 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable
         nint actorAddress,
         string path,
         float durationSeconds,
-        int layer = 0, uint entityId = 0, bool restart = true)
+        int layer = 0, uint entityId = 0, bool restart = true, bool exceptional = false)
     {
         if (disposed || actorAddress == 0 || (!actorIsCurrent(actorAddress, entityId) || modelForActor(actorAddress) == 0)) return "VFX actor is no longer available.";
         if (layer < 0 || layer >= 16 || !float.IsFinite(durationSeconds) || durationSeconds <= 0f) return "Invalid VFX settings.";
@@ -140,7 +140,7 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable
             return "The native actor-VFX functions could not be located.";
         }
 
-        int channel = layer == 0 ? 0 : 100 + layer;
+        int channel = exceptional ? 200 + layer : layer == 0 ? 0 : 100 + layer;
         if (activeVfxByActor.TryGetValue((actorAddress, channel), out var previous))
         {
             if (!restart && activeByVfx.TryGetValue(previous, out var existing) &&
@@ -185,7 +185,8 @@ internal sealed unsafe class GrowthVfxPlayer : IDisposable
 
     // Channel 0: timed growth; 1/2: crystal receiver/source;
     // 3/4: size-drain receiver/source; 10..25: accumulator layers.
-    // Each lifecycle is independent from timed growth layers (0 and 100+).
+    // Timed growth layers (0 and 100+) and exceptional layers (200..215)
+    // have independent lifecycles.
     public void ClearActorEffects(nint actor)
     {
         foreach (var pair in new List<KeyValuePair<nint, ActiveGrowthVfx>>(activeByVfx))

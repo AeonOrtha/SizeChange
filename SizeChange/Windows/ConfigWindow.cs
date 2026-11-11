@@ -1596,6 +1596,66 @@ public class ConfigWindow : Window, IDisposable
         ImGui.PopID();
     }
 
+    private void DrawGrowthBonuses(GrowthBonusSettings settings, string id)
+    {
+        if (!ImGui.CollapsingHeader($"Random Growth Bonuses##{id}")) return;
+        ImGui.PushID("growth-bonuses-" + id);
+        bool changed = false;
+        bool chains = settings.ChainsEnabled;
+        if (ImGui.Checkbox("Chain Pulses", ref chains)) { settings.ChainsEnabled = chains; changed = true; }
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Any released growth pulse can immediately trigger another, including chain links. Instant links overlap into one stronger surge; continuous reserve and bridge growth do not roll.");
+        if (chains)
+        {
+            float chance = settings.ChainChancePercent;
+            if (ImGui.InputFloat("Chain Chance (%)", ref chance, 0, 0, "%.1f")) { settings.ChainChancePercent = chance; changed = true; }
+            float amount = settings.ChainGrowthPercent;
+            if (ImGui.InputFloat("Growth per Link (%)", ref amount, 0, 0, "%.1f")) { settings.ChainGrowthPercent = amount; changed = true; }
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Percent of the original unboosted pulse, 0–100. Every link uses that amount and may roll an exceptional boost independently. Source size-limit rules still apply.");
+            int maximum = settings.MaximumExtraPulses;
+            if (ImGui.InputInt("Maximum Extra Pulses", ref maximum)) { settings.MaximumExtraPulses = maximum; changed = true; }
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("0–16 extra links per release. Stops even at 100% chance. Each link counts for delay increase and digestion reduction; sound, animation and VFX play once for the combined surge.");
+        }
+        bool exceptional = settings.ExceptionalEnabled;
+        if (ImGui.Checkbox("Exceptional Pulses", ref exceptional)) { settings.ExceptionalEnabled = exceptional; changed = true; }
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Any released growth pulse can roll a bonus multiplier, including chain links. Bonuses do not deposit extra digestion reserve.");
+        if (exceptional)
+        {
+            float chance = settings.ExceptionalChancePercent;
+            if (ImGui.InputFloat("Exceptional Chance (%)", ref chance, 0, 0, "%.1f")) { settings.ExceptionalChancePercent = chance; changed = true; }
+            float multiplier = settings.ExceptionalMultiplier;
+            if (ImGui.InputFloat("Growth Multiplier", ref multiplier, 0, 0, "%.2f")) { settings.ExceptionalMultiplier = multiplier; changed = true; }
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("1–100x the pulse's growth on a successful roll. Normal limit rules and overshoot still apply.");
+            bool vfx = settings.ExceptionalVfxEnabled;
+            if (ImGui.Checkbox("Exceptional VFX", ref vfx)) { settings.ExceptionalVfxEnabled = vfx; changed = true; }
+            if (vfx)
+            {
+                for (int i = 0; i < settings.VfxLayers.Count; i++)
+                {
+                    ImGui.PushID(i);
+                    var layer = settings.VfxLayers[i];
+                    if (ImGui.TreeNode($"Layer {i + 1}"))
+                    {
+                        string path = layer.Path;
+                        if (ImGui.InputText("AVFX", ref path, 512)) { layer.Path = path; changed = true; }
+                        float duration = layer.DurationSeconds;
+                        if (ImGui.InputFloat("Duration (s)", ref duration, 0, 0, "%.2f")) { layer.DurationSeconds = duration; changed = true; }
+                        bool restart = layer.Restart;
+                        if (ImGui.Checkbox("Restart", ref restart)) { layer.Restart = restart; changed = true; }
+                        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Restart this layer on another exceptional surge. Off lets an active copy finish. Normal growth VFX remain separate.");
+                        bool remove = ImGui.Button("Remove Layer");
+                        ImGui.TreePop();
+                        if (remove) { settings.VfxLayers.RemoveAt(i--); changed = true; }
+                    }
+                    ImGui.PopID();
+                }
+                if (settings.VfxLayers.Count < 16 && ImGui.Button("+ Add VFX Layer"))
+                { settings.VfxLayers.Add(new BonusVfxLayer()); changed = true; }
+            }
+        }
+        if (changed) { settings.Validate(); configuration.Save(); }
+        ImGui.PopID();
+    }
+
     private void DrawGrowthSettings(GrowthSettings settings, string id)
     {
         if (ImGui.CollapsingHeader($"Growth Mode & Base Size##{id}", ImGuiTreeNodeFlags.DefaultOpen))
@@ -1672,6 +1732,7 @@ public class ConfigWindow : Window, IDisposable
         DrawActionGrowth(settings.ActionGrowth, id);
         DrawEmoteGrowth(settings.EmoteGrowth, id);
         DrawChatGrowth(settings.ChatGrowth, id);
+        DrawGrowthBonuses(settings.GrowthBonuses, id);
 
         ImGui.PushID("accumulation-" + id);
         DrawAccumulatingEffects(settings.AccumulatingEffects);
@@ -1684,9 +1745,13 @@ public class ConfigWindow : Window, IDisposable
             bool aetherGrowth = settings.AetherProximityGrowth;
             if (ImGui.Checkbox($"Aetheryte Proximity Growth##{id}", ref aetherGrowth))
             { settings.AetherProximityGrowth = aetherGrowth; configuration.Save(); }
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Each crystal hits once per second. Damage rises smoothly as you approach. Overlaps stack; crystal growth bypasses the size limit, including outside combat.");
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Each crystal supplies damage at Hit Interval. Damage rises smoothly as you approach. Overlaps stack; crystal growth bypasses the size limit, including outside combat.");
             if (settings.AetherProximityGrowth)
             {
+                float hitInterval = settings.AetherHitIntervalSeconds;
+                if (ImGui.InputFloat($"Hit Interval (s)##{id}", ref hitInterval, 0, 0, "%.3f"))
+                { settings.AetherHitIntervalSeconds = GrowthBonusSettings.Finite(hitInterval, .05f, 60, 1); configuration.Save(); }
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("0.05–60 seconds between crystal hits; default 1. Independent of accumulator delay. Damage is per hit, so shorter intervals increase growth per second. First hit is immediate; no catch-up bursts after a stall. Size drain keeps its own one-second clock.");
                 float range = settings.AetherProximityRange;
                 if (ImGui.DragFloat($"Aetheryte Range##{id}", ref range, 0.1f, 0.1f, 100f, "%.1f"))
                 { settings.AetherProximityRange = Math.Clamp(range, 0.1f, 100f); configuration.Save(); }
@@ -1859,7 +1924,7 @@ public class ConfigWindow : Window, IDisposable
                 settings.DeltaGrowthAnimationCooldownSeconds = 0;
                 configuration.Save();
             }
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Sets growth sound, VFX and animation cooldowns to zero. These separately limit how often feedback can play. Source hit intervals, effect durations and layer restart settings stay unchanged. Aetherytes and size drain still supply one hit per second.");
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Sets growth sound, VFX and animation cooldowns to zero. These separately limit how often feedback can play. Source hit intervals, effect durations and layer restart settings stay unchanged. Set crystal frequency in Aetherytes; size drain supplies one hit per second.");
             float earlier = settings.EarlierVariation, later = settings.LaterVariation;
             if (ImGui.InputFloat($"Earlier (− s)##{id}", ref earlier, 0, 0, "%.3f"))
             {
