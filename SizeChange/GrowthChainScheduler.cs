@@ -19,13 +19,15 @@ internal sealed class GrowthChainScheduler
     public void Start(float growth, float aether, float emote, GrowthBonusSettings settings, Func<double> random)
     {
         int limit = Math.Clamp(settings.MaximumExtraPulses, 0, 16);
-        float fraction = GrowthBonusSettings.Finite(settings.ChainGrowthPercent, 0, 100, 50) / 100;
+        float fraction = GrowthBonusSettings.Finite(settings.ChainGrowthPercent, 0, 1000, 50) / 100;
         if (!settings.ChainsEnabled || limit == 0 || !float.IsFinite(growth) || growth <= 0 || fraction <= 0) return;
         if (pending.Count >= MaximumActiveChains) { DroppedChains++; return; }
         if (!GrowthBonusRolls.Roll(settings.ChainChancePercent, random)) return;
         aether = float.IsFinite(aether) ? Math.Clamp(aether, 0, growth) : 0;
         emote = float.IsFinite(emote) ? Math.Clamp(emote, 0, growth - aether) : 0;
-        pending.Add(new(growth * fraction, aether * fraction, emote * fraction, limit, Interval(settings)));
+        float linkGrowth = (float)Math.Min(float.MaxValue, (double)growth * fraction);
+        double effectiveFraction = (double)linkGrowth / growth;
+        pending.Add(new(linkGrowth, (float)(aether * effectiveFraction), (float)(emote * effectiveFraction), limit, Interval(settings)));
     }
 
     private static float Interval(GrowthBonusSettings settings) =>

@@ -64,7 +64,7 @@ public sealed class GrowthBonusSettings
         ExceptionalSound ??= new(); ExceptionalSound.Validate();
         ChainSound ??= new(); ChainSound.Validate();
         ChainChancePercent = Finite(ChainChancePercent, 0, 100, 20);
-        ChainGrowthPercent = Finite(ChainGrowthPercent, 0, 100, 50);
+        ChainGrowthPercent = Finite(ChainGrowthPercent, 0, 1000, 50);
         MaximumExtraPulses = Math.Clamp(MaximumExtraPulses, 0, 16);
         ExceptionalChancePercent = Finite(ExceptionalChancePercent, 0, 100, 10);
         ExceptionalMultiplier = Finite(ExceptionalMultiplier, 1, 100, 2);

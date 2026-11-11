@@ -1597,7 +1597,7 @@ public class ConfigWindow : Window, IDisposable
         ImGui.PopID();
     }
 
-    private bool DrawBonusSound(string label, PulseSoundSettings settings)
+    private bool DrawBonusSound(string label, PulseSoundSettings settings, SCActorGroup group, PulseSoundKind kind)
     {
         ImGui.PushID(label + "-sound");
         bool changed = false;
@@ -1628,6 +1628,10 @@ public class ConfigWindow : Window, IDisposable
                 if (ImGui.InputFloat("Rate Drop / 1x", ref drop, 0, 0, "%.3f")) { settings.RateDrop = drop; changed = true; }
                 if (ImGui.InputFloat("Minimum Rate", ref min, 0, 0, "%.3f")) { settings.MinimumRate = min; changed = true; }
             }
+            if (ImGui.Button("Test SCD")) plugin.TestPulseSound(group, kind, settings);
+            ImGui.SameLine();
+            if (ImGui.Button("Stop SCD")) plugin.StopPulseSound(group, kind);
+            ImGui.TextWrapped(plugin.PulseSoundStatus(group, kind));
             ImGui.TreePop();
         }
         ImGui.PopID();
@@ -1650,7 +1654,7 @@ public class ConfigWindow : Window, IDisposable
                 if (ImGui.InputFloat("Duration (s)", ref duration, 0, 0, "%.2f")) { layer.DurationSeconds = duration; changed = true; }
                 bool restart = layer.Restart;
                 if (ImGui.Checkbox("Restart", ref restart)) { layer.Restart = restart; changed = true; }
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Restart this layer on another matching pulse. Off lets an active copy finish. Normal growth VFX remain separate.");
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Restart this layer on another matching pulse. Off lets an active copy finish. Normal growth VFX are not triggered by chain links.");
                 bool remove = ImGui.Button("Remove Layer");
                 ImGui.TreePop();
                 if (remove) { layers.RemoveAt(i--); changed = true; }
@@ -1667,6 +1671,7 @@ public class ConfigWindow : Window, IDisposable
     {
         if (!ImGui.CollapsingHeader($"Random Growth Bonuses##{id}")) return;
         ImGui.PushID("growth-bonuses-" + id);
+        var group = id == "self" ? SCActorGroup.Self : id == "players" ? SCActorGroup.Player : SCActorGroup.Monster;
         bool changed = false;
         bool chains = settings.ChainsEnabled;
         if (ImGui.Checkbox("Chain Pulses", ref chains)) { settings.ChainsEnabled = chains; changed = true; }
@@ -1677,17 +1682,17 @@ public class ConfigWindow : Window, IDisposable
             if (ImGui.InputFloat("Chain Chance (%)", ref chance, 0, 0, "%.1f")) { settings.ChainChancePercent = chance; changed = true; }
             float amount = settings.ChainGrowthPercent;
             if (ImGui.InputFloat("Growth per Link (%)", ref amount, 0, 0, "%.1f")) { settings.ChainGrowthPercent = amount; changed = true; }
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Percent of the original unboosted pulse, 0–100. Every link uses that amount and may roll an exceptional boost independently. Source size-limit rules still apply.");
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Percent of the original unboosted pulse, 0–1000. 200% adds twice the original amount per link. Every link uses that amount and may roll an exceptional boost independently. Source size-limit rules still apply.");
             float interval = settings.ChainIntervalSeconds;
             if (ImGui.InputFloat("Chain Interval (s)", ref interval, 0, 0, "%.3f")) { settings.ChainIntervalSeconds = interval; changed = true; }
             if (ImGui.IsItemHovered()) ImGui.SetTooltip("0.05–10 seconds between chain links. Independent of accumulator timing. New normal pulses do not reset a running chain; overlaps use your existing overshoot duration. Default 0.35s.");
             int maximum = settings.MaximumExtraPulses;
             if (ImGui.InputInt("Maximum Extra Pulses", ref maximum)) { settings.MaximumExtraPulses = maximum; changed = true; }
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("0–16 extra links per root pulse. Stops even at 100% chance. Each link has its own growth animation and effects. Links reduce digestion but do not increase or reset the normal accumulator delay.");
-            changed |= DrawBonusSound("Chain", settings.ChainSound);
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("0–16 extra links per root pulse. Stops even at 100% chance. Each link uses the overshoot settings and its own VFX/SCD; no growth emote or TMB is triggered. Links reduce digestion but do not increase or reset the normal accumulator delay.");
+            changed |= DrawBonusSound("Chain", settings.ChainSound, group, PulseSoundKind.Chain);
             bool chainVfx = settings.ChainVfxEnabled;
             if (ImGui.Checkbox("Chain VFX", ref chainVfx)) { settings.ChainVfxEnabled = chainVfx; changed = true; }
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Additional layers on each follow-up link. Exceptional layers also play if that link rolls exceptional. Normal growth VFX remain separate.");
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Additional layers on each follow-up link. Exceptional layers also play if that link rolls exceptional. Normal growth VFX are not triggered by chain links.");
             if (chainVfx) changed |= DrawBonusVfxLayers("chain-vfx", settings.ChainVfxLayers);
         }
         bool exceptional = settings.ExceptionalEnabled;
@@ -1700,7 +1705,7 @@ public class ConfigWindow : Window, IDisposable
             float multiplier = settings.ExceptionalMultiplier;
             if (ImGui.InputFloat("Growth Multiplier", ref multiplier, 0, 0, "%.2f")) { settings.ExceptionalMultiplier = multiplier; changed = true; }
             if (ImGui.IsItemHovered()) ImGui.SetTooltip("1–100x the pulse's growth on a successful roll. Normal limit rules and overshoot still apply.");
-            changed |= DrawBonusSound("Exceptional", settings.ExceptionalSound);
+            changed |= DrawBonusSound("Exceptional", settings.ExceptionalSound, group, PulseSoundKind.Exceptional);
             bool vfx = settings.ExceptionalVfxEnabled;
             if (ImGui.Checkbox("Exceptional VFX", ref vfx)) { settings.ExceptionalVfxEnabled = vfx; changed = true; }
             if (vfx) changed |= DrawBonusVfxLayers("exceptional-vfx", settings.VfxLayers);

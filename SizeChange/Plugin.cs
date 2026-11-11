@@ -107,6 +107,8 @@ public sealed class Plugin : IDalamudPlugin
     private readonly SessionHeightBaselines sessionHeights = new();
     private readonly AetherSources aetherSources = new();
     private readonly SizeDrainSources drainSources = new();
+    private readonly PulseSoundPlayer pulseSounds = new(() => new HeartbeatScdVoice());
+    private uint pulseSoundTerritory;
     private readonly AetherSoundPlayer aetherSound = new(() => new HeartbeatScdVoice());
     private readonly GrowthPreview selfPreview = new();
     private readonly GrowthPreview playerPreview = new();
@@ -250,6 +252,7 @@ public sealed class Plugin : IDalamudPlugin
         PlayerEffects.Dispose();
         HeartbeatSound.Dispose();
         aetherSound.Dispose();
+        pulseSounds.Dispose();
         BoneHeartbeat.Dispose();
         RestoreCharacterTransforms();
         GrowthVfxPlayer.Dispose();
@@ -657,6 +660,7 @@ public sealed class Plugin : IDalamudPlugin
         try { OnFrameworkUpdateCore(framework); completed = true; }
         finally
         {
+            UpdatePulseSounds(completed);
             UpdateOutgoingBlendSync(completed);
             WeaponFollow.Tick(WeaponProfileEnabled(true) || WeaponProfileEnabled(false),
                 completed && Configuration.Enable && ClientState.IsLoggedIn && !ClientState.IsPvP &&
@@ -1395,14 +1399,18 @@ public sealed class Plugin : IDalamudPlugin
                 charState.ChainPulseCount++;
                 TryPlayBonusVfx(actor, settings.GrowthBonuses.ChainVfxEnabled,
                     settings.GrowthBonuses.ChainVfxLayers, chain: true);
-                TryPlayPulseSound(actor, settings.GrowthBonuses.ChainSound, charState.GrowthMultiplier);
+                TryPlayPulseSound(actor, actorGroup, PulseSoundKind.Chain, settings.GrowthBonuses.ChainSound, charState.GrowthMultiplier);
             }
             if (pulse.Exceptional)
             {
                 charState.ExceptionalPulseCount++;
                 TryPlayBonusVfx(actor, settings.GrowthBonuses.ExceptionalVfxEnabled, settings.GrowthBonuses.VfxLayers);
-                TryPlayPulseSound(actor, settings.GrowthBonuses.ExceptionalSound, charState.GrowthMultiplier);
+                TryPlayPulseSound(actor, actorGroup, PulseSoundKind.Exceptional, settings.GrowthBonuses.ExceptionalSound, charState.GrowthMultiplier);
             }
+            // Chain links have their own VFX/SCD only. In particular, never
+            // fall through into normal effects or the emote/TMB handlers.
+            // Scale overshoot is applied later, independently of this routing.
+            if (pulse.IsChain) continue;
             long soundCooldownMilliseconds =
                 (long)(settings.DeltaGrowthSoundCooldownSeconds * 1000f);
             bool soundCooldownElapsed =
@@ -1410,10 +1418,10 @@ public sealed class Plugin : IDalamudPlugin
                 charState.LastDeltaGrowthSoundTick == 0 ||
                 currentTick - charState.LastDeltaGrowthSoundTick >= soundCooldownMilliseconds;
 
-            if ((pulse.IsChain || soundCooldownElapsed) &&
+            if (soundCooldownElapsed &&
                 TryPlayDeltaGrowthSound(actor, settings, false, charState.GrowthMultiplier) == null)
             {
-                if (!pulse.IsChain) charState.LastDeltaGrowthSoundTick = currentTick;
+                charState.LastDeltaGrowthSoundTick = currentTick;
             }
 
             long vfxCooldownMilliseconds =
@@ -1423,13 +1431,13 @@ public sealed class Plugin : IDalamudPlugin
                 charState.LastDeltaGrowthVfxTick == 0 ||
                 currentTick - charState.LastDeltaGrowthVfxTick >= vfxCooldownMilliseconds;
 
-            if ((pulse.IsChain || vfxCooldownElapsed) &&
+            if (vfxCooldownElapsed &&
                 TryPlayDeltaGrowthVfx(
                     actor,
                     settings,
                     false) == null)
             {
-                if (!pulse.IsChain) charState.LastDeltaGrowthVfxTick = currentTick;
+                charState.LastDeltaGrowthVfxTick = currentTick;
             }
 
             if (actorGroup == SCActorGroup.Monster)
@@ -1444,10 +1452,10 @@ public sealed class Plugin : IDalamudPlugin
                     currentTick - charState.LastDeltaGrowthAnimationTick >=
                     animationCooldownMilliseconds;
 
-                if ((pulse.IsChain || animationCooldownElapsed) && settings.EnableDeltaGrowthAnimation &&
+                if (animationCooldownElapsed && settings.EnableDeltaGrowthAnimation &&
                     TryPlayDeltaGrowthAnimation(actor, settings, false) == null)
                 {
-                    if (!pulse.IsChain) charState.LastDeltaGrowthAnimationTick = currentTick;
+                    charState.LastDeltaGrowthAnimationTick = currentTick;
                 }
             }
         }
@@ -1644,14 +1652,52 @@ public sealed class Plugin : IDalamudPlugin
                 settings.DeltaGrowthSoundRateDropPerScale, settings.DeltaGrowthSoundMinimumRate));
     }
 
-    private unsafe string? TryPlayPulseSound(Character* actor, PulseSoundSettings settings, float scale)
+    private unsafe string TryPlayPulseSound(Character* actor, SCActorGroup group, PulseSoundKind kind,
+        PulseSoundSettings settings, float scale, bool test = false)
     {
-        if (!settings.Enabled || settings.Volume <= 0) return "Sound disabled.";
-        return TryPlayGrowthScd(actor, settings.Path, settings.Index,
-            SoundVolumeScaling.ForSize(settings.SizeVolume, settings.Volume,
-                scale, settings.VolumeGain, settings.MaximumVolume),
-            SoundPlaybackRate.ForSize(settings.SizeRate, scale,
-                settings.RateDrop, settings.MinimumRate));
+        if (actor == null) return "Actor unavailable.";
+        var position = actor->GameObject.Position;
+        return pulseSounds.Play((int)group, kind, (nint)actor, actor->EntityId, settings,
+            scale, position.X, position.Y, position.Z, test);
+    }
+
+    internal string PulseSoundStatus(SCActorGroup group, PulseSoundKind kind) => pulseSounds.Status((int)group, kind);
+    internal void StopPulseSound(SCActorGroup group, PulseSoundKind kind) => pulseSounds.Stop((int)group, kind);
+    internal unsafe void TestPulseSound(SCActorGroup group, PulseSoundKind kind, PulseSoundSettings settings)
+    {
+        var player = ObjectTable.LocalPlayer;
+        if (player == null) return;
+        settings.Validate();
+        var actor = (Character*)player.Address;
+        TryPlayPulseSound(actor, group, kind, settings,
+            TryGetCharacterState(actor, out var state) ? state.GrowthMultiplier : 1f, test: true);
+    }
+
+    private PulseSoundSettings? CurrentPulseSoundSettings(int group, PulseSoundKind kind)
+    {
+        var profile = GetSettings((SCActorGroup)group);
+        bool enabled = (SCActorGroup)group switch
+        {
+            SCActorGroup.Self => Configuration.AffectSelf,
+            SCActorGroup.Player => Configuration.AffectPlayers,
+            SCActorGroup.Monster => true,
+            _ => false,
+        };
+        if (!enabled || !profile.GrowthFromDelta) return null;
+        var bonus = profile.GrowthBonuses;
+        if (kind == PulseSoundKind.Chain && !bonus.ChainsEnabled || kind == PulseSoundKind.Exceptional && !bonus.ExceptionalEnabled) return null;
+        return kind == PulseSoundKind.Chain ? bonus.ChainSound : bonus.ExceptionalSound;
+    }
+
+    private void UpdatePulseSounds(bool completed)
+    {
+        bool available = completed && Configuration.Enable && ClientState.IsLoggedIn && !ClientState.IsPvP &&
+            !Condition[ConditionFlag.BetweenAreas] && !Condition[ConditionFlag.BetweenAreas51];
+        if (pulseSoundTerritory != ClientState.TerritoryType) pulseSounds.Dispose();
+        pulseSoundTerritory = ClientState.TerritoryType;
+        pulseSounds.Tick((float)Framework.UpdateDelta.TotalSeconds, available, CurrentPulseSoundSettings,
+            (address, entity) => ObjectTable.SearchByEntityId(entity) is IBattleChara actor && actor.Address == address && actor.CurrentHp > 0,
+            (address, entity) => CharacterIdToLastScaleMap.TryGetValue(entity, out var state) && state.ActorAddress == address);
     }
 
     private unsafe string? TryPlayGrowthScd(Character* actor, string path, int index, float volume, float rate)

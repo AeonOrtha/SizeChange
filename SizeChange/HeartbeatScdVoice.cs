@@ -6,7 +6,7 @@ namespace SizeChange;
 // Unlike the fire-and-forget growth sound, this entry disables auto-release
 // while owned. That keeps its pooled SoundData from being reused under our
 // retained pointer. Stop hands ownership back to the game's normal cleanup.
-internal sealed unsafe class HeartbeatScdVoice : IPositionalHeartbeatSoundVoice
+internal sealed unsafe class HeartbeatScdVoice : IPositionalHeartbeatSoundVoice, IPulseSoundVoice
 {
     private SoundData* sound;
     private bool positional;
