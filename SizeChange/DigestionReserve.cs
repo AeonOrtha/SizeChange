@@ -7,12 +7,16 @@ public sealed class DigestionSettings
 {
     public bool Enabled { get; set; }
     public float StoredPercent { get; set; } = 50f;
+    // Legacy JSON field. LowHpDepositBoost replaces the unbounded power curve.
     public float DepositBalancePercent { get; set; } = 100f;
+    public float LowHpDepositBoost { get; set; } = 10f;
     public float DepositBalancePoint { get; set; } = 0.1f;
     public float DepositCutoff { get; set; } = 1f;
     // Legacy JSON name: fraction of reserve digested per second (0.05 = 5%/s).
     // This controls depletion only, never the instantaneous growth speed.
     public float GrowthPerSecond { get; set; } = 0.05f;
+    // Additive fraction/second added on each released growth pulse (0.02 = +2 percentage points/s).
+    public float DigestionIncreasePerPulse { get; set; }
     // Legacy JSON name retained for imports: visual bone fullness ONLY.
     // This never limits storage or affects digestion output.
     public float MaximumReserve { get; set; } = 5f;
@@ -30,10 +34,12 @@ public sealed class DigestionSettings
         if (BoneName.Equals("n_root", StringComparison.OrdinalIgnoreCase)) BoneName = string.Empty;
         BoneMaximumAddition = float.IsFinite(BoneMaximumAddition) ? Math.Clamp(BoneMaximumAddition, 0f, 5f) : 0.4f;
         DepositBalancePercent = float.IsFinite(DepositBalancePercent) ? Math.Clamp(DepositBalancePercent, 0f, 100f) : 100f;
+        LowHpDepositBoost = float.IsFinite(LowHpDepositBoost) ? Math.Clamp(LowHpDepositBoost, 1f, 10000f) : 10f;
         DepositBalancePoint = float.IsFinite(DepositBalancePoint) ? Math.Clamp(DepositBalancePoint, 0.000001f, 10000f) : 0.1f;
         DepositCutoff = CutoffFor(DepositBalancePoint);
         StoredPercent = float.IsFinite(StoredPercent) ? Math.Clamp(StoredPercent, 0f, 500f) : 50f;
         GrowthPerSecond = float.IsFinite(GrowthPerSecond) ? Math.Clamp(GrowthPerSecond, 0f, 100f) : 0.05f;
+        DigestionIncreasePerPulse = float.IsFinite(DigestionIncreasePerPulse) ? Math.Clamp(DigestionIncreasePerPulse, 0f, 100f) : 0f;
         MaximumReserve = float.IsFinite(MaximumReserve) ? Math.Clamp(MaximumReserve, 0.001f, 10000f) : 5f;
     }
 
@@ -41,18 +47,33 @@ public sealed class DigestionSettings
         ? Math.Clamp(DepositCutoff, MathF.BitIncrement(point), 1000000f)
         : Math.Max(1f, point * 10f);
 
-    internal double DepositFor(float growth)
+    internal double DepositFor(float growth, float damageRatio = 0f)
     {
         if (!Enabled || !float.IsFinite(growth) || growth <= 0) return 0;
         double bonusPercent = float.IsFinite(StoredPercent) ? Math.Clamp(StoredPercent, 0, 500) : 0;
         if (bonusPercent <= 0) return 0;
-        double balance = float.IsFinite(DepositBalancePercent) ? Math.Clamp(DepositBalancePercent, 0, 100) : 100;
         double point = float.IsFinite(DepositBalancePoint) ? Math.Clamp(DepositBalancePoint, 0.000001f, 10000f) : 0.1;
         double cutoff = CutoffFor((float)point);
         if (growth >= cutoff) return 0;
         double shaped;
         if (growth <= point)
-            shaped = balance == 0 ? growth : point * Math.Pow(growth / point, 1 - balance / 200);
+        {
+            // 0.01% HP is a ratio of 0.0001. Convert that anchor to growth units
+            // using THIS contribution's actual HP-to-growth conversion, including
+            // its configured multiplier and size scaling. Balance/cutoff retain
+            // their existing growth units and take precedence over the boost.
+            double anchor = float.IsFinite(damageRatio) && damageRatio > 0f
+                ? (double)growth * 0.0001 / damageRatio : 0;
+            // Keep a nonzero blend span if size scaling pushes the HP anchor
+            // into the balance point. Clamping continuously avoids a jump when
+            // those endpoints cross; the balance value always takes priority.
+            anchor = Math.Min(anchor, point * 0.99);
+            double t = Math.Clamp((growth - anchor) / (point - anchor), 0, 1);
+            double fade = 1 - t * t * (3 - 2 * t);
+            double maximumBoost = float.IsFinite(LowHpDepositBoost) ? Math.Clamp(LowHpDepositBoost, 1f, 10000f) : 10;
+            // Finite boost even for tiny positive hits; zero input never deposits.
+            shaped = growth * (1 + (maximumBoost - 1) * fade);
+        }
         else
         {
             // Taper the actual deposit as well as its multiplier. Multiplying
@@ -77,6 +98,21 @@ internal struct DigestionReserve
     public bool HasGrowth => Growth > 0;
     // +1x stored directly drives +1x/s of ambient growth.
     public double AmbientGrowthPerSecond => Growth;
+    private double extraDigestionRate;
+
+    public double DigestionRate(DigestionSettings settings)
+    {
+        double initial = float.IsFinite(settings.GrowthPerSecond) ? Math.Clamp(settings.GrowthPerSecond, 0f, 100f) : 0.05;
+        return Math.Min(100, initial + extraDigestionRate);
+    }
+
+    public void OnGrowthPulse(DigestionSettings settings)
+    {
+        if (!settings.Enabled || !HasGrowth) { extraDigestionRate = 0; return; }
+        double increment = float.IsFinite(settings.DigestionIncreasePerPulse)
+            ? Math.Clamp(settings.DigestionIncreasePerPulse, 0f, 100f) : 0;
+        extraDigestionRate = Math.Min(100, extraDigestionRate + increment);
+    }
 
     public EarnedGrowth Absorb(float growth, float damage, DigestionSettings settings)
     {
@@ -84,7 +120,8 @@ internal struct DigestionReserve
         double validDamage = float.IsFinite(damage) ? Math.Max(0f, damage) : 0;
         if (settings.Enabled)
         {
-            double bonus = settings.DepositFor(growth);
+            double bonus = settings.DepositFor(growth, (float)validDamage);
+            if (!HasGrowth) extraDigestionRate = 0;
             // No gameplay capacity; only avoid numeric infinity at double's
             // representational boundary.
             Growth = Math.Min(Growth, double.MaxValue - bonus) + bonus;
@@ -97,8 +134,9 @@ internal struct DigestionReserve
     public double Advance(bool paused, float seconds, DigestionSettings settings)
     {
         if (!settings.Enabled) { this = default; return 0; }
-        if (paused || !HasGrowth || !float.IsFinite(seconds) || seconds <= 0) return 0;
-        double rate = float.IsFinite(settings.GrowthPerSecond) ? Math.Clamp(settings.GrowthPerSecond, 0f, 100f) : 0.05;
+        if (!HasGrowth) { extraDigestionRate = 0; return 0; }
+        if (paused || !float.IsFinite(seconds) || seconds <= 0) return 0;
+        double rate = DigestionRate(settings);
         double dt = Math.Clamp(seconds, 0, 1);
         double startingSpeed = AmbientGrowthPerSecond;
 
@@ -113,7 +151,7 @@ internal struct DigestionReserve
         double ambientGrowth = startingSpeed * dt * averageFraction;
         Growth *= Math.Exp(-exponent);
         // Finish a negligible digestion tail so normal shrink can resume.
-        if (rate > 0 && Growth < 0.000001) Growth = 0;
+        if (rate > 0 && Growth < 0.000001) this = default;
         return ambientGrowth;
     }
 }
