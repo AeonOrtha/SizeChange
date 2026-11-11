@@ -21,8 +21,8 @@ public sealed class DigestionSettings
     // Fractions of reserve/second: 0.02 adds/removes 2 percentage points/s.
     public float DigestionIncreasePerSecond { get; set; } = 0.02f;
     public float DigestionDecreasePerPulse { get; set; } = 0.02f;
-    // Legacy JSON name retained for imports: visual bone fullness ONLY.
-    // This never limits storage or affects digestion output.
+    // Legacy JSON name retained: one full reserve for bone appearance and
+    // exceptional fill bonuses. This is a reference amount, not a storage cap.
     public float MaximumReserve { get; set; } = 5f;
     public bool BoneEnabled { get; set; }
     public string BoneName { get; set; } = string.Empty;
@@ -140,6 +140,18 @@ internal struct DigestionReserve
         // Always grant the whole original hit. The visual fullness threshold
         // does not restrict bonus deposits, even when the bone looks full.
         return new(growth, validDamage);
+    }
+
+    public double AddFullReserves(float fills, DigestionSettings settings)
+    {
+        if (!settings.Enabled || !float.IsFinite(fills) || fills <= 0 ||
+            !float.IsFinite(settings.MaximumReserve) || settings.MaximumReserve <= 0) return 0;
+        // Fixed bonus, independent of hit size and the ordinary deposit curve.
+        // Adding to a live reserve must not reset its current digestion rate.
+        double bonus = (double)Math.Clamp(fills, 0, 1000) * Math.Clamp(settings.MaximumReserve, .001f, 10000f);
+        if (!HasGrowth) { currentDigestionRate = InitialRate(settings); secondsWithoutPulse = 0; }
+        Growth = Math.Min(Growth, double.MaxValue - bonus) + bonus;
+        return bonus;
     }
 
     public double Advance(bool paused, float seconds, DigestionSettings settings)

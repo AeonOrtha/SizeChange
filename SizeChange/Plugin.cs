@@ -1388,7 +1388,14 @@ public sealed class Plugin : IDalamudPlugin
             if (!pulse.IsChain && aliveForDigestion)
                 charState.AccumulatorPacing.OnGrowthPulse(settings.AccumulatorDelaySeconds,
                     settings.AccumulatorDelayIncreaseSeconds, settings.AccumulatorMaximumDelaySeconds);
-            if (!digestionPaused) charState.Digestion.OnGrowthPulse(settings.Digestion);
+            if (!digestionPaused)
+            {
+                // Every exceptional root or chain link deposits once. Initialize
+                // an empty reserve before applying this pulse's rate reduction.
+                if (pulse.Exceptional)
+                    charState.Digestion.AddFullReserves(settings.GrowthBonuses.ExceptionalReserveFills, settings.Digestion);
+                charState.Digestion.OnGrowthPulse(settings.Digestion);
+            }
             long currentTick = Environment.TickCount64;
             if (charState.GrowthReleaseCount > 0)
                 charState.LastGrowthReleaseIntervalSeconds = (currentTick - charState.LastGrowthReleaseTick) / 1000f;

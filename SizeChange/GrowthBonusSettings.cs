@@ -52,6 +52,7 @@ public sealed class GrowthBonusSettings
     public bool ExceptionalEnabled { get; set; }
     public float ExceptionalChancePercent { get; set; } = 10;
     public float ExceptionalMultiplier { get; set; } = 2;
+    public float ExceptionalReserveFills { get; set; }
     public bool ExceptionalVfxEnabled { get; set; }
     public List<BonusVfxLayer> VfxLayers { get; set; } = new();
 
@@ -68,6 +69,7 @@ public sealed class GrowthBonusSettings
         MaximumExtraPulses = Math.Clamp(MaximumExtraPulses, 0, 16);
         ExceptionalChancePercent = Finite(ExceptionalChancePercent, 0, 100, 10);
         ExceptionalMultiplier = Finite(ExceptionalMultiplier, 1, 100, 2);
+        ExceptionalReserveFills = Finite(ExceptionalReserveFills, 0, 1000, 0);
         VfxLayers = ValidateLayers(VfxLayers);
         ChainVfxLayers = ValidateLayers(ChainVfxLayers);
     }
@@ -99,6 +101,7 @@ public sealed class GrowthBonusSettings
         ChainGrowthPercent = s.ChainGrowthPercent, MaximumExtraPulses = s.MaximumExtraPulses,
         ExceptionalEnabled = s.ExceptionalEnabled, ExceptionalChancePercent = s.ExceptionalChancePercent,
         ExceptionalMultiplier = s.ExceptionalMultiplier, ExceptionalVfxEnabled = s.ExceptionalVfxEnabled,
+        ExceptionalReserveFills = s.ExceptionalReserveFills,
         VfxLayers = CopyLayers(s.VfxLayers),
     };
 }

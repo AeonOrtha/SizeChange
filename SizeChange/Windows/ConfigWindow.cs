@@ -1080,13 +1080,17 @@ public class ConfigWindow : Window, IDisposable
         {
             bool enabled = settings.Enabled;
             if (ImGui.Checkbox("Enabled", ref enabled)) { settings.Enabled = enabled; configuration.Save(); }
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Adds bonus crystal and size-drain growth to the reserve. Its entire balance directly drives continuous growth. Digestion only reduces that balance. Disabling clears it.");
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Stores bonus crystal/size-drain growth and configured exceptional reserve fills. Its entire balance directly drives continuous growth. Digestion only reduces that balance. Disabling clears it.");
             if (enabled)
             {
+                float fullAt = settings.MaximumReserve;
+                if (ImGui.InputFloat("Full Reserve Reference", ref fullAt, 0, 0, "%.3f"))
+                { settings.MaximumReserve = fullAt; settings.Validate(); configuration.Save(); }
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Amount counted as 1x full for exceptional reserve bonuses and maximum reserve-bone appearance. Not a storage cap: the reserve can exceed it. Formerly Full Appearance At.");
                 float percent = settings.StoredPercent;
                 if (ImGui.SliderFloat("Bonus Stored", ref percent, 0f, 500f, "%.1f%%"))
                 { settings.StoredPercent = percent; configuration.Save(); }
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Bonus at Balance Point. Smaller HP hits receive the extra boost below; larger contributions taper to zero. Original growth is unchanged. Zero stops deposits. Only crystal and size-drain hits fill the reserve.");
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Bonus at Balance Point. Smaller HP hits receive the extra boost below; larger contributions taper to zero. Original growth is unchanged. Zero stops these ordinary deposits. Applies only to crystal and size-drain hits; exceptional reserve fills are separate.");
                 float lowHpBoost = settings.LowHpDepositBoost;
                 if (ImGui.InputFloat("0.00001% HP Boost", ref lowHpBoost, 0f, 0f, "%.3f x"))
                 { settings.LowHpDepositBoost = lowHpBoost; settings.Validate(); configuration.Save(); }
@@ -1106,7 +1110,7 @@ public class ConfigWindow : Window, IDisposable
                     settings.Validate();
                     configuration.Save();
                 }
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Contributions at or above this add zero to the reservoir. Must exceed Balance Point. Original growth still applies; existing reserve is unaffected.");
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Ordinary contributions at or above this add zero to the reservoir. Must exceed Balance Point. Original growth and existing reserve are unaffected; configured exceptional fills bypass this curve.");
                 float speed = settings.GrowthPerSecond * 100f;
                 if (ImGui.DragFloat("Initial Digestion Rate", ref speed, 0.1f, 0f, 10000f, "%.1f%% /s"))
                 { settings.GrowthPerSecond = speed / 100f; configuration.Save(); }
@@ -1135,10 +1139,6 @@ public class ConfigWindow : Window, IDisposable
                         if (ImGui.InputText("Bone Name", ref boneName, 128))
                         { settings.BoneName = boneName; configuration.Save(); }
                         if (ImGui.IsItemHovered()) ImGui.SetTooltip("Exact JP bone name. n_root is reserved.");
-                        float fullAt = settings.MaximumReserve;
-                        if (ImGui.DragFloat("Full Appearance At", ref fullAt, 0.1f, 0.001f, 10000f, "%.3f x"))
-                        { settings.MaximumReserve = fullAt; configuration.Save(); }
-                        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Stored amount that reaches the maximum bone addition. Visual only: storage and digestion continue above it.");
                         float addition = settings.BoneMaximumAddition;
                         if (ImGui.DragFloat("Maximum Bone Addition", ref addition, 0.005f, 0f, 5f, "%.3f"))
                         { settings.BoneMaximumAddition = addition; configuration.Save(); }
@@ -1667,7 +1667,7 @@ public class ConfigWindow : Window, IDisposable
         return changed;
     }
 
-    private void DrawGrowthBonuses(GrowthBonusSettings settings, string id)
+    private void DrawGrowthBonuses(GrowthBonusSettings settings, DigestionSettings digestion, string id)
     {
         if (!ImGui.CollapsingHeader($"Random Growth Bonuses##{id}")) return;
         ImGui.PushID("growth-bonuses-" + id);
@@ -1697,7 +1697,7 @@ public class ConfigWindow : Window, IDisposable
         }
         bool exceptional = settings.ExceptionalEnabled;
         if (ImGui.Checkbox("Exceptional Pulses", ref exceptional)) { settings.ExceptionalEnabled = exceptional; changed = true; }
-        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Any released growth pulse can roll a bonus multiplier, including chain links. Bonuses do not deposit extra digestion reserve.");
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Any released growth pulse can roll a bonus multiplier, including chain links. Optional reserve fills are added separately.");
         if (exceptional)
         {
             float chance = settings.ExceptionalChancePercent;
@@ -1705,6 +1705,14 @@ public class ConfigWindow : Window, IDisposable
             float multiplier = settings.ExceptionalMultiplier;
             if (ImGui.InputFloat("Growth Multiplier", ref multiplier, 0, 0, "%.2f")) { settings.ExceptionalMultiplier = multiplier; changed = true; }
             if (ImGui.IsItemHovered()) ImGui.SetTooltip("1–100x the pulse's growth on a successful roll. Normal limit rules and overshoot still apply.");
+            float fills = settings.ExceptionalReserveFills;
+            if (ImGui.InputFloat("Reserve Bonus (x full)", ref fills, 0, 0, "%.3f")) { settings.ExceptionalReserveFills = fills; changed = true; }
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Adds this many full-reserve amounts on each exceptional pulse, including chain links. 0 = off; up to 1000. Uses Full Reserve Reference in Digestion Reserve. Adds to existing storage; ignores hit size, Bonus Stored and deposit balancing. Requires digestion enabled. Ambient growth never rolls this bonus again.");
+            if (settings.ExceptionalReserveFills > 0)
+            {
+                if (!digestion.Enabled) ImGui.TextDisabled("Enable Digestion Reserve.");
+                else ImGui.TextDisabled($"Adds {GrowthBonusSettings.Finite(settings.ExceptionalReserveFills, 0, 1000, 0) * (double)digestion.MaximumReserve:0.###} reserve / exceptional pulse");
+            }
             changed |= DrawBonusSound("Exceptional", settings.ExceptionalSound, group, PulseSoundKind.Exceptional);
             bool vfx = settings.ExceptionalVfxEnabled;
             if (ImGui.Checkbox("Exceptional VFX", ref vfx)) { settings.ExceptionalVfxEnabled = vfx; changed = true; }
@@ -1790,7 +1798,7 @@ public class ConfigWindow : Window, IDisposable
         DrawActionGrowth(settings.ActionGrowth, id);
         DrawEmoteGrowth(settings.EmoteGrowth, id);
         DrawChatGrowth(settings.ChatGrowth, id);
-        DrawGrowthBonuses(settings.GrowthBonuses, id);
+        DrawGrowthBonuses(settings.GrowthBonuses, settings.Digestion, id);
 
         ImGui.PushID("accumulation-" + id);
         DrawAccumulatingEffects(settings.AccumulatingEffects);
