@@ -1109,7 +1109,7 @@ public class ConfigWindow : Window, IDisposable
                 float speed = settings.GrowthPerSecond * 100f;
                 if (ImGui.DragFloat("Initial Digestion Rate", ref speed, 0.1f, 0f, 10000f, "%.1f%% /s"))
                 { settings.GrowthPerSecond = speed / 100f; configuration.Save(); }
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Starting and minimum depletion rate. Pulses reduce the rate back toward this floor; a quiet period lets it rise. Growth speed still equals the reserve balance. Emptying or disabling resets the rate and timer.");
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Starting depletion rate for a new reserve cycle, not a minimum. Pulses can reduce it to zero; a quiet period lets it rise again. Changes apply when a new reserve starts. Emptying or disabling resets the cycle.");
                 float delay = settings.DigestionNoPulseDelaySeconds;
                 if (ImGui.InputFloat("No-Pulse Delay (s)", ref delay, 0f, 0f, "%.3f"))
                 { settings.DigestionNoPulseDelaySeconds = delay; settings.Validate(); configuration.Save(); }
@@ -1121,7 +1121,7 @@ public class ConfigWindow : Window, IDisposable
                 float reduction = settings.DigestionDecreasePerPulse * 100f;
                 if (ImGui.InputFloat("Digestion Reduction / Pulse", ref reduction, 0f, 0f, "%.3f"))
                 { settings.DigestionDecreasePerPulse = reduction / 100f; settings.Validate(); configuration.Save(); }
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Percentage points/s removed per released growth pulse, down to Initial Digestion Rate. One combined release counts once. Heartbeats and continuous reserve growth do not count. A pulse also restarts No-Pulse Delay.");
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Percentage points/s removed per released growth pulse, down to zero. Initial 50 and reduction 50 stops depletion after one pulse. At zero the reserve still drives ambient growth. Each pulse restarts No-Pulse Delay; heartbeats and ambient growth do not count.");
                 if (id is "self" or "players")
                 {
                     bool boneEnabled = settings.BoneEnabled;

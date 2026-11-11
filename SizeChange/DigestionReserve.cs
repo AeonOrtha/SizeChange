@@ -105,25 +105,24 @@ internal struct DigestionReserve
     public bool HasGrowth => Growth > 0;
     // +1x stored directly drives +1x/s of ambient growth.
     public double AmbientGrowthPerSecond => Growth;
-    private double extraDigestionRate;
+    private double currentDigestionRate;
     private double secondsWithoutPulse;
 
-    public double DigestionRate(DigestionSettings settings)
-    {
-        double initial = float.IsFinite(settings.GrowthPerSecond) ? Math.Clamp(settings.GrowthPerSecond, 0f, 100f) : 0.05;
-        return Math.Min(100, initial + extraDigestionRate);
-    }
+    private static double InitialRate(DigestionSettings settings) =>
+        float.IsFinite(settings.GrowthPerSecond) ? Math.Clamp(settings.GrowthPerSecond, 0f, 100f) : 0.05;
+
+    public double DigestionRate(DigestionSettings settings) => HasGrowth
+        ? currentDigestionRate : InitialRate(settings);
 
     public void OnGrowthPulse(DigestionSettings settings)
     {
         secondsWithoutPulse = 0;
-        if (!settings.Enabled || !HasGrowth) { extraDigestionRate = 0; return; }
+        if (!settings.Enabled || !HasGrowth) { currentDigestionRate = 0; return; }
         double reduction = float.IsFinite(settings.DigestionDecreasePerPulse)
             ? Math.Clamp(settings.DigestionDecreasePerPulse, 0f, 100f) : 0.02;
-        // Reduce the effective rate, even if the initial rate was edited at the
-        // ceiling. Do not accumulate an invisible surplus above that ceiling.
-        double initial = float.IsFinite(settings.GrowthPerSecond) ? Math.Clamp(settings.GrowthPerSecond, 0f, 100f) : 0.05;
-        extraDigestionRate = Math.Max(0, DigestionRate(settings) - initial - reduction);
+        // The configured initial rate starts a new reserve cycle; it is not a
+        // floor. Pulses can stop depletion without stopping ambient growth.
+        currentDigestionRate = Math.Max(0, currentDigestionRate - reduction);
     }
 
     public EarnedGrowth Absorb(float growth, float damage, DigestionSettings settings)
@@ -133,7 +132,7 @@ internal struct DigestionReserve
         if (settings.Enabled)
         {
             double bonus = settings.DepositFor(growth, (float)validDamage);
-            if (!HasGrowth) { extraDigestionRate = 0; secondsWithoutPulse = 0; }
+            if (!HasGrowth) { currentDigestionRate = InitialRate(settings); secondsWithoutPulse = 0; }
             // No gameplay capacity; only avoid numeric infinity at double's
             // representational boundary.
             Growth = Math.Min(Growth, double.MaxValue - bonus) + bonus;
@@ -152,7 +151,6 @@ internal struct DigestionReserve
             ? Math.Clamp(settings.DigestionNoPulseDelaySeconds, 0f, 3600f) : 3;
         double increment = float.IsFinite(settings.DigestionIncreasePerSecond)
             ? Math.Clamp(settings.DigestionIncreasePerSecond, 0f, 100f) : 0.02;
-        double initial = float.IsFinite(settings.GrowthPerSecond) ? Math.Clamp(settings.GrowthPerSecond, 0f, 100f) : 0.05;
         double remaining = Math.Clamp(seconds, 0, 1);
         double output = 0;
         while (remaining > 0 && HasGrowth)
@@ -168,7 +166,7 @@ internal struct DigestionReserve
             remaining = Math.Max(0, remaining - dt);
             secondsWithoutPulse = reachesStep ? nextStep : secondsWithoutPulse + dt;
             if (reachesStep)
-                extraDigestionRate = Math.Min(100 - initial, extraDigestionRate + increment);
+                currentDigestionRate = Math.Min(100, currentDigestionRate + increment);
         }
         return output;
     }
