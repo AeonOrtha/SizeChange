@@ -11,7 +11,8 @@ internal sealed class GrowthChainScheduler
 {
     internal const int MaximumActiveChains = 64;
     private readonly List<Link> pending = new();
-    private record struct Link(float Growth, float Aether, float Emote, int Left, float Remaining);
+    private record struct Link(float OriginalGrowth, float Aether, float Emote,
+        float BasePercent, float StepPercent, int Number, int Left, float Remaining);
     public int PendingCount => pending.Count;
     public ulong DroppedChains { get; private set; }
     public void Clear() => pending.Clear();
@@ -19,15 +20,16 @@ internal sealed class GrowthChainScheduler
     public void Start(float growth, float aether, float emote, GrowthBonusSettings settings, Func<double> random)
     {
         int limit = Math.Clamp(settings.MaximumExtraPulses, 0, 16);
-        float fraction = GrowthBonusSettings.Finite(settings.ChainGrowthPercent, 0, 1000, 50) / 100;
-        if (!settings.ChainsEnabled || limit == 0 || !float.IsFinite(growth) || growth <= 0 || fraction <= 0) return;
+        float basePercent = GrowthBonusSettings.Finite(settings.ChainGrowthPercent, 0, 1000, 50);
+        float stepPercent = GrowthBonusSettings.Finite(settings.ChainGrowthStepPercent, 0, 1000, 0);
+        if (!settings.ChainsEnabled || limit == 0 || !float.IsFinite(growth) || growth <= 0 || basePercent + stepPercent <= 0) return;
         if (pending.Count >= MaximumActiveChains) { DroppedChains++; return; }
         if (!GrowthBonusRolls.Roll(settings.ChainChancePercent, random)) return;
         aether = float.IsFinite(aether) ? Math.Clamp(aether, 0, growth) : 0;
         emote = float.IsFinite(emote) ? Math.Clamp(emote, 0, growth - aether) : 0;
-        float linkGrowth = (float)Math.Min(float.MaxValue, (double)growth * fraction);
-        double effectiveFraction = (double)linkGrowth / growth;
-        pending.Add(new(linkGrowth, (float)(aether * effectiveFraction), (float)(emote * effectiveFraction), limit, Interval(settings)));
+        // Capture this root's progression. Overlapping chains keep separate
+        // counters, and exceptional multipliers never compound the next link.
+        pending.Add(new(growth, aether, emote, basePercent, stepPercent, 1, limit, Interval(settings)));
     }
 
     private static float Interval(GrowthBonusSettings settings) =>
@@ -48,11 +50,16 @@ internal sealed class GrowthChainScheduler
         if (due < 0) return null;
         var next = pending[due];
         pending.RemoveAt(due);
-        var pulse = GrowthBonusRolls.Pulse(next.Growth, next.Aether, next.Emote, true, settings, random);
+        double fraction = (next.BasePercent + (double)next.Number * next.StepPercent) / 100;
+        float growth = (float)Math.Min(float.MaxValue, next.OriginalGrowth * fraction);
+        double effectiveFraction = (double)growth / next.OriginalGrowth;
+        var pulse = GrowthBonusRolls.Pulse(growth,
+            (float)(next.Aether * effectiveFraction), (float)(next.Emote * effectiveFraction), true, settings, random);
         // Never catch up an entire sequence after a stalled frame. Other chains
         // keep their deadlines; at most one due link is dispatched per update.
         if (--next.Left > 0 && GrowthBonusRolls.Roll(settings.ChainChancePercent, random))
         {
+            next.Number++;
             next.Remaining = Interval(settings);
             pending.Add(next);
         }

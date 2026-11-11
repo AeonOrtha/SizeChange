@@ -8,27 +8,34 @@ namespace SizeChange;
 internal struct GrowthVisualScale
 {
     private bool initialized;
-    private List<GrowthOvershootPulse>? pulses;
+    private struct Envelope(GrowthOvershootPulse pulse, bool chain)
+    {
+        public GrowthOvershootPulse Pulse = pulse;
+        public bool Chain = chain;
+    }
+    private List<Envelope>? pulses;
     public float BaseScale { get; private set; }
     public float PulseOffset { get; private set; }
+    public float NormalPulseOffset { get; private set; }
+    public float ChainPulseOffset { get; private set; }
     public bool IsPulsing => pulses is { Count: > 0 };
     internal int ActivePulseCount => pulses?.Count ?? 0;
 
-    public void StartPulse(float extraScale, float durationSeconds, float risePercent = 30)
+    public void StartPulse(float extraScale, float durationSeconds, float risePercent = 30, bool chain = false)
     {
         if (!float.IsFinite(extraScale) || extraScale <= 0) return;
         pulses ??= new(4);
         // Same-frame contributions with identical timing share an envelope.
-        if (pulses.Count > 0 && pulses[^1].CanCombine(durationSeconds, risePercent))
+        if (pulses.Count > 0 && pulses[^1].Chain == chain && pulses[^1].Pulse.CanCombine(durationSeconds, risePercent))
         {
             var combined = pulses[^1];
-            combined.Combine(extraScale);
+            combined.Pulse.Combine(extraScale);
             pulses[^1] = combined;
             return;
         }
         var next = new GrowthOvershootPulse();
         next.Start(extraScale, durationSeconds, risePercent);
-        pulses.Add(next);
+        pulses.Add(new(next, chain));
     }
 
     public void CancelPulse()
@@ -37,6 +44,7 @@ internal struct GrowthVisualScale
         // visible size, rather than abruptly removing a live pulse.
         if (initialized) BaseScale += PulseOffset;
         PulseOffset = 0f;
+        NormalPulseOffset = ChainPulseOffset = 0f;
         pulses?.Clear();
     }
 
@@ -52,7 +60,7 @@ internal struct GrowthVisualScale
         // It continues during rise, settle and the interval between pulses.
         BaseScale = Math.Max(minimumScale,
             Math.Min(float.Lerp(BaseScale, targetScale, lerpAmount), maximumScale));
-        double offset = 0;
+        double normalOffset = 0, chainOffset = 0;
         if (pulses != null)
         {
             // Compact in one pass. Expired pulses leave no history; storage is
@@ -61,12 +69,15 @@ internal struct GrowthVisualScale
             for (int i = 0; i < pulses.Count; i++)
             {
                 var pulse = pulses[i];
-                offset += pulse.Update(frameSeconds);
-                if (pulse.IsActive) pulses[live++] = pulse;
+                double offset = pulse.Pulse.Update(frameSeconds);
+                if (pulse.Chain) chainOffset += offset; else normalOffset += offset;
+                if (pulse.Pulse.IsActive) pulses[live++] = pulse;
             }
             if (live < pulses.Count) pulses.RemoveRange(live, pulses.Count - live);
         }
-        PulseOffset = (float)Math.Min(float.MaxValue, offset);
+        NormalPulseOffset = (float)Math.Min(float.MaxValue, normalOffset);
+        ChainPulseOffset = (float)Math.Min(float.MaxValue, chainOffset);
+        PulseOffset = (float)Math.Min(float.MaxValue, normalOffset + chainOffset);
         // The temporary pulse may exceed the cap; its baseline never does.
         return BaseScale + PulseOffset;
     }

@@ -43,6 +43,7 @@ public sealed class GrowthBonusSettings
     public bool ChainsEnabled { get; set; }
     public float ChainChancePercent { get; set; } = 20;
     public float ChainGrowthPercent { get; set; } = 50;
+    public float ChainGrowthStepPercent { get; set; }
     public float ChainIntervalSeconds { get; set; } = 0.35f;
     public PulseSoundSettings ExceptionalSound { get; set; } = new();
     public PulseSoundSettings ChainSound { get; set; } = new();
@@ -66,6 +67,7 @@ public sealed class GrowthBonusSettings
         ChainSound ??= new(); ChainSound.Validate();
         ChainChancePercent = Finite(ChainChancePercent, 0, 100, 20);
         ChainGrowthPercent = Finite(ChainGrowthPercent, 0, 1000, 50);
+        ChainGrowthStepPercent = Finite(ChainGrowthStepPercent, 0, 1000, 0);
         MaximumExtraPulses = Math.Clamp(MaximumExtraPulses, 0, 16);
         ExceptionalChancePercent = Finite(ExceptionalChancePercent, 0, 100, 10);
         ExceptionalMultiplier = Finite(ExceptionalMultiplier, 1, 100, 2);
@@ -99,6 +101,7 @@ public sealed class GrowthBonusSettings
         ChainVfxEnabled = s.ChainVfxEnabled, ChainVfxLayers = CopyLayers(s.ChainVfxLayers),
         ChainsEnabled = s.ChainsEnabled, ChainChancePercent = s.ChainChancePercent,
         ChainGrowthPercent = s.ChainGrowthPercent, MaximumExtraPulses = s.MaximumExtraPulses,
+        ChainGrowthStepPercent = s.ChainGrowthStepPercent,
         ExceptionalEnabled = s.ExceptionalEnabled, ExceptionalChancePercent = s.ExceptionalChancePercent,
         ExceptionalMultiplier = s.ExceptionalMultiplier, ExceptionalVfxEnabled = s.ExceptionalVfxEnabled,
         ExceptionalReserveFills = s.ExceptionalReserveFills,

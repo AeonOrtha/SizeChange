@@ -1681,8 +1681,11 @@ public class ConfigWindow : Window, IDisposable
             float chance = settings.ChainChancePercent;
             if (ImGui.InputFloat("Chain Chance (%)", ref chance, 0, 0, "%.1f")) { settings.ChainChancePercent = chance; changed = true; }
             float amount = settings.ChainGrowthPercent;
-            if (ImGui.InputFloat("Growth per Link (%)", ref amount, 0, 0, "%.1f")) { settings.ChainGrowthPercent = amount; changed = true; }
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Percent of the original unboosted pulse, 0–1000. 200% adds twice the original amount per link. Every link uses that amount and may roll an exceptional boost independently. Source size-limit rules still apply.");
+            if (ImGui.InputFloat("Base Link Growth (%)", ref amount, 0, 0, "%.1f")) { settings.ChainGrowthPercent = amount; changed = true; }
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Base percent of the original unboosted pulse, 0–1000. Add Increase per Successive Link for each link number. At 100% base and 10% increase: 110%, 120%, 130%. Exceptional rolls apply afterward. Source size-limit rules still apply.");
+            float step = settings.ChainGrowthStepPercent;
+            if (ImGui.InputFloat("Increase per Successive Link (%)", ref step, 0, 0, "%.1f")) { settings.ChainGrowthStepPercent = step; changed = true; }
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Percentage points of the original pulse added per link, 0–1000. Linear progression, not compounded: root 100, then 110, 120, 130 with base 100 and step 10. Each new chain starts over. Zero keeps equal-sized links.");
             float interval = settings.ChainIntervalSeconds;
             if (ImGui.InputFloat("Chain Interval (s)", ref interval, 0, 0, "%.3f")) { settings.ChainIntervalSeconds = interval; changed = true; }
             if (ImGui.IsItemHovered()) ImGui.SetTooltip("0.05–10 seconds between chain links. Independent of accumulator timing. New normal pulses do not reset a running chain; overlaps use your existing overshoot duration. Default 0.35s.");

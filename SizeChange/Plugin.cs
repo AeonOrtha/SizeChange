@@ -67,6 +67,8 @@ struct SCCharacterState
     public GrowthChainScheduler? GrowthChains;
     public uint ChainTerritory;
     public ulong ChainPulseCount;
+    public float LastChainRequestedGrowth;
+    public float LastChainCreditedGrowth;
     public ulong ExceptionalPulseCount;
 }
 
@@ -1346,9 +1348,17 @@ public sealed class Plugin : IDalamudPlugin
         {
             // Credit only when the link actually fires. It never enters the
             // accumulator, reserve deposits or bridge queue.
+            float settledBefore = settings.LimitDeltaGrowth
+                ? Math.Min(charState.GrowthMultiplier, charState.EmoteAllowance.Cap(settings.DeltaMaxScaleMultiplier, charState.Aether.Bonus))
+                : charState.GrowthMultiplier;
             charState.GrowthMultiplier = (float)Math.Min(float.MaxValue, (double)charState.GrowthMultiplier + followup.Growth);
             charState.Aether.Bonus = (float)Math.Min(float.MaxValue, (double)charState.Aether.Bonus + followup.Aether);
             charState.EmoteAllowance.Bonus = (float)Math.Min(float.MaxValue, (double)charState.EmoteAllowance.Bonus + followup.Emote);
+            float settledAfter = settings.LimitDeltaGrowth
+                ? Math.Min(charState.GrowthMultiplier, charState.EmoteAllowance.Cap(settings.DeltaMaxScaleMultiplier, charState.Aether.Bonus))
+                : charState.GrowthMultiplier;
+            charState.LastChainRequestedGrowth = followup.Growth;
+            charState.LastChainCreditedGrowth = Math.Max(0, settledAfter - settledBefore);
             pulseGrowthAmount = (float)Math.Min(float.MaxValue, (double)pulseGrowthAmount + followup.Growth);
             releasedGrowth = true;
         }
@@ -1538,7 +1548,7 @@ public sealed class Plugin : IDalamudPlugin
                     charState.PlayerScale * pulseReference * GrowthOvershootPulse.BoostSmallRelease(
                         pulse.Value.Growth / pulseReference, settings.GrowthOvershootSmallBoost,
                         settings.GrowthOvershootBoostRangePercent) * settings.GrowthOvershootPercent / 100f,
-                    settings.OvershootDuration, settings.GrowthOvershootRisePercent);
+                    settings.OvershootDuration, settings.GrowthOvershootRisePercent, chain: pulse.Value.IsChain);
             }
         }
 
@@ -2113,6 +2123,8 @@ public sealed class Plugin : IDalamudPlugin
                 settings.AccumulatorDelayIncreaseSeconds, settings.AccumulatorMaximumDelaySeconds);
             lines.Add($"{name}: Base {state.PlayerScale:0.000} | Current {state.ObservedScale:0.000} | " +
                 $"Crystals {state.NearbyAetherSources} | Drain sources {state.NearbyDrainSources} | Growth {state.GrowthMultiplier:0.000} | Pending {state.PendingGrowth:0.000} | Reserve {state.Digestion.Growth:0.000} | Next delay {nextDelay:0.000}s | Window remaining {state.AccumulatorRemainingSeconds:0.000}s | Releases {state.GrowthReleaseCount} | Last release interval {(state.GrowthReleaseCount > 1 ? state.LastGrowthReleaseIntervalSeconds.ToString("0.000") + "s" : "n/a")}" +
+                $" | Last chain gain {state.LastChainCreditedGrowth:0.######} / requested {state.LastChainRequestedGrowth:0.######}" +
+                $" | Visual offsets: normal {state.GrowthVisual.NormalPulseOffset:0.######}, chain {state.GrowthVisual.ChainPulseOffset:0.######}" +
                 $" | Chain pulses {state.ChainPulseCount} | Exceptional pulses {state.ExceptionalPulseCount} | Pending chains {state.GrowthChains?.PendingCount ?? 0} | Chain overflow {state.GrowthChains?.DroppedChains ?? 0}" +
                 (group == SCActorGroup.Self ? $" | Customize+ root lift {state.SelfRootHeightOffset:0.000}" : $" | Session height {state.Transform.Height.Baseline:0.000} | Added {(state.Transform.Height.Owned ? state.Transform.Height.LastWritten - state.Transform.Height.Baseline : 0f):0.000}") +
                 (state.Transform.ScaleConflict ? " | Scale paused: external change" : "") +
