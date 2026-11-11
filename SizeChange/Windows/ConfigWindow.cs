@@ -1087,16 +1087,25 @@ public class ConfigWindow : Window, IDisposable
                 { settings.StoredPercent = percent; configuration.Save(); }
                 if (ImGui.IsItemHovered()) ImGui.SetTooltip("Bonus applied after deposit balancing. 500% stores five times the balanced contribution. Original growth is unchanged. Zero stops deposits; existing reserve keeps driving growth. Only crystal and size-drain hits fill it.");
                 float balance = settings.DepositBalancePercent;
-                if (ImGui.SliderFloat("Deposit Balancing", ref balance, 0f, 100f, "%.0f%%"))
+                if (ImGui.SliderFloat("Small Deposit Boost", ref balance, 0f, 100f, "%.0f%%"))
                 { settings.DepositBalancePercent = balance; configuration.Save(); }
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Boosts small deposits and dampens large ones. 0% restores linear deposits; 100% uses a square-root curve. Larger hits still deposit more.");
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Boosts contributions below Balance Point. 0% leaves small contributions unchanged; 100% uses a square-root boost. The upper taper and cutoff always apply.");
                 float balancePoint = settings.DepositBalancePoint;
                 if (ImGui.InputFloat("Balance Point", ref balancePoint, 0f, 0f, "%.6f"))
                 {
                     settings.DepositBalancePoint = float.IsFinite(balancePoint) ? Math.Clamp(balancePoint, 0.000001f, 10000f) : 0.1f;
+                    settings.Validate();
                     configuration.Save();
                 }
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Original growth per hit: values below this are boosted; values above are dampened. Applied before Bonus Stored, without changing original growth or pulse strength.");
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Original growth per contribution, not HP damage. At this point the reservoir multiplier is 1x before Bonus Stored. Above it, deposits decrease smoothly to zero.");
+                float cutoff = settings.DepositCutoff;
+                if (ImGui.InputFloat("Zero Deposit At", ref cutoff, 0f, 0f, "%.6f"))
+                {
+                    settings.DepositCutoff = cutoff;
+                    settings.Validate();
+                    configuration.Save();
+                }
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Contributions at or above this add zero to the reservoir. Must exceed Balance Point. Original growth still applies; existing reserve is unaffected.");
                 float speed = settings.GrowthPerSecond * 100f;
                 if (ImGui.DragFloat("Digestion Rate", ref speed, 0.1f, 0f, 10000f, "%.1f%% /s"))
                 { settings.GrowthPerSecond = speed / 100f; configuration.Save(); }
