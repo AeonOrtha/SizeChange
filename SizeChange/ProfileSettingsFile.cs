@@ -100,8 +100,9 @@ internal sealed class ProfileSettingsFile
             foreach (var item in element.EnumerateArray()) CheckNumbers(item);
     }
 
-    private static bool Compatible(string source, SCActorGroup target) => source == Name(target) ||
-        (source is "Self" or "AddedPlayers" && target is SCActorGroup.Self or SCActorGroup.Player);
+    private static bool Compatible(string source, SCActorGroup target) =>
+        source is "Self" or "AddedPlayers" or "Monsters" &&
+        target is SCActorGroup.Self or SCActorGroup.Player or SCActorGroup.Monster;
     private static T Copy<T>(T value) => JsonSerializer.Deserialize<T>(JsonSerializer.Serialize(value, Options), Options)!;
 
     internal void Apply(Configuration config, SCActorGroup group)
@@ -110,6 +111,19 @@ internal sealed class ProfileSettingsFile
         bool cross = Profile != Name(group);
         var growth = Copy(Growth ?? throw new InvalidDataException("Missing growth settings."));
         growth.Validate();
+        // Monsters share all growth settings, but have no player bone/profile
+        // equivalent. Cross-import only the common section; keep the target's
+        // roster, appearance, enable switches and monster animation overrides.
+        if (cross && (Profile == "Monsters" || group == SCActorGroup.Monster))
+        {
+            switch (group)
+            {
+                case SCActorGroup.Self: config.SelfSettings = growth; break;
+                case SCActorGroup.Player: config.PlayerSettings = growth; break;
+                case SCActorGroup.Monster: config.MonsterSettings = growth; break;
+            }
+            return;
+        }
         var bones = Copy(Bones ?? new BoneHeartbeatSettings());
         bones.Validate();
         float height = Math.Clamp(FlatHeightOffset ?? LocalHeight?.Offset ?? 0f, 0f, 100f);

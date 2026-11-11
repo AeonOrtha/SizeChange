@@ -24,6 +24,10 @@ public sealed class PulseSoundSettings
     public bool SizeRate { get; set; }
     public float RateDrop { get; set; } = 0.1f;
     public float MinimumRate { get; set; } = 0.5f;
+    public bool KeepThroughChain { get; set; }
+    public bool ChainRepeat { get; set; }
+    public float ChainRepeatSeconds { get; set; } = 1f;
+    public float ChainFadeOutSeconds { get; set; } = 1f;
     public void Validate()
     {
         Path = (Path ?? string.Empty).Trim().Replace('\\', '/');
@@ -33,6 +37,8 @@ public sealed class PulseSoundSettings
         MaximumVolume = GrowthBonusSettings.Finite(MaximumVolume, 0, 20, 20);
         RateDrop = GrowthBonusSettings.Finite(RateDrop, 0, 1, .1f);
         MinimumRate = GrowthBonusSettings.Finite(MinimumRate, .1f, 1, .5f);
+        ChainRepeatSeconds = GrowthBonusSettings.Finite(ChainRepeatSeconds, .05f, 300, 1);
+        ChainFadeOutSeconds = GrowthBonusSettings.Finite(ChainFadeOutSeconds, .05f, 30, 1);
     }
     public static PulseSoundSettings CopyOf(PulseSoundSettings s) => (PulseSoundSettings)s.MemberwiseClone();
 }
@@ -52,6 +58,8 @@ public sealed class GrowthBonusSettings
     public int MaximumExtraPulses { get; set; } = 3;
     public bool ExceptionalEnabled { get; set; }
     public float ExceptionalChancePercent { get; set; } = 10;
+    public float ChainExceptionalChancePercent { get; set; }
+    public int MaximumExceptionalPulsesPerChain { get; set; } = 1;
     public float ExceptionalMultiplier { get; set; } = 2;
     public float ExceptionalReserveFills { get; set; }
     public bool ExceptionalVfxEnabled { get; set; }
@@ -68,8 +76,10 @@ public sealed class GrowthBonusSettings
         ChainChancePercent = Finite(ChainChancePercent, 0, 100, 20);
         ChainGrowthPercent = Finite(ChainGrowthPercent, 0, 1000, 50);
         ChainGrowthStepPercent = Finite(ChainGrowthStepPercent, 0, 1000, 0);
-        MaximumExtraPulses = Math.Clamp(MaximumExtraPulses, 0, 16);
+        MaximumExtraPulses = Math.Max(0, MaximumExtraPulses);
         ExceptionalChancePercent = Finite(ExceptionalChancePercent, 0, 100, 10);
+        ChainExceptionalChancePercent = Finite(ChainExceptionalChancePercent, 0, 100, 0);
+        MaximumExceptionalPulsesPerChain = Math.Max(0, MaximumExceptionalPulsesPerChain);
         ExceptionalMultiplier = Finite(ExceptionalMultiplier, 1, 100, 2);
         ExceptionalReserveFills = Finite(ExceptionalReserveFills, 0, 1000, 0);
         VfxLayers = ValidateLayers(VfxLayers);
@@ -103,6 +113,8 @@ public sealed class GrowthBonusSettings
         ChainGrowthPercent = s.ChainGrowthPercent, MaximumExtraPulses = s.MaximumExtraPulses,
         ChainGrowthStepPercent = s.ChainGrowthStepPercent,
         ExceptionalEnabled = s.ExceptionalEnabled, ExceptionalChancePercent = s.ExceptionalChancePercent,
+        ChainExceptionalChancePercent = s.ChainExceptionalChancePercent,
+        MaximumExceptionalPulsesPerChain = s.MaximumExceptionalPulsesPerChain,
         ExceptionalMultiplier = s.ExceptionalMultiplier, ExceptionalVfxEnabled = s.ExceptionalVfxEnabled,
         ExceptionalReserveFills = s.ExceptionalReserveFills,
         VfxLayers = CopyLayers(s.VfxLayers),
@@ -132,22 +144,23 @@ internal static class GrowthBonusRolls
         return double.IsFinite(draw) && draw >= 0 && draw < chance / 100d;
     }
 
-    internal static GrowthBonusResult Resolve(float originalGrowth, GrowthBonusSettings settings, Func<double> random)
+    internal static GrowthBonusResult Resolve(float originalGrowth, GrowthBonusSettings settings, Func<double> random, bool chain = false)
     {
         if (!float.IsFinite(originalGrowth) || originalGrowth <= 0) return default;
-        bool exceptional = settings.ExceptionalEnabled && Roll(settings.ExceptionalChancePercent, random);
+        bool exceptional = settings.ExceptionalEnabled &&
+            Roll(chain ? settings.ChainExceptionalChancePercent : settings.ExceptionalChancePercent, random);
         double total = originalGrowth * (exceptional
             ? (double)GrowthBonusSettings.Finite(settings.ExceptionalMultiplier, 1, 100, 2) : 1);
         return new((float)Math.Min(float.MaxValue, total), exceptional);
     }
 
     internal static GrowthPulse Pulse(float growth, float aether, float emote, bool chain,
-        GrowthBonusSettings settings, Func<double> random)
+        GrowthBonusSettings settings, Func<double> random, bool allowExceptional = true)
     {
         if (!float.IsFinite(growth) || growth <= 0) return default;
         aether = float.IsFinite(aether) ? Math.Clamp(aether, 0, growth) : 0;
         emote = float.IsFinite(emote) ? Math.Clamp(emote, 0, growth - aether) : 0;
-        var rolled = Resolve(growth, settings, random);
+        var rolled = allowExceptional ? Resolve(growth, settings, random, chain) : new GrowthBonusResult(growth, false);
         var extra = rolled.ExtraForSources(growth, aether, emote);
         return new(rolled.TotalGrowth, (float)Math.Min(float.MaxValue, (double)aether + extra.Aether),
             (float)Math.Min(float.MaxValue, (double)emote + extra.Emote),

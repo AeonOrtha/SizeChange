@@ -19,6 +19,7 @@ internal struct GrowthVisualScale
     public float NormalPulseOffset { get; private set; }
     public float ChainPulseOffset { get; private set; }
     public bool IsPulsing => pulses is { Count: > 0 };
+    public bool IsChainPulsing => pulses?.Exists(p => p.Chain && p.Pulse.IsActive) == true;
     internal int ActivePulseCount => pulses?.Count ?? 0;
 
     public void StartPulse(float extraScale, float durationSeconds, float risePercent = 30, bool chain = false)

@@ -80,7 +80,7 @@ public class ConfigWindow : Window, IDisposable
                 }
                 catch (Exception ex) { profileFileStatus[group] = "Import failed: " + ex.Message; }
             });
-        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Imports this tab. Self and Added Players files are interchangeable; cross-tab imports keep destination names, enable switches and profile selection. Resets live growth and preview.");
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Imports this tab. Self and Added Players exchange growth and bone settings. Imports to/from Monsters transfer shared growth settings only. Cross-tab imports keep destination names and enable switches. Resets live growth and preview.");
         ImGui.SameLine();
         if (ImGui.Button("Export JSON"))
             profileDialogs.SaveFileDialog("Export " + ProfileSettingsFile.Name(group), ".json",
@@ -1603,7 +1603,9 @@ public class ConfigWindow : Window, IDisposable
         bool changed = false;
         bool sound = settings.Enabled;
         if (ImGui.Checkbox(label + " Sound", ref sound)) { settings.Enabled = sound; changed = true; }
-        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Plays this additional SCD on each matching pulse. Independent of normal growth sound and its cooldown.");
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip(kind == PulseSoundKind.Chain
+            ? "Starts on the first chain link. Overlapping chains share one sound per actor; later links do not restart it."
+            : "Plays on each exceptional pulse, including successful chain rolls. Independent of normal growth sound and its cooldown.");
         if (sound && ImGui.TreeNode(label + " SCD"))
         {
             string path = settings.Path;
@@ -1628,7 +1630,29 @@ public class ConfigWindow : Window, IDisposable
                 if (ImGui.InputFloat("Rate Drop / 1x", ref drop, 0, 0, "%.3f")) { settings.RateDrop = drop; changed = true; }
                 if (ImGui.InputFloat("Minimum Rate", ref min, 0, 0, "%.3f")) { settings.MinimumRate = min; changed = true; }
             }
+            if (kind == PulseSoundKind.Chain)
+            {
+                bool keep = settings.KeepThroughChain;
+                if (ImGui.Checkbox("Keep Through Chain", ref keep)) { settings.KeepThroughChain = keep; changed = true; }
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Keeps sound running through all overlapping chains and their final overshoot, then fades. Off: play once at the start, with no repeats.");
+                if (keep)
+                {
+                    int mode = settings.ChainRepeat ? 1 : 0;
+                    if (ImGui.Combo("Playback Mode", ref mode, "Looping SCD\0Replay Every\0")) { settings.ChainRepeat = mode == 1; changed = true; }
+                    if (ImGui.IsItemHovered()) ImGui.SetTooltip("Looping SCD uses the file's own loop. Replay Every restarts the sound on an independent timer; it does not stack voices.");
+                    if (settings.ChainRepeat)
+                    {
+                        float interval = settings.ChainRepeatSeconds;
+                        if (ImGui.InputFloat("Replay Every (s)", ref interval, 0, 0, "%.3f")) { settings.ChainRepeatSeconds = interval; changed = true; }
+                        if (ImGui.IsItemHovered()) ImGui.SetTooltip("0.05–300 seconds between starts. Short intervals cut off the previous playback. No new replay starts during fade-out.");
+                    }
+                }
+                float fade = settings.ChainFadeOutSeconds;
+                if (ImGui.InputFloat("Fade Out (s)", ref fade, 0, 0, "%.3f")) { settings.ChainFadeOutSeconds = fade; changed = true; }
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("0.05–30 seconds after the final chain overshoot ends. If overshoot is disabled, starts after the final link. A one-shot that ends earlier finishes naturally.");
+            }
             if (ImGui.Button("Test SCD")) plugin.TestPulseSound(group, kind, settings);
+            if (kind == PulseSoundKind.Chain && ImGui.IsItemHovered()) ImGui.SetTooltip("Preview a 3-second chain session, then the configured fade.");
             ImGui.SameLine();
             if (ImGui.Button("Stop SCD")) plugin.StopPulseSound(group, kind);
             ImGui.TextWrapped(plugin.PulseSoundStatus(group, kind));
@@ -1682,7 +1706,7 @@ public class ConfigWindow : Window, IDisposable
             if (ImGui.InputFloat("Chain Chance (%)", ref chance, 0, 0, "%.1f")) { settings.ChainChancePercent = chance; changed = true; }
             float amount = settings.ChainGrowthPercent;
             if (ImGui.InputFloat("Base Link Growth (%)", ref amount, 0, 0, "%.1f")) { settings.ChainGrowthPercent = amount; changed = true; }
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Base percent of the original unboosted pulse, 0–1000. Add Increase per Successive Link for each link number. At 100% base and 10% increase: 110%, 120%, 130%. Exceptional rolls apply afterward. Source size-limit rules still apply.");
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Base percent of the original unboosted pulse, 0–1000. Add Increase per Successive Link for each link number. At 100% base and 10% increase: 110%, 120%, 130%. Chain links use Chain Exceptional Chance. Source size-limit rules still apply.");
             float step = settings.ChainGrowthStepPercent;
             if (ImGui.InputFloat("Increase per Successive Link (%)", ref step, 0, 0, "%.1f")) { settings.ChainGrowthStepPercent = step; changed = true; }
             if (ImGui.IsItemHovered()) ImGui.SetTooltip("Percentage points of the original pulse added per link, 0–1000. Linear progression, not compounded: root 100, then 110, 120, 130 with base 100 and step 10. Each new chain starts over. Zero keeps equal-sized links.");
@@ -1691,26 +1715,32 @@ public class ConfigWindow : Window, IDisposable
             if (ImGui.IsItemHovered()) ImGui.SetTooltip("0.05–10 seconds between chain links. Independent of accumulator timing. New normal pulses do not reset a running chain; overlaps use your existing overshoot duration. Default 0.35s.");
             int maximum = settings.MaximumExtraPulses;
             if (ImGui.InputInt("Maximum Extra Pulses", ref maximum)) { settings.MaximumExtraPulses = maximum; changed = true; }
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("0–16 extra links per root pulse. Stops even at 100% chance. Each link uses the overshoot settings and its own VFX/SCD; no growth emote or TMB is triggered. Links reduce digestion but do not increase or reset the normal accumulator delay.");
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Your maximum extra links per root pulse; 0 disables chains. No 16-link cap. Stops at this count even at 100% chance. Each link uses overshoot and chain VFX; sound follows the chain session. no growth emote or TMB is triggered. Links reduce digestion but do not increase or reset the normal accumulator delay.");
             changed |= DrawBonusSound("Chain", settings.ChainSound, group, PulseSoundKind.Chain);
             bool chainVfx = settings.ChainVfxEnabled;
             if (ImGui.Checkbox("Chain VFX", ref chainVfx)) { settings.ChainVfxEnabled = chainVfx; changed = true; }
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Additional layers on each follow-up link. Exceptional layers also play if that link rolls exceptional. Normal growth VFX are not triggered by chain links.");
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Additional layers on each follow-up link. Chain links never trigger normal growth effects. An exceptional chain also adds exceptional effects.");
             if (chainVfx) changed |= DrawBonusVfxLayers("chain-vfx", settings.ChainVfxLayers);
         }
         bool exceptional = settings.ExceptionalEnabled;
         if (ImGui.Checkbox("Exceptional Pulses", ref exceptional)) { settings.ExceptionalEnabled = exceptional; changed = true; }
-        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Any released growth pulse can roll a bonus multiplier, including chain links. Optional reserve fills are added separately.");
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Normal pulses and chain links use separate exceptional chances. Both share the multiplier, reserve bonus and exceptional effects.");
         if (exceptional)
         {
             float chance = settings.ExceptionalChancePercent;
             if (ImGui.InputFloat("Exceptional Chance (%)", ref chance, 0, 0, "%.1f")) { settings.ExceptionalChancePercent = chance; changed = true; }
+            float chainChance = settings.ChainExceptionalChancePercent;
+            if (ImGui.InputFloat("Chain Exceptional Chance (%)", ref chainChance, 0, 0, "%.1f")) { settings.ChainExceptionalChancePercent = chainChance; changed = true; }
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Independent 0–100% chance per chain link. Default 0 disables exceptional chains. Uses the same exceptional multiplier, reserve bonus, VFX and SCD; does not compound later links.");
+            int exceptionalMaximum = settings.MaximumExceptionalPulsesPerChain;
+            if (ImGui.InputInt("Maximum Exceptional Pulses per Chain", ref exceptionalMaximum)) { settings.MaximumExceptionalPulsesPerChain = exceptionalMaximum; changed = true; }
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Default 1. Each new chain gets its own allowance; 0 disables exceptional chains. Only successful rolls use it. Captured when the chain starts; the original normal pulse does not count.");
             float multiplier = settings.ExceptionalMultiplier;
             if (ImGui.InputFloat("Growth Multiplier", ref multiplier, 0, 0, "%.2f")) { settings.ExceptionalMultiplier = multiplier; changed = true; }
             if (ImGui.IsItemHovered()) ImGui.SetTooltip("1–100x the pulse's growth on a successful roll. Normal limit rules and overshoot still apply.");
             float fills = settings.ExceptionalReserveFills;
             if (ImGui.InputFloat("Reserve Bonus (x full)", ref fills, 0, 0, "%.3f")) { settings.ExceptionalReserveFills = fills; changed = true; }
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Adds this many full-reserve amounts on each exceptional pulse, including chain links. 0 = off; up to 1000. Uses Full Reserve Reference in Digestion Reserve. Adds to existing storage; ignores hit size, Bonus Stored and deposit balancing. Requires digestion enabled. Ambient growth never rolls this bonus again.");
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Adds this many full-reserve amounts on each exceptional pulse, including chain links that pass their separate chance. 0 = off; up to 1000. Uses Full Reserve Reference in Digestion Reserve. Adds to existing storage; ignores hit size, Bonus Stored and deposit balancing. Requires digestion enabled. Ambient growth never rolls this bonus again.");
             if (settings.ExceptionalReserveFills > 0)
             {
                 if (!digestion.Enabled) ImGui.TextDisabled("Enable Digestion Reserve.");

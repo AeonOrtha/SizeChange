@@ -1416,7 +1416,7 @@ public sealed class Plugin : IDalamudPlugin
                 charState.ChainPulseCount++;
                 TryPlayBonusVfx(actor, settings.GrowthBonuses.ChainVfxEnabled,
                     settings.GrowthBonuses.ChainVfxLayers, chain: true);
-                TryPlayPulseSound(actor, actorGroup, PulseSoundKind.Chain, settings.GrowthBonuses.ChainSound, charState.GrowthMultiplier);
+                TryPlayPulseSound(actor, actorGroup, PulseSoundKind.Chain, settings.GrowthBonuses.ChainSound, charState.GrowthMultiplier, firstChainLink: pulse.FirstChainLink);
             }
             if (pulse.Exceptional)
             {
@@ -1670,10 +1670,13 @@ public sealed class Plugin : IDalamudPlugin
     }
 
     private unsafe string TryPlayPulseSound(Character* actor, SCActorGroup group, PulseSoundKind kind,
-        PulseSoundSettings settings, float scale, bool test = false)
+        PulseSoundSettings settings, float scale, bool test = false, bool firstChainLink = true)
     {
         if (actor == null) return "Actor unavailable.";
         var position = actor->GameObject.Position;
+        if (kind == PulseSoundKind.Chain)
+            return pulseSounds.ChainPulse((int)group, (nint)actor, actor->EntityId, settings,
+                scale, position.X, position.Y, position.Z, firstChainLink, test);
         return pulseSounds.Play((int)group, kind, (nint)actor, actor->EntityId, settings,
             scale, position.X, position.Y, position.Z, test);
     }
@@ -1714,7 +1717,16 @@ public sealed class Plugin : IDalamudPlugin
         pulseSoundTerritory = ClientState.TerritoryType;
         pulseSounds.Tick((float)Framework.UpdateDelta.TotalSeconds, available, CurrentPulseSoundSettings,
             (address, entity) => ObjectTable.SearchByEntityId(entity) is IBattleChara actor && actor.Address == address && actor.CurrentHp > 0,
-            (address, entity) => CharacterIdToLastScaleMap.TryGetValue(entity, out var state) && state.ActorAddress == address);
+            (address, entity) => CharacterIdToLastScaleMap.TryGetValue(entity, out var state) && state.ActorAddress == address,
+            (address, entity) =>
+            {
+                var actor = ObjectTable.SearchByEntityId(entity);
+                if (actor == null || actor.Address != address) return null;
+                var p = actor.Position;
+                bool tracked = CharacterIdToLastScaleMap.TryGetValue(entity, out var state) && state.ActorAddress == address;
+                return new ChainSoundState(tracked && ((state.GrowthChains?.PendingCount ?? 0) > 0 || state.GrowthVisual.IsChainPulsing),
+                    tracked ? state.GrowthMultiplier : 1, p.X, p.Y, p.Z);
+            });
     }
 
     private unsafe string? TryPlayGrowthScd(Character* actor, string path, int index, float volume, float rate)
