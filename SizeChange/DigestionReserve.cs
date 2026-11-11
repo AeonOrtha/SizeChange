@@ -15,8 +15,12 @@ public sealed class DigestionSettings
     // Legacy JSON name: fraction of reserve digested per second (0.05 = 5%/s).
     // This controls depletion only, never the instantaneous growth speed.
     public float GrowthPerSecond { get; set; } = 0.05f;
-    // Additive fraction/second added on each released growth pulse (0.02 = +2 percentage points/s).
+    // Legacy JSON field; pulses no longer increase digestion.
     public float DigestionIncreasePerPulse { get; set; }
+    public float DigestionNoPulseDelaySeconds { get; set; } = 3f;
+    // Fractions of reserve/second: 0.02 adds/removes 2 percentage points/s.
+    public float DigestionIncreasePerSecond { get; set; } = 0.02f;
+    public float DigestionDecreasePerPulse { get; set; } = 0.02f;
     // Legacy JSON name retained for imports: visual bone fullness ONLY.
     // This never limits storage or affects digestion output.
     public float MaximumReserve { get; set; } = 5f;
@@ -40,6 +44,9 @@ public sealed class DigestionSettings
         StoredPercent = float.IsFinite(StoredPercent) ? Math.Clamp(StoredPercent, 0f, 500f) : 50f;
         GrowthPerSecond = float.IsFinite(GrowthPerSecond) ? Math.Clamp(GrowthPerSecond, 0f, 100f) : 0.05f;
         DigestionIncreasePerPulse = float.IsFinite(DigestionIncreasePerPulse) ? Math.Clamp(DigestionIncreasePerPulse, 0f, 100f) : 0f;
+        DigestionNoPulseDelaySeconds = float.IsFinite(DigestionNoPulseDelaySeconds) ? Math.Clamp(DigestionNoPulseDelaySeconds, 0f, 3600f) : 3f;
+        DigestionIncreasePerSecond = float.IsFinite(DigestionIncreasePerSecond) ? Math.Clamp(DigestionIncreasePerSecond, 0f, 100f) : 0.02f;
+        DigestionDecreasePerPulse = float.IsFinite(DigestionDecreasePerPulse) ? Math.Clamp(DigestionDecreasePerPulse, 0f, 100f) : 0.02f;
         MaximumReserve = float.IsFinite(MaximumReserve) ? Math.Clamp(MaximumReserve, 0.001f, 10000f) : 5f;
     }
 
@@ -58,12 +65,12 @@ public sealed class DigestionSettings
         double shaped;
         if (growth <= point)
         {
-            // 0.01% HP is a ratio of 0.0001. Convert that anchor to growth units
+            // 0.001% HP is a ratio of 0.00001. Convert that anchor to growth units
             // using THIS contribution's actual HP-to-growth conversion, including
             // its configured multiplier and size scaling. Balance/cutoff retain
             // their existing growth units and take precedence over the boost.
             double anchor = float.IsFinite(damageRatio) && damageRatio > 0f
-                ? (double)growth * 0.0001 / damageRatio : 0;
+                ? (double)growth * 0.00001 / damageRatio : 0;
             // Keep a nonzero blend span if size scaling pushes the HP anchor
             // into the balance point. Clamping continuously avoids a jump when
             // those endpoints cross; the balance value always takes priority.
@@ -99,6 +106,7 @@ internal struct DigestionReserve
     // +1x stored directly drives +1x/s of ambient growth.
     public double AmbientGrowthPerSecond => Growth;
     private double extraDigestionRate;
+    private double secondsWithoutPulse;
 
     public double DigestionRate(DigestionSettings settings)
     {
@@ -108,10 +116,14 @@ internal struct DigestionReserve
 
     public void OnGrowthPulse(DigestionSettings settings)
     {
+        secondsWithoutPulse = 0;
         if (!settings.Enabled || !HasGrowth) { extraDigestionRate = 0; return; }
-        double increment = float.IsFinite(settings.DigestionIncreasePerPulse)
-            ? Math.Clamp(settings.DigestionIncreasePerPulse, 0f, 100f) : 0;
-        extraDigestionRate = Math.Min(100, extraDigestionRate + increment);
+        double reduction = float.IsFinite(settings.DigestionDecreasePerPulse)
+            ? Math.Clamp(settings.DigestionDecreasePerPulse, 0f, 100f) : 0.02;
+        // Reduce the effective rate, even if the initial rate was edited at the
+        // ceiling. Do not accumulate an invisible surplus above that ceiling.
+        double initial = float.IsFinite(settings.GrowthPerSecond) ? Math.Clamp(settings.GrowthPerSecond, 0f, 100f) : 0.05;
+        extraDigestionRate = Math.Max(0, DigestionRate(settings) - initial - reduction);
     }
 
     public EarnedGrowth Absorb(float growth, float damage, DigestionSettings settings)
@@ -121,7 +133,7 @@ internal struct DigestionReserve
         if (settings.Enabled)
         {
             double bonus = settings.DepositFor(growth, (float)validDamage);
-            if (!HasGrowth) extraDigestionRate = 0;
+            if (!HasGrowth) { extraDigestionRate = 0; secondsWithoutPulse = 0; }
             // No gameplay capacity; only avoid numeric infinity at double's
             // representational boundary.
             Growth = Math.Min(Growth, double.MaxValue - bonus) + bonus;
@@ -134,10 +146,35 @@ internal struct DigestionReserve
     public double Advance(bool paused, float seconds, DigestionSettings settings)
     {
         if (!settings.Enabled) { this = default; return 0; }
-        if (!HasGrowth) { extraDigestionRate = 0; return 0; }
+        if (!HasGrowth) { this = default; return 0; }
         if (paused || !float.IsFinite(seconds) || seconds <= 0) return 0;
-        double rate = DigestionRate(settings);
-        double dt = Math.Clamp(seconds, 0, 1);
+        double delay = float.IsFinite(settings.DigestionNoPulseDelaySeconds)
+            ? Math.Clamp(settings.DigestionNoPulseDelaySeconds, 0f, 3600f) : 3;
+        double increment = float.IsFinite(settings.DigestionIncreasePerSecond)
+            ? Math.Clamp(settings.DigestionIncreasePerSecond, 0f, 100f) : 0.02;
+        double initial = float.IsFinite(settings.GrowthPerSecond) ? Math.Clamp(settings.GrowthPerSecond, 0f, 100f) : 0.05;
+        double remaining = Math.Clamp(seconds, 0, 1);
+        double output = 0;
+        while (remaining > 0 && HasGrowth)
+        {
+            // First step is one full second AFTER the quiet-period threshold.
+            // Split at the boundary so depletion/output do not depend on FPS.
+            double nextStep = delay + Math.Floor(Math.Max(0, secondsWithoutPulse - delay)) + 1;
+            double untilStep = nextStep - secondsWithoutPulse;
+            bool reachesStep = remaining >= untilStep;
+            double dt = Math.Min(remaining, untilStep);
+            output += AdvanceAtRate(dt, DigestionRate(settings));
+            if (!HasGrowth) break;
+            remaining = Math.Max(0, remaining - dt);
+            secondsWithoutPulse = reachesStep ? nextStep : secondsWithoutPulse + dt;
+            if (reachesStep)
+                extraDigestionRate = Math.Min(100 - initial, extraDigestionRate + increment);
+        }
+        return output;
+    }
+
+    private double AdvanceAtRate(double dt, double rate)
+    {
         double startingSpeed = AmbientGrowthPerSecond;
 
         // Two independent rules: dSize/dt = reserve; dReserve/dt = -rate*reserve.

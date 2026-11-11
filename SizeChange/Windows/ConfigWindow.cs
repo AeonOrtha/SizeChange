@@ -1087,9 +1087,9 @@ public class ConfigWindow : Window, IDisposable
                 { settings.StoredPercent = percent; configuration.Save(); }
                 if (ImGui.IsItemHovered()) ImGui.SetTooltip("Bonus at Balance Point. Smaller HP hits receive the extra boost below; larger contributions taper to zero. Original growth is unchanged. Zero stops deposits. Only crystal and size-drain hits fill the reserve.");
                 float lowHpBoost = settings.LowHpDepositBoost;
-                if (ImGui.InputFloat("0.01% HP Boost", ref lowHpBoost, 0f, 0f, "%.3f x"))
+                if (ImGui.InputFloat("0.001% HP Boost", ref lowHpBoost, 0f, 0f, "%.3f x"))
                 { settings.LowHpDepositBoost = lowHpBoost; settings.Validate(); configuration.Save(); }
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Multiplies Bonus Stored for a 0.01% HP hit, fading smoothly to 1x at Balance Point. Smaller positive hits retain this boost; zero adds nothing. 10x with 50% Bonus Stored means 500% at the low-HP anchor. Balance/cutoff take precedence; 1x disables the extra boost.");
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Multiplies Bonus Stored for a 0.001% HP hit, fading smoothly to 1x at Balance Point. Smaller positive hits retain this boost; zero adds nothing. 10x with 50% Bonus Stored means 500% at the low-HP anchor. Balance/cutoff take precedence; 1x disables the extra boost.");
                 float balancePoint = settings.DepositBalancePoint;
                 if (ImGui.InputFloat("Balance Point", ref balancePoint, 0f, 0f, "%.6f"))
                 {
@@ -1109,11 +1109,19 @@ public class ConfigWindow : Window, IDisposable
                 float speed = settings.GrowthPerSecond * 100f;
                 if (ImGui.DragFloat("Initial Digestion Rate", ref speed, 0.1f, 0f, 10000f, "%.1f%% /s"))
                 { settings.GrowthPerSecond = speed / 100f; configuration.Save(); }
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Starting depletion rate for an empty-to-full reserve cycle. Growth speed still equals the current reserve. New deposits do not reset the rate; emptying or disabling the reserve does. Zero prevents depletion only while the pulse increase is also zero.");
-                float increase = settings.DigestionIncreasePerPulse * 100f;
-                if (ImGui.InputFloat("Digestion Increase / Pulse", ref increase, 0f, 0f, "%.3f%% /s"))
-                { settings.DigestionIncreasePerPulse = increase / 100f; settings.Validate(); configuration.Save(); }
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Adds percentage points/s after each growth pulse while reserve remains. Initial 5, increase 2: 5 -> 7 -> 9%/s. Applies once per combined release, not per hit or heartbeat. Zero keeps a constant rate; rate is bounded at 10000%/s. Without pulses the last rate continues.");
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Starting and minimum depletion rate. Pulses reduce the rate back toward this floor; a quiet period lets it rise. Growth speed still equals the reserve balance. Emptying or disabling resets the rate and timer.");
+                float delay = settings.DigestionNoPulseDelaySeconds;
+                if (ImGui.InputFloat("No-Pulse Delay (s)", ref delay, 0f, 0f, "%.3f"))
+                { settings.DigestionNoPulseDelaySeconds = delay; settings.Validate(); configuration.Save(); }
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Wait this long without a growth pulse, then increase digestion once per full second. Delay 3 means the first increase is at 4 seconds. Each pulse restarts the wait, even with zero reduction. Mere deposits and ambient growth do not reset it.");
+                float increase = settings.DigestionIncreasePerSecond * 100f;
+                if (ImGui.InputFloat("Digestion Increase / Second", ref increase, 0f, 0f, "%.3f"))
+                { settings.DigestionIncreasePerSecond = increase / 100f; settings.Validate(); configuration.Save(); }
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Percentage points/s added each second after No-Pulse Delay. Initial 5, increase 2: 5 -> 7 -> 9%/s. Zero disables acceleration. Maximum total rate is 10000%/s.");
+                float reduction = settings.DigestionDecreasePerPulse * 100f;
+                if (ImGui.InputFloat("Digestion Reduction / Pulse", ref reduction, 0f, 0f, "%.3f"))
+                { settings.DigestionDecreasePerPulse = reduction / 100f; settings.Validate(); configuration.Save(); }
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Percentage points/s removed per released growth pulse, down to Initial Digestion Rate. One combined release counts once. Heartbeats and continuous reserve growth do not count. A pulse also restarts No-Pulse Delay.");
                 if (id is "self" or "players")
                 {
                     bool boneEnabled = settings.BoneEnabled;

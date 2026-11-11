@@ -1331,8 +1331,8 @@ public sealed class Plugin : IDalamudPlugin
         // not create an effect on every framework update.
         if (releasedGrowth && pulseGrowthAmount > 0f)
         {
-            // One step per actual combined release, even at the size cap and
-            // with visual effects disabled. Ambient digestion is never a pulse.
+            // Actual releases slow digestion and restart its quiet-period timer,
+            // even at the size cap. Ambient digestion is never a pulse.
             if (!digestionPaused) charState.Digestion.OnGrowthPulse(settings.Digestion);
             long currentTick = Environment.TickCount64;
             long soundCooldownMilliseconds =
