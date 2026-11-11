@@ -64,8 +64,10 @@ struct SCCharacterState
     public long LastGrowthReleaseTick;
     public float LastGrowthReleaseIntervalSeconds;
     public ulong GrowthReleaseCount;
-    public int LastChainExtraPulses;
-    public int LastExceptionalPulses;
+    public GrowthChainScheduler? GrowthChains;
+    public uint ChainTerritory;
+    public ulong ChainPulseCount;
+    public ulong ExceptionalPulseCount;
 }
 
 public sealed class Plugin : IDalamudPlugin
@@ -1097,6 +1099,7 @@ public sealed class Plugin : IDalamudPlugin
         {
             // Pause only. Never restore to 1x, delete accumulated damage or
             // discard the active pulse merely because an external value changed.
+            charState.GrowthChains?.Clear();
             charState.PreviousHealth = health;
             charState.Aether.InRange = false;
             CharacterIdToLastScaleMap[actor->EntityId] = charState;
@@ -1294,10 +1297,17 @@ public sealed class Plugin : IDalamudPlugin
 
         if (charState.PendingGrowth <= 0f) charState.Bridge.ReleaseQueued();
 
+        charState.GrowthChains ??= new();
+        if (digestionPaused || charState.ChainTerritory != ClientState.TerritoryType)
+            charState.GrowthChains.Clear();
+        charState.ChainTerritory = ClientState.TerritoryType;
+        // Advance before adding this frame's root so the first link always waits.
+        GrowthPulse? chainPulse = digestionPaused ? null :
+            charState.GrowthChains.Advance(deltaSeconds, settings.GrowthBonuses, Random.Shared.NextDouble);
         var accumulationFx = settings.AccumulatingEffects;
         bool feedbackAllowed = settings.GrowthFromDelta && !disable && (actor->Health > 0 || aetherWithoutHp);
         charState.AfterglowActive = charState.Afterglow.Advance(feedbackAllowed,
-            charState.PendingGrowth > 0f || proximityActive || releasedGrowth || digesting, accumulationFx, deltaSeconds);
+            charState.PendingGrowth > 0f || proximityActive || releasedGrowth || chainPulse.HasValue || digesting, accumulationFx, deltaSeconds);
         if (feedbackAllowed && accumulationFx.Enabled && (charState.PendingGrowth > 0f || charState.AfterglowActive))
             for (int layer = 0; layer < Math.Min(16, accumulationFx.Paths.Count); layer++)
                 GrowthVfxPlayer.KeepProximity((nint)actor, actor->EntityId, accumulationFx.Paths[layer], false,
@@ -1307,21 +1317,36 @@ public sealed class Plugin : IDalamudPlugin
         // character already at the cap can still display a temporary pulse.
         float pulseGrowthAmount = Math.Max(
             0f, charState.GrowthMultiplier - growthMultiplierBeforeRelease);
-        GrowthBonusResult pulseBonuses = default;
-        if (releasedGrowth && pulseGrowthAmount > 0 && feedbackAllowed)
+        bool normalReleased = releasedGrowth && pulseGrowthAmount > 0;
+        GrowthPulse? rootPulse = null;
+        if (normalReleased && feedbackAllowed)
         {
-            pulseBonuses = GrowthBonusRolls.Resolve(pulseGrowthAmount, settings.GrowthBonuses, Random.Shared.NextDouble);
-            // Bonuses inherit the original release's limit permissions. Mixing
-            // proximity/emote bypass with ordinary damage cannot uncap the latter.
-            var extra = pulseBonuses.ExtraForSources(pulseGrowthAmount,
-                charState.Aether.Bonus - aetherBonusBeforeRelease,
-                charState.EmoteAllowance.Bonus - emoteBonusBeforeRelease);
-            charState.GrowthMultiplier = (float)Math.Min(float.MaxValue, (double)charState.GrowthMultiplier + extra.Growth);
-            charState.Aether.Bonus = (float)Math.Min(float.MaxValue, (double)charState.Aether.Bonus + extra.Aether);
-            charState.EmoteAllowance.Bonus = (float)Math.Min(float.MaxValue, (double)charState.EmoteAllowance.Bonus + extra.Emote);
-            pulseGrowthAmount = pulseBonuses.TotalGrowth;
-            charState.LastChainExtraPulses = pulseBonuses.ExtraPulses;
-            charState.LastExceptionalPulses = pulseBonuses.ExceptionalPulses;
+            float aether = charState.Aether.Bonus - aetherBonusBeforeRelease;
+            float emote = charState.EmoteAllowance.Bonus - emoteBonusBeforeRelease;
+            var pulse = GrowthBonusRolls.Pulse(pulseGrowthAmount, aether, emote,
+                false, settings.GrowthBonuses, Random.Shared.NextDouble);
+            rootPulse = pulse;
+            // Schedule from the unboosted root; exceptional multipliers never
+            // compound into the amounts of subsequent links.
+            if (!digestionPaused)
+                charState.GrowthChains.Start(pulseGrowthAmount, aether, emote, settings.GrowthBonuses, Random.Shared.NextDouble);
+            charState.GrowthMultiplier = (float)Math.Min(float.MaxValue,
+                (double)charState.GrowthMultiplier + pulse.Growth - pulseGrowthAmount);
+            charState.Aether.Bonus = (float)Math.Min(float.MaxValue,
+                (double)charState.Aether.Bonus + Math.Max(0, pulse.Aether - aether));
+            charState.EmoteAllowance.Bonus = (float)Math.Min(float.MaxValue,
+                (double)charState.EmoteAllowance.Bonus + Math.Max(0, pulse.Emote - emote));
+            pulseGrowthAmount = pulse.Growth;
+        }
+        if (chainPulse is { } followup)
+        {
+            // Credit only when the link actually fires. It never enters the
+            // accumulator, reserve deposits or bridge queue.
+            charState.GrowthMultiplier = (float)Math.Min(float.MaxValue, (double)charState.GrowthMultiplier + followup.Growth);
+            charState.Aether.Bonus = (float)Math.Min(float.MaxValue, (double)charState.Aether.Bonus + followup.Aether);
+            charState.EmoteAllowance.Bonus = (float)Math.Min(float.MaxValue, (double)charState.EmoteAllowance.Bonus + followup.Emote);
+            pulseGrowthAmount = (float)Math.Min(float.MaxValue, (double)pulseGrowthAmount + followup.Growth);
+            releasedGrowth = true;
         }
 
         // Reserve-driven ambient growth goes straight into settled size every frame, even
@@ -1350,30 +1375,34 @@ public sealed class Plugin : IDalamudPlugin
         bool triggerOvershoot = settings.GrowthFromDelta && !disable &&
             releasedGrowth && pulseGrowthAmount > 0f && settings.GrowthOvershootPercent > 0f;
 
-        // Trigger feedback for earned growth even when the settled size is capped.
-        // A delayed window produces one combined sound/VFX event instead of
-        // one event for every hit inside the window.
-        // Sound and VFX have independent per-actor cooldowns so rapid attacks do
-        // not create an effect on every framework update.
-        if (releasedGrowth && pulseGrowthAmount > 0f)
+        // Each due pulse gets its own effects. A coincident normal release
+        // and chain link are both credited, without moving either timer.
+        for (int eventIndex = 0; eventIndex < 2; eventIndex++)
         {
-            // Count the original release and each immediate chain link. These
-            // slow digestion and advance pacing, even at the size cap.
-            for (int link = 0; link <= pulseBonuses.ExtraPulses; link++)
-            {
-                if (aliveForDigestion)
-                    charState.AccumulatorPacing.OnGrowthPulse(settings.AccumulatorDelaySeconds,
-                        settings.AccumulatorDelayIncreaseSeconds, settings.AccumulatorMaximumDelaySeconds);
-                if (!digestionPaused) charState.Digestion.OnGrowthPulse(settings.Digestion);
-            }
-            // Same-frame links share one visual surge and one feedback event.
+            var pulseEvent = eventIndex == 0 ? rootPulse : chainPulse;
+            if (pulseEvent is not { } pulse) continue;
+            if (!pulse.IsChain && aliveForDigestion)
+                charState.AccumulatorPacing.OnGrowthPulse(settings.AccumulatorDelaySeconds,
+                    settings.AccumulatorDelayIncreaseSeconds, settings.AccumulatorMaximumDelaySeconds);
+            if (!digestionPaused) charState.Digestion.OnGrowthPulse(settings.Digestion);
             long currentTick = Environment.TickCount64;
             if (charState.GrowthReleaseCount > 0)
                 charState.LastGrowthReleaseIntervalSeconds = (currentTick - charState.LastGrowthReleaseTick) / 1000f;
             charState.LastGrowthReleaseTick = currentTick;
             charState.GrowthReleaseCount++;
-            if (pulseBonuses.ExceptionalPulses > 0)
-                TryPlayExceptionalGrowthVfx(actor, settings.GrowthBonuses);
+            if (pulse.IsChain)
+            {
+                charState.ChainPulseCount++;
+                TryPlayBonusVfx(actor, settings.GrowthBonuses.ChainVfxEnabled,
+                    settings.GrowthBonuses.ChainVfxLayers, chain: true);
+                TryPlayPulseSound(actor, settings.GrowthBonuses.ChainSound, charState.GrowthMultiplier);
+            }
+            if (pulse.Exceptional)
+            {
+                charState.ExceptionalPulseCount++;
+                TryPlayBonusVfx(actor, settings.GrowthBonuses.ExceptionalVfxEnabled, settings.GrowthBonuses.VfxLayers);
+                TryPlayPulseSound(actor, settings.GrowthBonuses.ExceptionalSound, charState.GrowthMultiplier);
+            }
             long soundCooldownMilliseconds =
                 (long)(settings.DeltaGrowthSoundCooldownSeconds * 1000f);
             bool soundCooldownElapsed =
@@ -1381,10 +1410,10 @@ public sealed class Plugin : IDalamudPlugin
                 charState.LastDeltaGrowthSoundTick == 0 ||
                 currentTick - charState.LastDeltaGrowthSoundTick >= soundCooldownMilliseconds;
 
-            if (soundCooldownElapsed &&
+            if ((pulse.IsChain || soundCooldownElapsed) &&
                 TryPlayDeltaGrowthSound(actor, settings, false, charState.GrowthMultiplier) == null)
             {
-                charState.LastDeltaGrowthSoundTick = currentTick;
+                if (!pulse.IsChain) charState.LastDeltaGrowthSoundTick = currentTick;
             }
 
             long vfxCooldownMilliseconds =
@@ -1394,13 +1423,13 @@ public sealed class Plugin : IDalamudPlugin
                 charState.LastDeltaGrowthVfxTick == 0 ||
                 currentTick - charState.LastDeltaGrowthVfxTick >= vfxCooldownMilliseconds;
 
-            if (vfxCooldownElapsed &&
+            if ((pulse.IsChain || vfxCooldownElapsed) &&
                 TryPlayDeltaGrowthVfx(
                     actor,
                     settings,
                     false) == null)
             {
-                charState.LastDeltaGrowthVfxTick = currentTick;
+                if (!pulse.IsChain) charState.LastDeltaGrowthVfxTick = currentTick;
             }
 
             if (actorGroup == SCActorGroup.Monster)
@@ -1415,15 +1444,15 @@ public sealed class Plugin : IDalamudPlugin
                     currentTick - charState.LastDeltaGrowthAnimationTick >=
                     animationCooldownMilliseconds;
 
-                if (animationCooldownElapsed && settings.EnableDeltaGrowthAnimation &&
+                if ((pulse.IsChain || animationCooldownElapsed) && settings.EnableDeltaGrowthAnimation &&
                     TryPlayDeltaGrowthAnimation(actor, settings, false) == null)
                 {
-                    charState.LastDeltaGrowthAnimationTick = currentTick;
+                    if (!pulse.IsChain) charState.LastDeltaGrowthAnimationTick = currentTick;
                 }
             }
         }
 
-        if (!digestionPaused && !(releasedGrowth && pulseGrowthAmount > 0f))
+        if (!digestionPaused && !normalReleased)
             charState.AccumulatorPacing.AdvanceRecovery(deltaSeconds, settings.AccumulatorDelaySeconds,
                 settings.AccumulatorDelayIncreaseSeconds, settings.AccumulatorMaximumDelaySeconds,
                 settings.AccumulatorRecoveryDelaySeconds, settings.AccumulatorRecoveryPerSecond);
@@ -1434,10 +1463,10 @@ public sealed class Plugin : IDalamudPlugin
         // Ambient decay is exclusive to Growth From Delta.
         if (settings.GrowthFromDelta &&
             !charState.AfterglowActive &&
-            !proximityActive && !digesting && !bridging &&
+            !proximityActive && !digesting && !bridging && charState.GrowthChains.PendingCount == 0 &&
             charState.PendingGrowth <= 0f &&
             !charState.GrowthVisual.IsPulsing &&
-            !triggerOvershoot && immediateAmount <= 0f &&
+            !triggerOvershoot && !releasedGrowth && immediateAmount <= 0f &&
             charState.GrowthMultiplier > 1.0f)
         {
             float decayMultiplier =
@@ -1486,11 +1515,16 @@ public sealed class Plugin : IDalamudPlugin
         {
             float pulseReference = settings.ScaleGrowthWithSize
                 ? Math.Max(1f, growthMultiplierBeforeRelease) : 1f;
-            charState.GrowthVisual.StartPulse(
-                charState.PlayerScale * pulseReference * GrowthOvershootPulse.BoostSmallRelease(
-                    pulseGrowthAmount / pulseReference, settings.GrowthOvershootSmallBoost,
-                    settings.GrowthOvershootBoostRangePercent) * settings.GrowthOvershootPercent / 100f,
-                settings.OvershootDuration, settings.GrowthOvershootRisePercent);
+            for (int eventIndex = 0; eventIndex < 2; eventIndex++)
+            {
+                var pulse = eventIndex == 0 ? rootPulse : chainPulse;
+                if (!pulse.HasValue) continue;
+                charState.GrowthVisual.StartPulse(
+                    charState.PlayerScale * pulseReference * GrowthOvershootPulse.BoostSmallRelease(
+                        pulse.Value.Growth / pulseReference, settings.GrowthOvershootSmallBoost,
+                        settings.GrowthOvershootBoostRangePercent) * settings.GrowthOvershootPercent / 100f,
+                    settings.OvershootDuration, settings.GrowthOvershootRisePercent);
+            }
         }
 
         scale = charState.GrowthVisual.Update(previousScale, intendedTargetScale,
@@ -1602,7 +1636,28 @@ public sealed class Plugin : IDalamudPlugin
             return "Sound is disabled or its volume is zero.";
         }
 
-        string path = settings.DeltaGrowthSoundPath.Trim().Replace('\\', '/');
+        return TryPlayGrowthScd(actor, settings.DeltaGrowthSoundPath, settings.DeltaGrowthSoundIndex,
+            SoundVolumeScaling.ForSize(settings.DeltaGrowthSoundSizeDrivenVolume,
+                settings.DeltaGrowthSoundVolume, settledScale,
+                settings.DeltaGrowthSoundVolumeGainPerScale, settings.DeltaGrowthSoundMaximumVolume),
+            SoundPlaybackRate.ForSize(settings.DeltaGrowthSoundSizeDrivenRate, settledScale,
+                settings.DeltaGrowthSoundRateDropPerScale, settings.DeltaGrowthSoundMinimumRate));
+    }
+
+    private unsafe string? TryPlayPulseSound(Character* actor, PulseSoundSettings settings, float scale)
+    {
+        if (!settings.Enabled || settings.Volume <= 0) return "Sound disabled.";
+        return TryPlayGrowthScd(actor, settings.Path, settings.Index,
+            SoundVolumeScaling.ForSize(settings.SizeVolume, settings.Volume,
+                scale, settings.VolumeGain, settings.MaximumVolume),
+            SoundPlaybackRate.ForSize(settings.SizeRate, scale,
+                settings.RateDrop, settings.MinimumRate));
+    }
+
+    private unsafe string? TryPlayGrowthScd(Character* actor, string path, int index, float volume, float rate)
+    {
+        if (actor == null || index < 0 || !float.IsFinite(volume) || volume <= 0) return "Invalid sound settings.";
+        path = (path ?? string.Empty).Trim().Replace('\\', '/');
         if (!path.StartsWith("sound/", StringComparison.OrdinalIgnoreCase) ||
             !path.EndsWith(".scd", StringComparison.OrdinalIgnoreCase))
         {
@@ -1620,9 +1675,9 @@ public sealed class Plugin : IDalamudPlugin
             return "The SCD was found, but it contains no playable sound entries.";
         }
 
-        if (settings.DeltaGrowthSoundIndex >= soundCount)
+        if (index >= soundCount)
         {
-            return $"Sound index {settings.DeltaGrowthSoundIndex} is outside this " +
+            return $"Sound index {index} is outside this " +
                    $"SCD's range of 0 to {soundCount - 1}.";
         }
 
@@ -1634,15 +1689,7 @@ public sealed class Plugin : IDalamudPlugin
             return "The actor has an invalid world position.";
         }
 
-        return GrowthSoundPlayer.TryPlay(
-            path,
-            settings.DeltaGrowthSoundIndex,
-            SoundVolumeScaling.ForSize(settings.DeltaGrowthSoundSizeDrivenVolume,
-                settings.DeltaGrowthSoundVolume, settledScale,
-                settings.DeltaGrowthSoundVolumeGainPerScale, settings.DeltaGrowthSoundMaximumVolume),
-            position,
-            SoundPlaybackRate.ForSize(settings.DeltaGrowthSoundSizeDrivenRate, settledScale,
-                settings.DeltaGrowthSoundRateDropPerScale, settings.DeltaGrowthSoundMinimumRate));
+        return GrowthSoundPlayer.TryPlay(path, index, volume, position, rate);
     }
 
     private static int GetScdSoundCount(string path)
@@ -1714,17 +1761,17 @@ public sealed class Plugin : IDalamudPlugin
         return firstError;
     }
 
-    private unsafe void TryPlayExceptionalGrowthVfx(Character* actor, GrowthBonusSettings settings)
+    private unsafe void TryPlayBonusVfx(Character* actor, bool enabled, List<BonusVfxLayer> layers, bool chain = false)
     {
-        if (actor == null || !settings.ExceptionalVfxEnabled) return;
-        for (int i = 0; i < Math.Min(16, settings.VfxLayers.Count); i++)
+        if (actor == null || !enabled) return;
+        for (int i = 0; i < Math.Min(16, layers.Count); i++)
         {
-            var layer = settings.VfxLayers[i];
+            var layer = layers[i];
             if (layer == null || string.IsNullOrWhiteSpace(layer.Path)) continue;
             // The existing player validates the actor, model, AVFX path and
             // duration before creation. Separate channels preserve ordinary VFX.
             GrowthVfxPlayer.TryPlay((nint)actor, layer.Path, layer.DurationSeconds,
-                i, actor->EntityId, layer.Restart, exceptional: true);
+                i, actor->EntityId, layer.Restart, exceptional: !chain, chain: chain);
         }
     }
 
@@ -2013,7 +2060,7 @@ public sealed class Plugin : IDalamudPlugin
                 settings.AccumulatorDelayIncreaseSeconds, settings.AccumulatorMaximumDelaySeconds);
             lines.Add($"{name}: Base {state.PlayerScale:0.000} | Current {state.ObservedScale:0.000} | " +
                 $"Crystals {state.NearbyAetherSources} | Drain sources {state.NearbyDrainSources} | Growth {state.GrowthMultiplier:0.000} | Pending {state.PendingGrowth:0.000} | Reserve {state.Digestion.Growth:0.000} | Next delay {nextDelay:0.000}s | Window remaining {state.AccumulatorRemainingSeconds:0.000}s | Releases {state.GrowthReleaseCount} | Last release interval {(state.GrowthReleaseCount > 1 ? state.LastGrowthReleaseIntervalSeconds.ToString("0.000") + "s" : "n/a")}" +
-                $" | Last surge: {state.LastChainExtraPulses} extra links, {state.LastExceptionalPulses} exceptional pulses" +
+                $" | Chain pulses {state.ChainPulseCount} | Exceptional pulses {state.ExceptionalPulseCount} | Pending chains {state.GrowthChains?.PendingCount ?? 0} | Chain overflow {state.GrowthChains?.DroppedChains ?? 0}" +
                 (group == SCActorGroup.Self ? $" | Customize+ root lift {state.SelfRootHeightOffset:0.000}" : $" | Session height {state.Transform.Height.Baseline:0.000} | Added {(state.Transform.Height.Owned ? state.Transform.Height.LastWritten - state.Transform.Height.Baseline : 0f):0.000}") +
                 (state.Transform.ScaleConflict ? " | Scale paused: external change" : "") +
                 (state.Transform.Height.Conflict ? " | Height paused: external change" : ""));

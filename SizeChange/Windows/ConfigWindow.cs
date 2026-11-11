@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface.Windowing;
@@ -1596,6 +1597,72 @@ public class ConfigWindow : Window, IDisposable
         ImGui.PopID();
     }
 
+    private bool DrawBonusSound(string label, PulseSoundSettings settings)
+    {
+        ImGui.PushID(label + "-sound");
+        bool changed = false;
+        bool sound = settings.Enabled;
+        if (ImGui.Checkbox(label + " Sound", ref sound)) { settings.Enabled = sound; changed = true; }
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Plays this additional SCD on each matching pulse. Independent of normal growth sound and its cooldown.");
+        if (sound && ImGui.TreeNode(label + " SCD"))
+        {
+            string path = settings.Path;
+            if (ImGui.InputText("SCD Path", ref path, 512)) { settings.Path = path; changed = true; }
+            int index = settings.Index;
+            if (ImGui.InputInt("Sound Index", ref index)) { settings.Index = index; changed = true; }
+            float volume = settings.Volume;
+            if (ImGui.InputFloat("Volume (x)", ref volume, 0, 0, "%.2f")) { settings.Volume = volume; changed = true; }
+            bool sizeVolume = settings.SizeVolume;
+            if (ImGui.Checkbox("Louder With Size", ref sizeVolume)) { settings.SizeVolume = sizeVolume; changed = true; }
+            if (sizeVolume)
+            {
+                float gain = settings.VolumeGain, max = settings.MaximumVolume;
+                if (ImGui.InputFloat("Volume Gain / 1x", ref gain, 0, 0, "%.3f")) { settings.VolumeGain = gain; changed = true; }
+                if (ImGui.InputFloat("Maximum Volume (x)", ref max, 0, 0, "%.2f")) { settings.MaximumVolume = max; changed = true; }
+            }
+            bool sizeRate = settings.SizeRate;
+            if (ImGui.Checkbox("Lower Pitch With Size", ref sizeRate)) { settings.SizeRate = sizeRate; changed = true; }
+            if (sizeRate)
+            {
+                float drop = settings.RateDrop, min = settings.MinimumRate;
+                if (ImGui.InputFloat("Rate Drop / 1x", ref drop, 0, 0, "%.3f")) { settings.RateDrop = drop; changed = true; }
+                if (ImGui.InputFloat("Minimum Rate", ref min, 0, 0, "%.3f")) { settings.MinimumRate = min; changed = true; }
+            }
+            ImGui.TreePop();
+        }
+        ImGui.PopID();
+        return changed;
+    }
+
+    private bool DrawBonusVfxLayers(string id, List<BonusVfxLayer> layers)
+    {
+        ImGui.PushID(id);
+        bool changed = false;
+        for (int i = 0; i < layers.Count; i++)
+        {
+            ImGui.PushID(i);
+            var layer = layers[i];
+            if (ImGui.TreeNode($"Layer {i + 1}"))
+            {
+                string path = layer.Path;
+                if (ImGui.InputText("AVFX", ref path, 512)) { layer.Path = path; changed = true; }
+                float duration = layer.DurationSeconds;
+                if (ImGui.InputFloat("Duration (s)", ref duration, 0, 0, "%.2f")) { layer.DurationSeconds = duration; changed = true; }
+                bool restart = layer.Restart;
+                if (ImGui.Checkbox("Restart", ref restart)) { layer.Restart = restart; changed = true; }
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Restart this layer on another matching pulse. Off lets an active copy finish. Normal growth VFX remain separate.");
+                bool remove = ImGui.Button("Remove Layer");
+                ImGui.TreePop();
+                if (remove) { layers.RemoveAt(i--); changed = true; }
+            }
+            ImGui.PopID();
+        }
+        if (layers.Count < 16 && ImGui.Button("+ Add VFX Layer"))
+        { layers.Add(new BonusVfxLayer()); changed = true; }
+        ImGui.PopID();
+        return changed;
+    }
+
     private void DrawGrowthBonuses(GrowthBonusSettings settings, string id)
     {
         if (!ImGui.CollapsingHeader($"Random Growth Bonuses##{id}")) return;
@@ -1603,7 +1670,7 @@ public class ConfigWindow : Window, IDisposable
         bool changed = false;
         bool chains = settings.ChainsEnabled;
         if (ImGui.Checkbox("Chain Pulses", ref chains)) { settings.ChainsEnabled = chains; changed = true; }
-        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Any released growth pulse can immediately trigger another, including chain links. Instant links overlap into one stronger surge; continuous reserve and bridge growth do not roll.");
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Any released growth pulse can start timed follow-up pulses. Chains run independently alongside normal pulses; continuous reserve and bridge growth do not roll.");
         if (chains)
         {
             float chance = settings.ChainChancePercent;
@@ -1611,9 +1678,17 @@ public class ConfigWindow : Window, IDisposable
             float amount = settings.ChainGrowthPercent;
             if (ImGui.InputFloat("Growth per Link (%)", ref amount, 0, 0, "%.1f")) { settings.ChainGrowthPercent = amount; changed = true; }
             if (ImGui.IsItemHovered()) ImGui.SetTooltip("Percent of the original unboosted pulse, 0–100. Every link uses that amount and may roll an exceptional boost independently. Source size-limit rules still apply.");
+            float interval = settings.ChainIntervalSeconds;
+            if (ImGui.InputFloat("Chain Interval (s)", ref interval, 0, 0, "%.3f")) { settings.ChainIntervalSeconds = interval; changed = true; }
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("0.05–10 seconds between chain links. Independent of accumulator timing. New normal pulses do not reset a running chain; overlaps use your existing overshoot duration. Default 0.35s.");
             int maximum = settings.MaximumExtraPulses;
             if (ImGui.InputInt("Maximum Extra Pulses", ref maximum)) { settings.MaximumExtraPulses = maximum; changed = true; }
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("0–16 extra links per release. Stops even at 100% chance. Each link counts for delay increase and digestion reduction; sound, animation and VFX play once for the combined surge.");
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("0–16 extra links per root pulse. Stops even at 100% chance. Each link has its own growth animation and effects. Links reduce digestion but do not increase or reset the normal accumulator delay.");
+            changed |= DrawBonusSound("Chain", settings.ChainSound);
+            bool chainVfx = settings.ChainVfxEnabled;
+            if (ImGui.Checkbox("Chain VFX", ref chainVfx)) { settings.ChainVfxEnabled = chainVfx; changed = true; }
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Additional layers on each follow-up link. Exceptional layers also play if that link rolls exceptional. Normal growth VFX remain separate.");
+            if (chainVfx) changed |= DrawBonusVfxLayers("chain-vfx", settings.ChainVfxLayers);
         }
         bool exceptional = settings.ExceptionalEnabled;
         if (ImGui.Checkbox("Exceptional Pulses", ref exceptional)) { settings.ExceptionalEnabled = exceptional; changed = true; }
@@ -1625,32 +1700,10 @@ public class ConfigWindow : Window, IDisposable
             float multiplier = settings.ExceptionalMultiplier;
             if (ImGui.InputFloat("Growth Multiplier", ref multiplier, 0, 0, "%.2f")) { settings.ExceptionalMultiplier = multiplier; changed = true; }
             if (ImGui.IsItemHovered()) ImGui.SetTooltip("1–100x the pulse's growth on a successful roll. Normal limit rules and overshoot still apply.");
+            changed |= DrawBonusSound("Exceptional", settings.ExceptionalSound);
             bool vfx = settings.ExceptionalVfxEnabled;
             if (ImGui.Checkbox("Exceptional VFX", ref vfx)) { settings.ExceptionalVfxEnabled = vfx; changed = true; }
-            if (vfx)
-            {
-                for (int i = 0; i < settings.VfxLayers.Count; i++)
-                {
-                    ImGui.PushID(i);
-                    var layer = settings.VfxLayers[i];
-                    if (ImGui.TreeNode($"Layer {i + 1}"))
-                    {
-                        string path = layer.Path;
-                        if (ImGui.InputText("AVFX", ref path, 512)) { layer.Path = path; changed = true; }
-                        float duration = layer.DurationSeconds;
-                        if (ImGui.InputFloat("Duration (s)", ref duration, 0, 0, "%.2f")) { layer.DurationSeconds = duration; changed = true; }
-                        bool restart = layer.Restart;
-                        if (ImGui.Checkbox("Restart", ref restart)) { layer.Restart = restart; changed = true; }
-                        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Restart this layer on another exceptional surge. Off lets an active copy finish. Normal growth VFX remain separate.");
-                        bool remove = ImGui.Button("Remove Layer");
-                        ImGui.TreePop();
-                        if (remove) { settings.VfxLayers.RemoveAt(i--); changed = true; }
-                    }
-                    ImGui.PopID();
-                }
-                if (settings.VfxLayers.Count < 16 && ImGui.Button("+ Add VFX Layer"))
-                { settings.VfxLayers.Add(new BonusVfxLayer()); changed = true; }
-            }
+            if (vfx) changed |= DrawBonusVfxLayers("exceptional-vfx", settings.VfxLayers);
         }
         if (changed) { settings.Validate(); configuration.Save(); }
         ImGui.PopID();
