@@ -8,7 +8,20 @@ internal static class GrowthReleaseTiming
         => Bounds(delay, variation, variation);
 
     internal static (float Minimum, float Maximum) ForSettings(GrowthSettings settings) =>
-        Bounds(settings.AccumulatorDelaySeconds, settings.EarlierVariation, settings.LaterVariation);
+        ForSettings(settings, settings.AccumulatorDelaySeconds);
+
+    internal static (float Minimum, float Maximum) ForSettings(GrowthSettings settings, float delay)
+    {
+        var range = Bounds(delay, settings.EarlierVariation, settings.LaterVariation);
+        if (GrowthAccumulatorPacing.ValidSeconds(settings.AccumulatorDelayIncreaseSeconds) <= 0) return range;
+        float cap = GrowthAccumulatorPacing.Maximum(settings.AccumulatorDelaySeconds, settings.AccumulatorMaximumDelaySeconds);
+        // Variation can shorten or lengthen a ramped window, but cannot bypass
+        // its configured maximum. Clamp the range before drawing randomness.
+        return (Math.Min(range.Minimum, cap), Math.Min(range.Maximum, cap));
+    }
+
+    internal static float ForQueue(float remaining, GrowthSettings settings, float delay,
+        bool immediate, Func<double> random) => Select(remaining, ForSettings(settings, delay), immediate, random);
 
     internal static (float Minimum, float Maximum) Bounds(float delay, float earlier, float later)
     {
@@ -28,8 +41,13 @@ internal static class GrowthReleaseTiming
     internal static float ForQueue(float remaining, float delay, float earlier, float later,
         bool immediate, Func<double> random)
     {
+        return Select(remaining, Bounds(delay, earlier, later), immediate, random);
+    }
+
+    private static float Select(float remaining, (float Minimum, float Maximum) range,
+        bool immediate, Func<double> random)
+    {
         if (immediate) return 0;
-        var range = Bounds(delay, earlier, later);
         if (range.Maximum <= 0) return 0;
         // Existing windows retain their deadline, regardless of more hits.
         if (remaining > 0) return remaining;

@@ -65,12 +65,12 @@ public sealed class DigestionSettings
         double shaped;
         if (growth <= point)
         {
-            // 0.001% HP is a ratio of 0.00001. Convert that anchor to growth units
+            // 0.00001% HP is a ratio of 0.0000001. Convert that anchor to growth units
             // using THIS contribution's actual HP-to-growth conversion, including
             // its configured multiplier and size scaling. Balance/cutoff retain
             // their existing growth units and take precedence over the boost.
             double anchor = float.IsFinite(damageRatio) && damageRatio > 0f
-                ? (double)growth * 0.00001 / damageRatio : 0;
+                ? (double)growth * 0.0000001 / damageRatio : 0;
             // Keep a nonzero blend span if size scaling pushes the HP anchor
             // into the balance point. Clamping continuously avoids a jump when
             // those endpoints cross; the balance value always takes priority.

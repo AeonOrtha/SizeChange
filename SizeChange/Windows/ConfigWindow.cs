@@ -1087,9 +1087,9 @@ public class ConfigWindow : Window, IDisposable
                 { settings.StoredPercent = percent; configuration.Save(); }
                 if (ImGui.IsItemHovered()) ImGui.SetTooltip("Bonus at Balance Point. Smaller HP hits receive the extra boost below; larger contributions taper to zero. Original growth is unchanged. Zero stops deposits. Only crystal and size-drain hits fill the reserve.");
                 float lowHpBoost = settings.LowHpDepositBoost;
-                if (ImGui.InputFloat("0.001% HP Boost", ref lowHpBoost, 0f, 0f, "%.3f x"))
+                if (ImGui.InputFloat("0.00001% HP Boost", ref lowHpBoost, 0f, 0f, "%.3f x"))
                 { settings.LowHpDepositBoost = lowHpBoost; settings.Validate(); configuration.Save(); }
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Multiplies Bonus Stored for a 0.001% HP hit, fading smoothly to 1x at Balance Point. Smaller positive hits retain this boost; zero adds nothing. 10x with 50% Bonus Stored means 500% at the low-HP anchor. Balance/cutoff take precedence; 1x disables the extra boost.");
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Multiplies Bonus Stored for a 0.00001% HP hit, fading smoothly to 1x at Balance Point. Smaller positive hits retain this boost; zero adds nothing. 10x with 50% Bonus Stored means 500% at the low-HP anchor. Balance/cutoff take precedence; 1x disables the extra boost.");
                 float balancePoint = settings.DepositBalancePoint;
                 if (ImGui.InputFloat("Balance Point", ref balancePoint, 0f, 0f, "%.6f"))
                 {
@@ -1810,7 +1810,7 @@ public class ConfigWindow : Window, IDisposable
 
             float accumulatorDelaySeconds = settings.AccumulatorDelaySeconds;
             if (ImGui.DragFloat(
-                    $"Release Interval (s)##{id}",
+                    $"Base Release Delay (s)##{id}",
                     ref accumulatorDelaySeconds,
                     0.1f,
                     0.00f,
@@ -1818,8 +1818,28 @@ public class ConfigWindow : Window, IDisposable
                     "%.1f"))
             {
                 settings.AccumulatorDelaySeconds =
-                    Math.Clamp(accumulatorDelaySeconds, 0f, 60f);
+                    GrowthAccumulatorPacing.ValidSeconds(accumulatorDelaySeconds);
+                settings.AccumulatorMaximumDelaySeconds = GrowthAccumulatorPacing.Maximum(
+                    settings.AccumulatorDelaySeconds, settings.AccumulatorMaximumDelaySeconds);
                 configuration.Save();
+            }
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Starting accumulator delay. Zero releases damage growth on the update that detects it. Keep Delay Increase / Pulse at zero for every hit to stay immediate. Visual lerp and overshoot still animate normally.");
+            float delayIncrease = settings.AccumulatorDelayIncreaseSeconds;
+            if (ImGui.InputFloat($"Delay Increase / Pulse (s)##{id}", ref delayIncrease, 0, 0, "%.3f"))
+            {
+                settings.AccumulatorDelayIncreaseSeconds = GrowthAccumulatorPacing.ValidSeconds(delayIncrease);
+                configuration.Save();
+            }
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Adds this much to the next window after each growth pulse. Hits inside a window do not extend its deadline. Zero disables the increase. Each actor resets when shrinking back to normal, dying, or disabling growth. Reserve growth and heartbeats do not add steps.");
+            if (settings.AccumulatorDelayIncreaseSeconds > 0)
+            {
+                float maximumDelay = settings.AccumulatorMaximumDelaySeconds;
+                if (ImGui.InputFloat($"Maximum Release Delay (s)##{id}", ref maximumDelay, 0, 0, "%.3f"))
+                {
+                    settings.AccumulatorMaximumDelaySeconds = GrowthAccumulatorPacing.Maximum(settings.AccumulatorDelaySeconds, maximumDelay);
+                    configuration.Save();
+                }
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Maximum delay including Later variation. Cannot be less than Base Release Delay. Example: base 0, increase 0.5, max 2 gives 0 -> 0.5 -> 1 -> 1.5 -> 2 seconds before variation.");
             }
             float earlier = settings.EarlierVariation, later = settings.LaterVariation;
             if (ImGui.InputFloat($"Earlier (− s)##{id}", ref earlier, 0, 0, "%.3f"))
@@ -1827,17 +1847,17 @@ public class ConfigWindow : Window, IDisposable
                 settings.AccumulatorEarlierSeconds = float.IsFinite(earlier) ? Math.Clamp(earlier, 0, 60) : 0;
                 configuration.Save();
             }
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("How much a release can be shortened. 0 = never earlier.");
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("How much the current delay can be shortened. Random windows never go negative; nonzero windows normally have a 0.05s minimum. Zero delay stays immediate. 0 = never earlier.");
             if (ImGui.InputFloat($"Later (+ s)##{id}", ref later, 0, 0, "%.3f"))
             {
                 settings.AccumulatorLaterSeconds = float.IsFinite(later) ? Math.Clamp(later, 0, 60) : 0;
                 configuration.Save();
             }
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("How much a release can be lengthened. 0 = never later. Random timing does not change overshoot duration.");
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("How much the current delay can be lengthened, bounded by Maximum Release Delay when the increase is enabled. 0 = never later. Random timing does not change overshoot duration.");
             if ((settings.EarlierVariation > 0 || settings.LaterVariation > 0) && settings.AccumulatorDelaySeconds > 0)
             {
                 var range = GrowthReleaseTiming.ForSettings(settings);
-                ImGui.TextDisabled($"Release range: {range.Minimum:0.00}–{range.Maximum:0.00} s");
+                ImGui.TextDisabled($"Base release range: {range.Minimum:0.00}–{range.Maximum:0.00} s");
             }
 
             float bridge = settings.GrowthBridgePercent;

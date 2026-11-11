@@ -50,6 +50,7 @@ struct SCCharacterState
     public SizeDrainSettings? ActiveDrainMode;
     public List<AetherSources.Hit>? AetherHits;
     public float AccumulatorRemainingSeconds;
+    public GrowthAccumulatorPacing AccumulatorPacing;
     public GrowthVisualScale GrowthVisual;
     public GrowthBridge Bridge;
     public bool HasPreviousHealth;
@@ -823,7 +824,6 @@ public sealed class Plugin : IDalamudPlugin
         processedEntityIds.Add(localActor->EntityId);
 
         bool accumulating = Configuration.SelfSettings.GrowthFromDelta &&
-            Configuration.SelfSettings.AccumulatorDelaySeconds > 0f &&
             TryGetCharacterState(localActor, out var heartbeatState) && !heartbeatState.Transform.ScaleConflict &&
             (!Configuration.SelfSettings.OnlyActiveInCombat || inCombat || selfPreview.Enabled || heartbeatState.Aether.InRange || heartbeatState.Aether.PendingGrowth > 0f) &&
             heartbeatState.PendingGrowth > 0f;
@@ -887,7 +887,7 @@ public sealed class Plugin : IDalamudPlugin
                 bool allowed = !globallyDisabled && Configuration.AffectPlayers && actor->Health > 0 && actor->DrawObject != null &&
                     !Condition[ConditionFlag.BetweenAreas] && !Condition[ConditionFlag.BetweenAreas51];
                 bool accumulatingPlayer = hasState && !playerState.Transform.ScaleConflict && Configuration.PlayerSettings.GrowthFromDelta &&
-                    Configuration.PlayerSettings.AccumulatorDelaySeconds > 0 && playerState.PendingGrowth > 0;
+                    playerState.PendingGrowth > 0;
                 float settled = hasState ? Configuration.PlayerSettings.GrowthFromDelta ? playerState.GrowthMultiplier :
                     playerState.PlayerScale > 0 ? playerState.PreviousScale / playerState.PlayerScale : 1f : 1f;
                 bool growing = accumulatingPlayer || (hasState && !playerState.Transform.ScaleConflict &&
@@ -919,7 +919,9 @@ public sealed class Plugin : IDalamudPlugin
             var monsterSettings = Configuration.MonsterSettings;
             monsterAnimations.Tick(actor, monsterChoices, !globallyDisabled && !drainTransition && actor->Health > 0,
                 TryResolveActionTimeline, accumulatingMonster,
-                MonsterIdleActivity.Interval(GrowthReleaseTiming.ForSettings(monsterSettings).Maximum,
+                MonsterIdleActivity.Interval(GrowthReleaseTiming.ForSettings(monsterSettings,
+                    monsterState.AccumulatorPacing.Delay(monsterSettings.AccumulatorDelaySeconds,
+                        monsterSettings.AccumulatorDelayIncreaseSeconds, monsterSettings.AccumulatorMaximumDelaySeconds)).Maximum,
                     monsterSettings.OvershootDuration, 0f),
                 monsterSettings.GrowthFromDelta);
             if (!globallyDisabled && !drainTransition)
@@ -1066,6 +1068,8 @@ public sealed class Plugin : IDalamudPlugin
             return;
         }
         bool aliveForDigestion = actor->Health > 0 || aetherWithoutHp;
+        if (!settings.GrowthFromDelta || !aliveForDigestion)
+            charState.AccumulatorPacing.Reset();
         if (!settings.GrowthFromDelta || !settings.Digestion.Enabled || !aliveForDigestion)
             charState.Digestion = default;
         bool newTracking = !charState.Transform.Ready;
@@ -1115,6 +1119,8 @@ public sealed class Plugin : IDalamudPlugin
         bool inactiveForCombat = settings.OnlyActiveInCombat && outOfCombat;
         float growthMultiplierBeforeRelease = charState.GrowthMultiplier;
         float deltaSeconds = (float)Framework.UpdateDelta.TotalSeconds;
+        float accumulatorDelay = charState.AccumulatorPacing.Delay(settings.AccumulatorDelaySeconds,
+            settings.AccumulatorDelayIncreaseSeconds, settings.AccumulatorMaximumDelaySeconds);
         var position = actor->GameObject.Position;
         charState.AetherHits ??= new List<AetherSources.Hit>();
         var nearbyCrystals = settings.GrowthFromDelta && settings.AetherProximityGrowth && !disable &&
@@ -1186,8 +1192,7 @@ public sealed class Plugin : IDalamudPlugin
             bool released = GrowthContribution.Queue(ref charState.GrowthMultiplier, ref charState.PendingGrowth,
                 ref charState.PendingDamageRatio, ref charState.AccumulatorRemainingSeconds,
                 addedGrowth, healthLostRatio, GrowthReleaseTiming.ForQueue(charState.AccumulatorRemainingSeconds,
-                    settings.AccumulatorDelaySeconds, settings.EarlierVariation, settings.LaterVariation,
-                    immediate, Random.Shared.NextDouble), immediate);
+                    settings, accumulatorDelay, immediate, Random.Shared.NextDouble), immediate);
             charState.Bridge.Queue(addedGrowth, settings.GrowthBridgePercent,
                 released ? 0 : charState.AccumulatorRemainingSeconds, settings.OvershootDuration, aether, emoteBypassFraction,
                 released, settings.GrowthOvershootPercent > 0 ? settings.GrowthOvershootRisePercent : 0);
@@ -1252,14 +1257,14 @@ public sealed class Plugin : IDalamudPlugin
         else if (charState.PendingGrowth > 0f)
         {
             bool releasePendingGrowth =
-                settings.AccumulatorDelaySeconds <= 0f || (inactiveForCombat && charState.Aether.PendingGrowth <= 0f);
+                accumulatorDelay <= 0f || (inactiveForCombat && charState.Aether.PendingGrowth <= 0f);
             if (!releasePendingGrowth)
             {
                 // Preserve random windows longer than the nominal interval.
                 // A settings edit can still shorten them to the new range.
                 charState.AccumulatorRemainingSeconds = Math.Min(
                     charState.AccumulatorRemainingSeconds,
-                    GrowthReleaseTiming.ForSettings(settings).Maximum);
+                    GrowthReleaseTiming.ForSettings(settings, accumulatorDelay).Maximum);
                 charState.AccumulatorRemainingSeconds = Math.Max(
                     0f,
                     charState.AccumulatorRemainingSeconds - deltaSeconds);
@@ -1331,6 +1336,11 @@ public sealed class Plugin : IDalamudPlugin
         // not create an effect on every framework update.
         if (releasedGrowth && pulseGrowthAmount > 0f)
         {
+            // One step per combined release, not per incoming hit, heartbeat,
+            // or ambient growth frame. Existing window deadlines stay intact.
+            if (aliveForDigestion)
+                charState.AccumulatorPacing.OnGrowthPulse(settings.AccumulatorDelaySeconds,
+                    settings.AccumulatorDelayIncreaseSeconds, settings.AccumulatorMaximumDelaySeconds);
             // Actual releases slow digestion and restart its quiet-period timer,
             // even at the size cap. Ambient digestion is never a pulse.
             if (!digestionPaused) charState.Digestion.OnGrowthPulse(settings.Digestion);
@@ -1408,6 +1418,7 @@ public sealed class Plugin : IDalamudPlugin
                 1.0f,
                 charState.GrowthMultiplier - shrinkAmount);
             charState.Aether.Decay(charState.EmoteAllowance.Decay(shrinkAmount));
+            if (charState.GrowthMultiplier <= 1f) charState.AccumulatorPacing.Reset();
         }
 
         float intendedTargetScale = disable
@@ -1949,8 +1960,11 @@ public sealed class Plugin : IDalamudPlugin
             var state = entry.Value;
             if (state.ActorGroup != group || !state.Transform.Ready) continue;
             string name = ObjectTable.SearchByEntityId(entry.Key)?.Name.TextValue ?? $"Actor {entry.Key:X}";
+            var settings = GetSettings(state.ActorGroup);
+            float nextDelay = state.AccumulatorPacing.Delay(settings.AccumulatorDelaySeconds,
+                settings.AccumulatorDelayIncreaseSeconds, settings.AccumulatorMaximumDelaySeconds);
             lines.Add($"{name}: Base {state.PlayerScale:0.000} | Current {state.ObservedScale:0.000} | " +
-                $"Crystals {state.NearbyAetherSources} | Drain sources {state.NearbyDrainSources} | Growth {state.GrowthMultiplier:0.000} | Pending {state.PendingGrowth:0.000} | Reserve {state.Digestion.Growth:0.000}" +
+                $"Crystals {state.NearbyAetherSources} | Drain sources {state.NearbyDrainSources} | Growth {state.GrowthMultiplier:0.000} | Pending {state.PendingGrowth:0.000} | Reserve {state.Digestion.Growth:0.000} | Next delay {nextDelay:0.000}s | Window remaining {state.AccumulatorRemainingSeconds:0.000}s" +
                 (group == SCActorGroup.Self ? $" | Customize+ root lift {state.SelfRootHeightOffset:0.000}" : $" | Session height {state.Transform.Height.Baseline:0.000} | Added {(state.Transform.Height.Owned ? state.Transform.Height.LastWritten - state.Transform.Height.Baseline : 0f):0.000}") +
                 (state.Transform.ScaleConflict ? " | Scale paused: external change" : "") +
                 (state.Transform.Height.Conflict ? " | Height paused: external change" : ""));
