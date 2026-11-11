@@ -40,6 +40,8 @@ public class GrowthSettings
     public float AccumulatorDelaySeconds { get; set; }
     public float AccumulatorDelayIncreaseSeconds { get; set; }
     public float AccumulatorMaximumDelaySeconds { get; set; } = 5f;
+    public float AccumulatorRecoveryDelaySeconds { get; set; } = 5f;
+    public float AccumulatorRecoveryPerSecond { get; set; } = 0.5f;
     public float AccumulatorDelayVariationSeconds { get; set; }
     public float? AccumulatorEarlierSeconds { get; set; }
     public float? AccumulatorLaterSeconds { get; set; }
@@ -153,6 +155,10 @@ public class GrowthSettings
         AccumulatorDelayIncreaseSeconds = float.IsFinite(AccumulatorDelayIncreaseSeconds) ? Math.Clamp(AccumulatorDelayIncreaseSeconds, 0f, 60f) : 0f;
         AccumulatorMaximumDelaySeconds = float.IsFinite(AccumulatorMaximumDelaySeconds)
             ? Math.Clamp(AccumulatorMaximumDelaySeconds, AccumulatorDelaySeconds, 60f) : Math.Max(AccumulatorDelaySeconds, 5f);
+        AccumulatorRecoveryDelaySeconds = float.IsFinite(AccumulatorRecoveryDelaySeconds)
+            ? Math.Clamp(AccumulatorRecoveryDelaySeconds, 0f, 3600f) : 5f;
+        AccumulatorRecoveryPerSecond = float.IsFinite(AccumulatorRecoveryPerSecond)
+            ? Math.Clamp(AccumulatorRecoveryPerSecond, 0f, 60f) : 0.5f;
         AccumulatorDelayVariationSeconds = float.IsFinite(AccumulatorDelayVariationSeconds)
             ? Math.Clamp(AccumulatorDelayVariationSeconds, 0f, 60f) : 0f;
         AccumulatorEarlierSeconds = EarlierVariation;
@@ -247,6 +253,8 @@ public class GrowthSettings
             AccumulatorDelaySeconds = settings.AccumulatorDelaySeconds,
             AccumulatorDelayIncreaseSeconds = settings.AccumulatorDelayIncreaseSeconds,
             AccumulatorMaximumDelaySeconds = settings.AccumulatorMaximumDelaySeconds,
+            AccumulatorRecoveryDelaySeconds = settings.AccumulatorRecoveryDelaySeconds,
+            AccumulatorRecoveryPerSecond = settings.AccumulatorRecoveryPerSecond,
             AccumulatorDelayVariationSeconds = settings.AccumulatorDelayVariationSeconds,
             AccumulatorEarlierSeconds = settings.EarlierVariation,
             AccumulatorLaterSeconds = settings.LaterVariation,

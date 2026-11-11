@@ -1831,16 +1831,35 @@ public class ConfigWindow : Window, IDisposable
                 configuration.Save();
             }
             if (ImGui.IsItemHovered()) ImGui.SetTooltip("Adds this much to the next window after each growth pulse. Hits inside a window do not extend its deadline. Zero disables the increase. Each actor resets when shrinking back to normal, dying, or disabling growth. Reserve growth and heartbeats do not add steps.");
-            if (settings.AccumulatorDelayIncreaseSeconds > 0)
+            float maximumDelay = settings.AccumulatorMaximumDelaySeconds;
+            if (ImGui.InputFloat($"Maximum Release Delay (s)##{id}", ref maximumDelay, 0, 0, "%.3f"))
             {
-                float maximumDelay = settings.AccumulatorMaximumDelaySeconds;
-                if (ImGui.InputFloat($"Maximum Release Delay (s)##{id}", ref maximumDelay, 0, 0, "%.3f"))
-                {
-                    settings.AccumulatorMaximumDelaySeconds = GrowthAccumulatorPacing.Maximum(settings.AccumulatorDelaySeconds, maximumDelay);
-                    configuration.Save();
-                }
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Maximum delay including Later variation. Cannot be less than Base Release Delay. Example: base 0, increase 0.5, max 2 gives 0 -> 0.5 -> 1 -> 1.5 -> 2 seconds before variation.");
+                settings.AccumulatorMaximumDelaySeconds = GrowthAccumulatorPacing.Maximum(settings.AccumulatorDelaySeconds, maximumDelay);
+                configuration.Save();
             }
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Maximum delay including Later variation when Delay Increase / Pulse is enabled. Cannot be less than the base. With increase 0, existing static timing is unchanged.");
+            float recoveryDelay = settings.AccumulatorRecoveryDelaySeconds;
+            if (ImGui.InputFloat($"Recovery Delay (s)##{id}", ref recoveryDelay, 0, 0, "%.3f"))
+            {
+                settings.AccumulatorRecoveryDelaySeconds = float.IsFinite(recoveryDelay) ? Math.Clamp(recoveryDelay, 0, 3600) : 5;
+                configuration.Save();
+            }
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Time without a growth pulse before the extra delay starts recovering. Every pulse restarts this wait. Unreleased hits and continuous reserve growth do not reset it. Zero starts recovery immediately between pulses.");
+            float recoveryRate = settings.AccumulatorRecoveryPerSecond;
+            if (ImGui.InputFloat($"Delay Recovery / Second##{id}", ref recoveryRate, 0, 0, "%.3f"))
+            {
+                settings.AccumulatorRecoveryPerSecond = float.IsFinite(recoveryRate) ? Math.Clamp(recoveryRate, 0, 60) : 0.5f;
+                configuration.Save();
+            }
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Seconds removed from the next release delay per second after Recovery Delay. Stops at Base Release Delay, including zero. An active window keeps its deadline. Zero disables recovery. Example: 0.5 removes a 3-second extra delay in 6 seconds after the wait.");
+            if (ImGui.Button($"Remove Effect Cooldowns##{id}"))
+            {
+                settings.DeltaGrowthSoundCooldownSeconds = 0;
+                settings.DeltaGrowthVfxCooldownSeconds = 0;
+                settings.DeltaGrowthAnimationCooldownSeconds = 0;
+                configuration.Save();
+            }
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Sets growth sound, VFX and animation cooldowns to zero. These separately limit how often feedback can play. Source hit intervals, effect durations and layer restart settings stay unchanged. Aetherytes and size drain still supply one hit per second.");
             float earlier = settings.EarlierVariation, later = settings.LaterVariation;
             if (ImGui.InputFloat($"Earlier (− s)##{id}", ref earlier, 0, 0, "%.3f"))
             {

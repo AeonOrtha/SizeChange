@@ -61,6 +61,9 @@ struct SCCharacterState
     public long LastDeltaGrowthSoundTick;
     public long LastDeltaGrowthVfxTick;
     public long LastDeltaGrowthAnimationTick;
+    public long LastGrowthReleaseTick;
+    public float LastGrowthReleaseIntervalSeconds;
+    public ulong GrowthReleaseCount;
 }
 
 public sealed class Plugin : IDalamudPlugin
@@ -1256,15 +1259,16 @@ public sealed class Plugin : IDalamudPlugin
         }
         else if (charState.PendingGrowth > 0f)
         {
+            float windowMaximum = GrowthReleaseTiming.ActiveWindowMaximum(settings);
             bool releasePendingGrowth =
-                accumulatorDelay <= 0f || (inactiveForCombat && charState.Aether.PendingGrowth <= 0f);
+                windowMaximum <= 0f || (inactiveForCombat && charState.Aether.PendingGrowth <= 0f);
             if (!releasePendingGrowth)
             {
-                // Preserve random windows longer than the nominal interval.
-                // A settings edit can still shorten them to the new range.
+                // Recovery changes future windows, not this deadline. Only an
+                // explicit settings limit can shorten the active window.
                 charState.AccumulatorRemainingSeconds = Math.Min(
                     charState.AccumulatorRemainingSeconds,
-                    GrowthReleaseTiming.ForSettings(settings, accumulatorDelay).Maximum);
+                    windowMaximum);
                 charState.AccumulatorRemainingSeconds = Math.Max(
                     0f,
                     charState.AccumulatorRemainingSeconds - deltaSeconds);
@@ -1345,6 +1349,10 @@ public sealed class Plugin : IDalamudPlugin
             // even at the size cap. Ambient digestion is never a pulse.
             if (!digestionPaused) charState.Digestion.OnGrowthPulse(settings.Digestion);
             long currentTick = Environment.TickCount64;
+            if (charState.GrowthReleaseCount > 0)
+                charState.LastGrowthReleaseIntervalSeconds = (currentTick - charState.LastGrowthReleaseTick) / 1000f;
+            charState.LastGrowthReleaseTick = currentTick;
+            charState.GrowthReleaseCount++;
             long soundCooldownMilliseconds =
                 (long)(settings.DeltaGrowthSoundCooldownSeconds * 1000f);
             bool soundCooldownElapsed =
@@ -1393,6 +1401,11 @@ public sealed class Plugin : IDalamudPlugin
                 }
             }
         }
+
+        if (!digestionPaused && !(releasedGrowth && pulseGrowthAmount > 0f))
+            charState.AccumulatorPacing.AdvanceRecovery(deltaSeconds, settings.AccumulatorDelaySeconds,
+                settings.AccumulatorDelayIncreaseSeconds, settings.AccumulatorMaximumDelaySeconds,
+                settings.AccumulatorRecoveryDelaySeconds, settings.AccumulatorRecoveryPerSecond);
 
         if (!settings.GrowthFromDelta || disable || settings.GrowthOvershootPercent <= 0f)
             charState.GrowthVisual.CancelPulse();
@@ -1964,7 +1977,7 @@ public sealed class Plugin : IDalamudPlugin
             float nextDelay = state.AccumulatorPacing.Delay(settings.AccumulatorDelaySeconds,
                 settings.AccumulatorDelayIncreaseSeconds, settings.AccumulatorMaximumDelaySeconds);
             lines.Add($"{name}: Base {state.PlayerScale:0.000} | Current {state.ObservedScale:0.000} | " +
-                $"Crystals {state.NearbyAetherSources} | Drain sources {state.NearbyDrainSources} | Growth {state.GrowthMultiplier:0.000} | Pending {state.PendingGrowth:0.000} | Reserve {state.Digestion.Growth:0.000} | Next delay {nextDelay:0.000}s | Window remaining {state.AccumulatorRemainingSeconds:0.000}s" +
+                $"Crystals {state.NearbyAetherSources} | Drain sources {state.NearbyDrainSources} | Growth {state.GrowthMultiplier:0.000} | Pending {state.PendingGrowth:0.000} | Reserve {state.Digestion.Growth:0.000} | Next delay {nextDelay:0.000}s | Window remaining {state.AccumulatorRemainingSeconds:0.000}s | Releases {state.GrowthReleaseCount} | Last release interval {(state.GrowthReleaseCount > 1 ? state.LastGrowthReleaseIntervalSeconds.ToString("0.000") + "s" : "n/a")}" +
                 (group == SCActorGroup.Self ? $" | Customize+ root lift {state.SelfRootHeightOffset:0.000}" : $" | Session height {state.Transform.Height.Baseline:0.000} | Added {(state.Transform.Height.Owned ? state.Transform.Height.LastWritten - state.Transform.Height.Baseline : 0f):0.000}") +
                 (state.Transform.ScaleConflict ? " | Scale paused: external change" : "") +
                 (state.Transform.Height.Conflict ? " | Height paused: external change" : ""));

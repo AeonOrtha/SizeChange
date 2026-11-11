@@ -21,7 +21,19 @@ internal static class GrowthReleaseTiming
     }
 
     internal static float ForQueue(float remaining, GrowthSettings settings, float delay,
-        bool immediate, Func<double> random) => Select(remaining, ForSettings(settings, delay), immediate, random);
+        bool immediate, Func<double> random)
+    {
+        // Recovery to zero affects the NEXT window. Incoming hits still join a
+        // live adaptive window; explicit immediate triggers still bypass it.
+        if (!immediate && remaining > 0 && GrowthAccumulatorPacing.ValidSeconds(settings.AccumulatorDelayIncreaseSeconds) > 0)
+            return remaining;
+        return Select(remaining, ForSettings(settings, delay), immediate, random);
+    }
+
+    internal static float ActiveWindowMaximum(GrowthSettings settings) => ForSettings(settings,
+        GrowthAccumulatorPacing.ValidSeconds(settings.AccumulatorDelayIncreaseSeconds) > 0
+            ? GrowthAccumulatorPacing.Maximum(settings.AccumulatorDelaySeconds, settings.AccumulatorMaximumDelaySeconds)
+            : settings.AccumulatorDelaySeconds).Maximum;
 
     internal static (float Minimum, float Maximum) Bounds(float delay, float earlier, float later)
     {
