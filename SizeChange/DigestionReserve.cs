@@ -103,8 +103,23 @@ internal struct DigestionReserve
 {
     public double Growth { get; private set; }
     public bool HasGrowth => Growth > 0;
-    // +1x stored directly drives +1x/s of ambient growth.
+    // Reserve is the fractional growth rate of current settled size per second.
     public double AmbientGrowthPerSecond => Growth;
+
+    internal static double ProportionalGain(double integratedRate, float settledMultiplier)
+    {
+        if (!double.IsFinite(integratedRate) || integratedRate <= 0 ||
+            !float.IsFinite(settledMultiplier) || settledMultiplier <= 0) return 0;
+        double size = Math.Max(1, settledMultiplier);
+        double available = (double)float.MaxValue - size;
+        // Integrate dSize/dt = reserve(t) * size exactly. Clamp only at the
+        // representational boundary, before Exp can overflow.
+        if (integratedRate >= Math.Log((double)float.MaxValue / size)) return available;
+        double fraction = integratedRate < .00001
+            ? integratedRate * (1 + integratedRate * (.5 + integratedRate / 6))
+            : Math.Exp(integratedRate) - 1;
+        return Math.Min(available, size * fraction);
+    }
     private double currentDigestionRate;
     private double secondsWithoutPulse;
 
@@ -187,8 +202,8 @@ internal struct DigestionReserve
     {
         double startingSpeed = AmbientGrowthPerSecond;
 
-        // Two independent rules: dSize/dt = reserve; dReserve/dt = -rate*reserve.
-        // Average the changing speed over this frame for FPS-independent growth.
+        // Integrate reserve over this frame; ProportionalGain converts it to
+        // size growth. Depletion remains dReserve/dt = -rate*reserve.
         // This is NOT consumed energy converted into size. At zero digestion,
         // the balance remains unchanged and continues driving ambient growth.
         double exponent = rate * dt;

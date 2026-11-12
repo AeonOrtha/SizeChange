@@ -1080,7 +1080,7 @@ public class ConfigWindow : Window, IDisposable
         {
             bool enabled = settings.Enabled;
             if (ImGui.Checkbox("Enabled", ref enabled)) { settings.Enabled = enabled; configuration.Save(); }
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Stores bonus crystal/size-drain growth and configured exceptional reserve fills. Its entire balance directly drives continuous growth. Digestion only reduces that balance. Disabling clears it.");
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Stores bonus crystal/size-drain growth and configured exceptional reserve fills. Its balance drives continuous percentage growth of current settled size: reserve 0.1 means a 10%/s instantaneous rate, compounded continuously. Overshoot is excluded. Digestion only reduces the reserve balance. Disabling clears it.");
             if (enabled)
             {
                 float fullAt = settings.MaximumReserve;

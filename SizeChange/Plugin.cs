@@ -1366,6 +1366,12 @@ public sealed class Plugin : IDalamudPlugin
         // Reserve-driven ambient growth goes straight into settled size every frame, even
         // during feeding. Keep it out of pulse magnitude, damage/BPM, the
         // accumulator and bridge so it cannot generate recursive bonus growth.
+        // Only credited settled size counts: never overshoot or a normal pulse's
+        // excess above its limit. The reserve retains its own limit allowance.
+        float digestionSize = settings.LimitDeltaGrowth
+            ? Math.Min(charState.GrowthMultiplier, charState.EmoteAllowance.Cap(settings.DeltaMaxScaleMultiplier, charState.Aether.Bonus))
+            : charState.GrowthMultiplier;
+        reserveGrowth = DigestionReserve.ProportionalGain(reserveGrowth, digestionSize);
         charState.GrowthMultiplier = (float)Math.Min(float.MaxValue, (double)charState.GrowthMultiplier + reserveGrowth);
         charState.Aether.Bonus = (float)Math.Min(float.MaxValue, (double)charState.Aether.Bonus + reserveGrowth);
 
