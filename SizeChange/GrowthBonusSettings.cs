@@ -164,6 +164,12 @@ internal static class GrowthBonusRolls
         var extra = rolled.ExtraForSources(growth, aether, emote);
         return new(rolled.TotalGrowth, (float)Math.Min(float.MaxValue, (double)aether + extra.Aether),
             (float)Math.Min(float.MaxValue, (double)emote + extra.Emote),
-            chain, rolled.Exceptional);
+            chain, rolled.Exceptional)
+        {
+            // Existing source allowances already cover part of this bonus.
+            // Only the remaining exceptional extra needs its own allowance.
+            ExceptionalAllowance = rolled.Exceptional
+                ? (float)Math.Max(0, (double)extra.Growth - extra.Aether - extra.Emote) : 0,
+        };
     }
 }

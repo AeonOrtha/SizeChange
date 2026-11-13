@@ -1342,6 +1342,7 @@ public sealed class Plugin : IDalamudPlugin
                 (double)charState.Aether.Bonus + Math.Max(0, pulse.Aether - aether));
             charState.EmoteAllowance.Bonus = (float)Math.Min(float.MaxValue,
                 (double)charState.EmoteAllowance.Bonus + Math.Max(0, pulse.Emote - emote));
+            charState.EmoteAllowance.AddExceptional(pulse.ExceptionalAllowance);
             pulseGrowthAmount = pulse.Growth;
         }
         if (chainPulse is { } followup)
@@ -1354,6 +1355,7 @@ public sealed class Plugin : IDalamudPlugin
             charState.GrowthMultiplier = (float)Math.Min(float.MaxValue, (double)charState.GrowthMultiplier + followup.Growth);
             charState.Aether.Bonus = (float)Math.Min(float.MaxValue, (double)charState.Aether.Bonus + followup.Aether);
             charState.EmoteAllowance.Bonus = (float)Math.Min(float.MaxValue, (double)charState.EmoteAllowance.Bonus + followup.Emote);
+            charState.EmoteAllowance.AddExceptional(followup.ExceptionalAllowance);
             float settledAfter = settings.LimitDeltaGrowth
                 ? Math.Min(charState.GrowthMultiplier, charState.EmoteAllowance.Cap(settings.DeltaMaxScaleMultiplier, charState.Aether.Bonus))
                 : charState.GrowthMultiplier;
@@ -1367,13 +1369,14 @@ public sealed class Plugin : IDalamudPlugin
         // during feeding. Keep it out of pulse magnitude, damage/BPM, the
         // accumulator and bridge so it cannot generate recursive bonus growth.
         // Only credited settled size counts: never overshoot or a normal pulse's
-        // excess above its limit. The reserve retains its own limit allowance.
+        // excess above its limit. Digestion obeys the configured limit itself,
+        // never spending or creating a source/exceptional bypass allowance.
         float digestionSize = settings.LimitDeltaGrowth
             ? Math.Min(charState.GrowthMultiplier, charState.EmoteAllowance.Cap(settings.DeltaMaxScaleMultiplier, charState.Aether.Bonus))
             : charState.GrowthMultiplier;
-        reserveGrowth = DigestionReserve.ProportionalGain(reserveGrowth, digestionSize);
+        reserveGrowth = DigestionReserve.ProportionalGain(reserveGrowth, digestionSize,
+            settings.LimitDeltaGrowth, settings.DeltaMaxScaleMultiplier);
         charState.GrowthMultiplier = (float)Math.Min(float.MaxValue, (double)charState.GrowthMultiplier + reserveGrowth);
-        charState.Aether.Bonus = (float)Math.Min(float.MaxValue, (double)charState.Aether.Bonus + reserveGrowth);
 
         // Pay bridge growth only after measuring the actual release. It never
         // becomes another hit, pulse, reserve deposit or recursive bridge.

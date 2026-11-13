@@ -6,6 +6,7 @@ namespace SizeChange;
 internal readonly record struct GrowthPulse(float Growth, float Aether, float Emote, bool IsChain, bool Exceptional)
 {
     public bool FirstChainLink { get; init; }
+    public float ExceptionalAllowance { get; init; }
 }
 
 // Per actor, separate from the damage accumulator. New roots never reset old

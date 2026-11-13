@@ -117,18 +117,30 @@ internal readonly record struct ImmediateGrowthAmount(float Limited, float Bypas
 }
 
 // Keep emote allowance separate from proximity state: entering a duty must not
-// erase already-earned emote growth. Decay spends a single budget across both.
+// erase already-earned emote growth. Exceptional extra not covered by source
+// allowances is tracked separately, so it cannot be mistaken for a new emote.
+// Decay spends a single budget across all allowances.
 internal struct EmoteGrowthAllowance
 {
     internal float Bonus;
+    internal float ExceptionalBonus;
     internal void Add(float amount)
     { if (float.IsFinite(amount) && amount > 0) Bonus += amount; }
-    internal float Cap(float regularLimit, float aetherBonus) => regularLimit + aetherBonus + Bonus;
+    internal void AddExceptional(float amount)
+    {
+        if (float.IsFinite(amount) && amount > 0)
+            ExceptionalBonus = (float)Math.Min(float.MaxValue, (double)ExceptionalBonus + amount);
+    }
+    internal float Cap(float regularLimit, float aetherBonus) =>
+        (float)Math.Min(float.MaxValue, (double)regularLimit + aetherBonus + Bonus + ExceptionalBonus);
     internal float Decay(float amount)
     {
         float used = Math.Min(Bonus, Math.Max(0f, amount));
         Bonus -= used;
-        return Math.Max(0f, amount - used);
+        float remaining = Math.Max(0f, amount - used);
+        used = Math.Min(ExceptionalBonus, remaining);
+        ExceptionalBonus -= used;
+        return Math.Max(0f, remaining - used);
     }
 }
 

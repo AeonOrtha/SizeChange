@@ -1080,7 +1080,7 @@ public class ConfigWindow : Window, IDisposable
         {
             bool enabled = settings.Enabled;
             if (ImGui.Checkbox("Enabled", ref enabled)) { settings.Enabled = enabled; configuration.Save(); }
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Stores bonus crystal/size-drain growth and configured exceptional reserve fills. Its balance drives continuous percentage growth of current settled size: reserve 0.1 means a 10%/s instantaneous rate, compounded continuously. Overshoot is excluded. Digestion only reduces the reserve balance. Disabling clears it.");
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Stores bonus crystal/size-drain growth and configured exceptional reserve fills. Its balance drives continuous percentage growth of current settled size: reserve 0.1 means a 10%/s instantaneous rate, compounded continuously. Overshoot is excluded. Digestion only reduces the reserve balance. Growth obeys the configured size limit, even for exceptional reserve fills. Disabling clears it.");
             if (enabled)
             {
                 float fullAt = settings.MaximumReserve;
@@ -1737,7 +1737,7 @@ public class ConfigWindow : Window, IDisposable
             if (ImGui.IsItemHovered()) ImGui.SetTooltip("Default 1. Each new chain gets its own allowance; 0 disables exceptional chains. Only successful rolls use it. Captured when the chain starts; the original normal pulse does not count.");
             float multiplier = settings.ExceptionalMultiplier;
             if (ImGui.InputFloat("Growth Multiplier", ref multiplier, 0, 0, "%.2f")) { settings.ExceptionalMultiplier = multiplier; changed = true; }
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("1–100x the pulse's growth on a successful roll. Normal limit rules and overshoot still apply.");
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("1–100x the pulse's growth on a successful roll. Only the added amount bypasses the size limit; the original pulse follows its source rules. Reserve-fill growth remains capped.");
             float fills = settings.ExceptionalReserveFills;
             if (ImGui.InputFloat("Reserve Bonus (x full)", ref fills, 0, 0, "%.3f")) { settings.ExceptionalReserveFills = fills; changed = true; }
             if (ImGui.IsItemHovered()) ImGui.SetTooltip("Adds this many full-reserve amounts on each exceptional pulse, including chain links that pass their separate chance. 0 = off; up to 1000. Uses Full Reserve Reference in Digestion Reserve. Adds to existing storage; ignores hit size, Bonus Stored and deposit balancing. Requires digestion enabled. Ambient growth never rolls this bonus again.");
