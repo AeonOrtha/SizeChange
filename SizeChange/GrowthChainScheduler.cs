@@ -7,6 +7,7 @@ internal readonly record struct GrowthPulse(float Growth, float Aether, float Em
 {
     public bool FirstChainLink { get; init; }
     public float ExceptionalAllowance { get; init; }
+    public float BypassGrowth => (float)Math.Min(Growth, (double)Aether + Emote + ExceptionalAllowance);
 }
 
 // Per actor, separate from the damage accumulator. New roots never reset old

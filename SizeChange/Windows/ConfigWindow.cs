@@ -1080,9 +1080,13 @@ public class ConfigWindow : Window, IDisposable
         {
             bool enabled = settings.Enabled;
             if (ImGui.Checkbox("Enabled", ref enabled)) { settings.Enabled = enabled; configuration.Save(); }
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Stores bonus crystal/size-drain growth and configured exceptional reserve fills. Its balance drives continuous percentage growth of current settled size: reserve 0.1 means a 10%/s instantaneous rate, compounded continuously. Overshoot is excluded. Digestion only reduces the reserve balance. Growth obeys the configured size limit, even for exceptional reserve fills. Disabling clears it.");
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Stores bonus crystal/size-drain growth and configured exceptional reserve fills. Its balance drives continuous percentage growth of current settled size: reserve 0.1 means a 10%/s instantaneous rate, compounded continuously. Overshoot is excluded. Digestion only reduces the reserve balance. Growth follows the reserve's Ignore Size Limit option, including exceptional reserve fills. Disabling clears it.");
             if (enabled)
             {
+                bool ignoreLimit = settings.IgnoreSizeLimit;
+                if (ImGui.Checkbox("Ignore Size Limit", ref ignoreLimit))
+                { settings.IgnoreSizeLimit = ignoreLimit; configuration.Save(); }
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Applies to continuous reserve growth, including exceptional reserve fills. Off: stops adding size at Size Limit. On: can grow beyond it. Existing earned size still shrinks normally.");
                 float fullAt = settings.MaximumReserve;
                 if (ImGui.InputFloat("Full Reserve Reference", ref fullAt, 0, 0, "%.3f"))
                 { settings.MaximumReserve = fullAt; settings.Validate(); configuration.Save(); }
@@ -1194,6 +1198,10 @@ public class ConfigWindow : Window, IDisposable
     private void DrawSizeDrainMode(SizeDrainSettings settings, string id)
     {
         ImGui.PushID(id);
+        bool ignoreLimit = settings.IgnoreSizeLimit;
+        if (ImGui.Checkbox("Ignore Size Limit", ref ignoreLimit))
+        { settings.IgnoreSizeLimit = ignoreLimit; configuration.SaveSizeDrain(settings); }
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Size drain's direct growth and anticipation/tail growth can exceed Size Limit. Reserve output and chain/exceptional bonuses have separate rules. Applies to this normal/duty mode.");
         bool everyone = settings.Everyone;
         if (ImGui.Checkbox("Everyone Near Me", ref everyone))
         { settings.Everyone = everyone; configuration.SaveSizeDrain(settings); }
@@ -1702,11 +1710,23 @@ public class ConfigWindow : Window, IDisposable
         if (ImGui.IsItemHovered()) ImGui.SetTooltip("Any released growth pulse can start timed follow-up pulses. Chains run independently alongside normal pulses; continuous reserve and bridge growth do not roll.");
         if (chains)
         {
+            bool ignoreLimit = settings.ChainIgnoreSizeLimit ?? false;
+            if (ImGui.Checkbox("Ignore Size Limit##chain", ref ignoreLimit))
+            { settings.ChainIgnoreSizeLimit = ignoreLimit; changed = true; }
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Controls each chain link independently of its starting pulse. Exceptional extra has its own rule. Changes affect future links, not size already earned.");
+            if (!settings.ChainIgnoreSizeLimit.HasValue)
+            {
+                ImGui.TextDisabled("Inherited (legacy)");
+                ImGui.SameLine();
+                if (ImGui.SmallButton("Respect limit##chain"))
+                { settings.ChainIgnoreSizeLimit = false; changed = true; }
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("This older profile still inherits the starting pulse's source rules. Choose Respect limit or tick Ignore Size Limit to replace inheritance.");
+            }
             float chance = settings.ChainChancePercent;
             if (ImGui.InputFloat("Chain Chance (%)", ref chance, 0, 0, "%.1f")) { settings.ChainChancePercent = chance; changed = true; }
             float amount = settings.ChainGrowthPercent;
             if (ImGui.InputFloat("Base Link Growth (%)", ref amount, 0, 0, "%.1f")) { settings.ChainGrowthPercent = amount; changed = true; }
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Base percent of the original unboosted pulse, 0–1000. Add Increase per Successive Link for each link number. At 100% base and 10% increase: 110%, 120%, 130%. Chain links use Chain Exceptional Chance. Source size-limit rules still apply.");
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Base percent of the original unboosted pulse, 0–1000. Add Increase per Successive Link for each link number. At 100% base and 10% increase: 110%, 120%, 130%. Chain links use Chain Exceptional Chance. Chain and exceptional limit rules apply.");
             float step = settings.ChainGrowthStepPercent;
             if (ImGui.InputFloat("Increase per Successive Link (%)", ref step, 0, 0, "%.1f")) { settings.ChainGrowthStepPercent = step; changed = true; }
             if (ImGui.IsItemHovered()) ImGui.SetTooltip("Percentage points of the original pulse added per link, 0–1000. Linear progression, not compounded: root 100, then 110, 120, 130 with base 100 and step 10. Each new chain starts over. Zero keeps equal-sized links.");
@@ -1727,6 +1747,10 @@ public class ConfigWindow : Window, IDisposable
         if (ImGui.IsItemHovered()) ImGui.SetTooltip("Normal pulses and chain links use separate exceptional chances. Both share the multiplier, reserve bonus and exceptional effects.");
         if (exceptional)
         {
+            bool ignoreLimit = settings.ExceptionalIgnoreSizeLimit;
+            if (ImGui.Checkbox("Ignore Size Limit##exceptional", ref ignoreLimit))
+            { settings.ExceptionalIgnoreSizeLimit = ignoreLimit; changed = true; }
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Controls only the extra growth from the exceptional multiplier. The original amount keeps its source/chain rule. Reserve fills follow Digestion Reserve's limit rule.");
             float chance = settings.ExceptionalChancePercent;
             if (ImGui.InputFloat("Exceptional Chance (%)", ref chance, 0, 0, "%.1f")) { settings.ExceptionalChancePercent = chance; changed = true; }
             float chainChance = settings.ChainExceptionalChancePercent;
@@ -1737,7 +1761,7 @@ public class ConfigWindow : Window, IDisposable
             if (ImGui.IsItemHovered()) ImGui.SetTooltip("Default 1. Each new chain gets its own allowance; 0 disables exceptional chains. Only successful rolls use it. Captured when the chain starts; the original normal pulse does not count.");
             float multiplier = settings.ExceptionalMultiplier;
             if (ImGui.InputFloat("Growth Multiplier", ref multiplier, 0, 0, "%.2f")) { settings.ExceptionalMultiplier = multiplier; changed = true; }
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("1–100x the pulse's growth on a successful roll. Only the added amount bypasses the size limit; the original pulse follows its source rules. Reserve-fill growth remains capped.");
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("1–100x the pulse's growth on a successful roll. The added amount follows Exceptional Ignore Size Limit; the original pulse follows its source rules. Reserve-fill growth follows the digestion rule.");
             float fills = settings.ExceptionalReserveFills;
             if (ImGui.InputFloat("Reserve Bonus (x full)", ref fills, 0, 0, "%.3f")) { settings.ExceptionalReserveFills = fills; changed = true; }
             if (ImGui.IsItemHovered()) ImGui.SetTooltip("Adds this many full-reserve amounts on each exceptional pulse, including chain links that pass their separate chance. 0 = off; up to 1000. Uses Full Reserve Reference in Digestion Reserve. Adds to existing storage; ignores hit size, Bonus Stored and deposit balancing. Requires digestion enabled. Ambient growth never rolls this bonus again.");
@@ -1844,9 +1868,13 @@ public class ConfigWindow : Window, IDisposable
             bool aetherGrowth = settings.AetherProximityGrowth;
             if (ImGui.Checkbox($"Aetheryte Proximity Growth##{id}", ref aetherGrowth))
             { settings.AetherProximityGrowth = aetherGrowth; configuration.Save(); }
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Each crystal supplies damage at Hit Interval. Damage rises smoothly as you approach. Overlaps stack; crystal growth bypasses the size limit, including outside combat.");
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Each crystal supplies damage at Hit Interval. Damage rises smoothly as you approach. Overlaps stack; crystal growth follows its Ignore Size Limit option and works outside combat.");
             if (settings.AetherProximityGrowth)
             {
+                bool ignoreLimit = settings.AetherIgnoreSizeLimit;
+                if (ImGui.Checkbox($"Ignore Size Limit##aether-{id}", ref ignoreLimit))
+                { settings.AetherIgnoreSizeLimit = ignoreLimit; configuration.Save(); }
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Crystal growth and its anticipation/tail growth can exceed Size Limit. Digestion, chains and exceptional extra use their own rules. Works outside combat.");
                 float hitInterval = settings.AetherHitIntervalSeconds;
                 if (ImGui.InputFloat($"Hit Interval (s)##{id}", ref hitInterval, 0, 0, "%.3f"))
                 { settings.AetherHitIntervalSeconds = GrowthBonusSettings.Finite(hitInterval, .05f, 60, 1); configuration.Save(); }
@@ -1950,12 +1978,18 @@ public class ConfigWindow : Window, IDisposable
             }
             if (ImGui.IsItemHovered()) ImGui.SetTooltip("Caps the HP loss counted for each hit.");
 
+            bool damageIgnoreLimit = settings.DamageIgnoreSizeLimit;
+            if (ImGui.Checkbox($"Damage: Ignore Size Limit##{id}", ref damageIgnoreLimit))
+            { settings.DamageIgnoreSizeLimit = damageIgnoreLimit; configuration.Save(); }
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Real HP loss and Preview Growth can exceed Size Limit, including their anticipation/tail growth. Does not change skills, commands, emote/chat rules or the alternate Grow From Damage mode.");
+
             bool limitDeltaGrowth = settings.LimitDeltaGrowth;
             if (ImGui.Checkbox($"Limit Delta Growth##{id}", ref limitDeltaGrowth))
             {
                 settings.LimitDeltaGrowth = limitDeltaGrowth;
                 configuration.Save();
             }
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Caps settled size for sources without Ignore Size Limit. Temporary overshoot can still exceed it. Source rules affect new contributions; turning a source's bypass off does not remove already-earned size. With this master switch off, all sources are unrestricted.");
 
             if (settings.LimitDeltaGrowth)
             {

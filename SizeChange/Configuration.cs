@@ -15,8 +15,12 @@ public class GrowthSettings
     public ChatGrowthSettings ChatGrowth { get; set; } = new();
     public SizeDrainSettings SizeDrain { get; set; } = new();
     public DigestionSettings Digestion { get; set; } = new();
-    public GrowthBonusSettings GrowthBonuses { get; set; } = new();
+    // Dalamud populates existing objects by default; replace this one so absent
+    // legacy chain settings remain null, just as in System.Text.Json imports.
+    [Newtonsoft.Json.JsonProperty(ObjectCreationHandling = Newtonsoft.Json.ObjectCreationHandling.Replace)]
+    public GrowthBonusSettings GrowthBonuses { get; set; } = new() { ChainIgnoreSizeLimit = false };
     public bool AetherProximityGrowth { get; set; }
+    public bool AetherIgnoreSizeLimit { get; set; } = true;
     public float AetherProximityRange { get; set; } = 10f;
     public float AetherShardHitPercent { get; set; } = 0.4f;
     public float AetherLargeHitPercent { get; set; } = 1.2f;
@@ -38,6 +42,7 @@ public class GrowthSettings
     public bool ScaleGrowthWithSize { get; set; }
     public float MaximumHealthLossRatioPerTrigger { get; set; } = 1.0f;
     public bool LimitDeltaGrowth { get; set; }
+    public bool DamageIgnoreSizeLimit { get; set; }
     public float DeltaMaxScaleMultiplier { get; set; } = 5.0f;
     public float AccumulatorDelaySeconds { get; set; }
     public float AccumulatorDelayIncreaseSeconds { get; set; }
@@ -256,6 +261,8 @@ public class GrowthSettings
             MaximumHealthLossRatioPerTrigger =
                 settings.MaximumHealthLossRatioPerTrigger,
             LimitDeltaGrowth = settings.LimitDeltaGrowth,
+            DamageIgnoreSizeLimit = settings.DamageIgnoreSizeLimit,
+            AetherIgnoreSizeLimit = settings.AetherIgnoreSizeLimit,
             DeltaMaxScaleMultiplier = settings.DeltaMaxScaleMultiplier,
             AccumulatorDelaySeconds = settings.AccumulatorDelaySeconds,
             AccumulatorDelayIncreaseSeconds = settings.AccumulatorDelayIncreaseSeconds,

@@ -9,6 +9,8 @@ internal struct AetherGrowthState
     private float drainRemainingSeconds;
     public float PendingGrowth;
     public float PendingDamageRatio;
+    // Earned bypass allowance (also used by explicit damage/chain overrides).
+    // PendingGrowth records proximity provenance, not a limit permission.
     public float Bonus;
     public bool InRange;
 

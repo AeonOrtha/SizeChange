@@ -8,6 +8,7 @@ namespace SizeChange;
 public sealed class SizeDrainSettings
 {
     public bool Enabled { get; set; }
+    public bool IgnoreSizeLimit { get; set; } = true;
     public bool EnableInDuties { get; set; }
     internal bool AllowsLocation(bool inDuty) => !inDuty || EnableInDuties;
     public bool UseDutyOverrides { get; set; }

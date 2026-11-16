@@ -37,6 +37,7 @@ struct SCCharacterState
     public float PreviousHealth;
     public float GrowthMultiplier;
     public float PendingGrowth;
+    public PendingGrowthPermissions PendingLimits;
     public float PendingDamageRatio;
     public AetherGrowthState Aether;
     public EmoteGrowthAllowance EmoteAllowance;
@@ -1117,6 +1118,7 @@ public sealed class Plugin : IDalamudPlugin
             // Stop queued fake hits when preview ends. A visible pulse finishes
             // smoothly before normal decay resumes.
             charState.PendingGrowth = charState.Aether.PendingGrowth;
+            charState.PendingLimits.KeepProximity();
             charState.PendingDamageRatio = charState.Aether.PendingDamageRatio;
             if (charState.PendingGrowth <= 0f) charState.AccumulatorRemainingSeconds = 0f;
         }
@@ -1200,7 +1202,8 @@ public sealed class Plugin : IDalamudPlugin
         // configured interval; size drain retains its own one-second clock.
         bool proximityActive = aetherCount + drainCount > 0;
         var proximityHits = charState.Aether.Advance(aetherCount, drainCount, deltaSeconds, settings.AetherHitIntervalSeconds);
-        void QueueGrowth(EarnedGrowth earned, bool aether, bool immediate = false, float emoteBypassFraction = 0)
+        void QueueGrowth(EarnedGrowth earned, bool proximity, bool ignoreLimit = false,
+            bool immediate = false, float emoteBypassFraction = 0)
         {
             float addedGrowth = (float)earned.Growth;
             float healthLostRatio = (float)earned.DamageRatio;
@@ -1210,17 +1213,22 @@ public sealed class Plugin : IDalamudPlugin
                 addedGrowth, healthLostRatio, GrowthReleaseTiming.ForQueue(charState.AccumulatorRemainingSeconds,
                     settings, accumulatorDelay, immediate, Random.Shared.NextDouble), immediate);
             charState.Bridge.Queue(addedGrowth, settings.GrowthBridgePercent,
-                released ? 0 : charState.AccumulatorRemainingSeconds, settings.OvershootDuration, aether, emoteBypassFraction,
+                released ? 0 : charState.AccumulatorRemainingSeconds, settings.OvershootDuration, ignoreLimit, emoteBypassFraction,
                 released, settings.GrowthOvershootPercent > 0 ? settings.GrowthOvershootRisePercent : 0);
             if (released)
             {
-                if (aether) charState.Aether.Bonus += addedGrowth;
+                if (ignoreLimit) charState.Aether.Bonus += addedGrowth;
                 releasedGrowth = true;
             }
-            else if (aether)
+            else
             {
-                charState.Aether.PendingGrowth += addedGrowth;
-                charState.Aether.PendingDamageRatio = Math.Min(1f, charState.Aether.PendingDamageRatio + healthLostRatio);
+                charState.PendingLimits.Queue(addedGrowth, proximity, ignoreLimit);
+                // Combat gating tracks proximity independently from limit policy.
+                if (proximity)
+                {
+                    charState.Aether.PendingGrowth += addedGrowth;
+                    charState.Aether.PendingDamageRatio = Math.Min(1f, charState.Aether.PendingDamageRatio + healthLostRatio);
+                }
             }
         }
         var immediate = settings.GrowthFromDelta && !disable
@@ -1228,28 +1236,29 @@ public sealed class Plugin : IDalamudPlugin
         float immediateAmount = immediate.Total;
         if (immediateAmount > 0)
         {
-            QueueGrowth(new EarnedGrowth(immediateAmount, 0), false, true, immediate.Bypass / immediateAmount);
+            QueueGrowth(new EarnedGrowth(immediateAmount, 0), false, immediate: true,
+                emoteBypassFraction: immediate.Bypass / immediateAmount);
             charState.EmoteAllowance.Add(immediate.Bypass);
         }
-        void Accumulate(float healthLostRatio, bool aether)
+        void Accumulate(float healthLostRatio, bool proximity, bool ignoreLimit)
         {
             healthLostRatio = Math.Min(healthLostRatio, settings.MaximumHealthLossRatioPerTrigger);
             float addedGrowth = GrowthScalingMath.CalculateGain(healthLostRatio, settings.DeltaGrowthMultiplier,
                 growthMultiplierBeforeRelease, settings.ScaleGrowthWithSize);
             // Real damage/preview never fills the proximity reserve.
-            var earned = aether ? charState.Digestion.Absorb(addedGrowth, healthLostRatio, settings.Digestion)
+            var earned = proximity ? charState.Digestion.Absorb(addedGrowth, healthLostRatio, settings.Digestion)
                 : new EarnedGrowth(addedGrowth, healthLostRatio);
-            QueueGrowth(earned, aether);
+            QueueGrowth(earned, proximity, ignoreLimit);
         }
         if (settings.GrowthFromDelta && !disable && !inactiveForCombat && !aetherWithoutHp)
         {
             float healthLost = preview != null ? preview.HitRatio * maxhp : charState.PreviousHealth - health;
-            if (healthLost > 0f) Accumulate(healthLost / maxhp, false);
+            if (healthLost > 0f) Accumulate(healthLost / maxhp, false, settings.DamageIgnoreSizeLimit);
         }
         if (proximityHits.Crystals && nearbyCrystals != null)
-            foreach (var hit in nearbyCrystals) Accumulate(hit.Ratio, true);
+            foreach (var hit in nearbyCrystals) Accumulate(hit.Ratio, true, settings.AetherIgnoreSizeLimit);
         if (proximityHits.Drain && nearbyTargets != null)
-            foreach (var hit in nearbyTargets) Accumulate(hit.Ratio, true);
+            foreach (var hit in nearbyTargets) Accumulate(hit.Ratio, true, drain.IgnoreSizeLimit);
 
         bool digestionPaused = !settings.GrowthFromDelta || disable || !aliveForDigestion ||
             Condition[ConditionFlag.BetweenAreas] || Condition[ConditionFlag.BetweenAreas51];
@@ -1262,6 +1271,7 @@ public sealed class Plugin : IDalamudPlugin
             // Pending growth must never survive disabling the mode, entering
             // PvP, disabling the plugin, or removing the actor from its list.
             charState.PendingGrowth = 0f;
+            charState.PendingLimits = default;
             charState.PendingDamageRatio = 0f;
             charState.AccumulatorRemainingSeconds = 0f;
             charState.Aether = default;
@@ -1289,7 +1299,8 @@ public sealed class Plugin : IDalamudPlugin
             if (releasePendingGrowth)
             {
                 charState.GrowthMultiplier += charState.PendingGrowth;
-                charState.Aether.Release();
+                charState.Aether.Bonus += charState.PendingLimits.Take();
+                charState.Aether.PendingGrowth = charState.Aether.PendingDamageRatio = 0f;
                 charState.PendingGrowth = 0f;
                 charState.PendingDamageRatio = 0f;
                 charState.AccumulatorRemainingSeconds = 0f;
@@ -1325,6 +1336,14 @@ public sealed class Plugin : IDalamudPlugin
             0f, charState.GrowthMultiplier - growthMultiplierBeforeRelease);
         bool normalReleased = releasedGrowth && pulseGrowthAmount > 0;
         GrowthPulse? rootPulse = null;
+        float rootBypass = Math.Max(0, charState.Aether.Bonus - aetherBonusBeforeRelease) +
+            Math.Max(0, charState.EmoteAllowance.Bonus - emoteBonusBeforeRelease);
+        // Preserve the requested amount for visual pulses, even when capped.
+        // Apply actual size separately so blocked growth cannot spill into a
+        // chain's, exceptional bonus's or later source's bypass allowance.
+        if (normalReleased)
+            charState.GrowthMultiplier = GrowthLimitPolicy.Apply(growthMultiplierBeforeRelease,
+                pulseGrowthAmount, rootBypass, settings.LimitDeltaGrowth, settings.DeltaMaxScaleMultiplier);
         if (normalReleased && feedbackAllowed)
         {
             float aether = charState.Aether.Bonus - aetherBonusBeforeRelease;
@@ -1336,12 +1355,8 @@ public sealed class Plugin : IDalamudPlugin
             // compound into the amounts of subsequent links.
             if (!digestionPaused)
                 charState.GrowthChains.Start(pulseGrowthAmount, aether, emote, settings.GrowthBonuses, Random.Shared.NextDouble);
-            charState.GrowthMultiplier = (float)Math.Min(float.MaxValue,
-                (double)charState.GrowthMultiplier + pulse.Growth - pulseGrowthAmount);
-            charState.Aether.Bonus = (float)Math.Min(float.MaxValue,
-                (double)charState.Aether.Bonus + Math.Max(0, pulse.Aether - aether));
-            charState.EmoteAllowance.Bonus = (float)Math.Min(float.MaxValue,
-                (double)charState.EmoteAllowance.Bonus + Math.Max(0, pulse.Emote - emote));
+            charState.GrowthMultiplier = GrowthLimitPolicy.Apply(growthMultiplierBeforeRelease,
+                pulse.Growth, pulse.BypassGrowth, settings.LimitDeltaGrowth, settings.DeltaMaxScaleMultiplier);
             charState.EmoteAllowance.AddExceptional(pulse.ExceptionalAllowance);
             pulseGrowthAmount = pulse.Growth;
         }
@@ -1352,7 +1367,8 @@ public sealed class Plugin : IDalamudPlugin
             float settledBefore = settings.LimitDeltaGrowth
                 ? Math.Min(charState.GrowthMultiplier, charState.EmoteAllowance.Cap(settings.DeltaMaxScaleMultiplier, charState.Aether.Bonus))
                 : charState.GrowthMultiplier;
-            charState.GrowthMultiplier = (float)Math.Min(float.MaxValue, (double)charState.GrowthMultiplier + followup.Growth);
+            charState.GrowthMultiplier = GrowthLimitPolicy.Apply(settledBefore,
+                followup.Growth, followup.BypassGrowth, settings.LimitDeltaGrowth, settings.DeltaMaxScaleMultiplier);
             charState.Aether.Bonus = (float)Math.Min(float.MaxValue, (double)charState.Aether.Bonus + followup.Aether);
             charState.EmoteAllowance.Bonus = (float)Math.Min(float.MaxValue, (double)charState.EmoteAllowance.Bonus + followup.Emote);
             charState.EmoteAllowance.AddExceptional(followup.ExceptionalAllowance);
@@ -1369,20 +1385,23 @@ public sealed class Plugin : IDalamudPlugin
         // during feeding. Keep it out of pulse magnitude, damage/BPM, the
         // accumulator and bridge so it cannot generate recursive bonus growth.
         // Only credited settled size counts: never overshoot or a normal pulse's
-        // excess above its limit. Digestion obeys the configured limit itself,
-        // never spending or creating a source/exceptional bypass allowance.
+        // excess above its limit. Reserve output has its own limit rule,
+        // independent of whatever sources deposited that reserve.
         float digestionSize = settings.LimitDeltaGrowth
             ? Math.Min(charState.GrowthMultiplier, charState.EmoteAllowance.Cap(settings.DeltaMaxScaleMultiplier, charState.Aether.Bonus))
             : charState.GrowthMultiplier;
         reserveGrowth = DigestionReserve.ProportionalGain(reserveGrowth, digestionSize,
-            settings.LimitDeltaGrowth, settings.DeltaMaxScaleMultiplier);
+            settings.LimitDeltaGrowth && !settings.Digestion.IgnoreSizeLimit, settings.DeltaMaxScaleMultiplier);
         charState.GrowthMultiplier = (float)Math.Min(float.MaxValue, (double)charState.GrowthMultiplier + reserveGrowth);
+        if (settings.Digestion.IgnoreSizeLimit) charState.EmoteAllowance.Add((float)reserveGrowth);
 
         // Pay bridge growth only after measuring the actual release. It never
         // becomes another hit, pulse, reserve deposit or recursive bridge.
         if (!feedbackAllowed || settings.GrowthBridgePercent <= 0) charState.Bridge.Clear();
         var bridgeGain = charState.Bridge.Advance(deltaSeconds);
-        charState.GrowthMultiplier += bridgeGain.Growth;
+        charState.GrowthMultiplier = GrowthLimitPolicy.Apply(charState.GrowthMultiplier,
+            bridgeGain.Growth, (float)Math.Min(float.MaxValue, (double)bridgeGain.AetherBonus + bridgeGain.EmoteBonus),
+            settings.LimitDeltaGrowth, settings.DeltaMaxScaleMultiplier);
         charState.Aether.Bonus += bridgeGain.AetherBonus;
         charState.EmoteAllowance.Add(bridgeGain.EmoteBonus);
         bool bridging = charState.Bridge.HasGrowth || bridgeGain.Growth > 0;
@@ -1604,9 +1623,8 @@ public sealed class Plugin : IDalamudPlugin
         {
             // Follow the visible scale so height also follows overshoot, normal
             // ambient decay, and the faster out-of-combat return.
-            desiredHeightOffset +=
-                Math.Max(0f, visibleScaleMultiplier - 1f) *
-                settings.DeltaHeightOffsetPerScale;
+            desiredHeightOffset = PoseHeightOffset.WithGrowth(desiredHeightOffset,
+                visibleScaleMultiplier, settings.DeltaHeightOffsetPerScale);
         }
 
         if (actorGroup == SCActorGroup.Self || playerProfileHeight)

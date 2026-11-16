@@ -5,6 +5,7 @@ namespace SizeChange;
 [Serializable]
 public sealed class DigestionSettings
 {
+    public bool IgnoreSizeLimit { get; set; }
     public bool Enabled { get; set; }
     public float StoredPercent { get; set; } = 50f;
     // Legacy JSON field. LowHpDepositBoost replaces the unbounded power curve.

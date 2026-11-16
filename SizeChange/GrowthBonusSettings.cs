@@ -47,6 +47,9 @@ public sealed class PulseSoundSettings
 public sealed class GrowthBonusSettings
 {
     public bool ChainsEnabled { get; set; }
+    // Missing in older profiles: retain source inheritance until explicitly set.
+    public bool? ChainIgnoreSizeLimit { get; set; }
+    public bool ExceptionalIgnoreSizeLimit { get; set; } = true;
     public float ChainChancePercent { get; set; } = 20;
     public float ChainGrowthPercent { get; set; } = 50;
     public float ChainGrowthStepPercent { get; set; }
@@ -110,6 +113,8 @@ public sealed class GrowthBonusSettings
         ChainSound = PulseSoundSettings.CopyOf(s.ChainSound),
         ChainVfxEnabled = s.ChainVfxEnabled, ChainVfxLayers = CopyLayers(s.ChainVfxLayers),
         ChainsEnabled = s.ChainsEnabled, ChainChancePercent = s.ChainChancePercent,
+        ChainIgnoreSizeLimit = s.ChainIgnoreSizeLimit,
+        ExceptionalIgnoreSizeLimit = s.ExceptionalIgnoreSizeLimit,
         ChainGrowthPercent = s.ChainGrowthPercent, MaximumExtraPulses = s.MaximumExtraPulses,
         ChainGrowthStepPercent = s.ChainGrowthStepPercent,
         ExceptionalEnabled = s.ExceptionalEnabled, ExceptionalChancePercent = s.ExceptionalChancePercent,
@@ -160,16 +165,18 @@ internal static class GrowthBonusRolls
         if (!float.IsFinite(growth) || growth <= 0) return default;
         aether = float.IsFinite(aether) ? Math.Clamp(aether, 0, growth) : 0;
         emote = float.IsFinite(emote) ? Math.Clamp(emote, 0, growth - aether) : 0;
-        var rolled = allowExceptional ? Resolve(growth, settings, random, chain) : new GrowthBonusResult(growth, false);
-        var extra = rolled.ExtraForSources(growth, aether, emote);
-        return new(rolled.TotalGrowth, (float)Math.Min(float.MaxValue, (double)aether + extra.Aether),
-            (float)Math.Min(float.MaxValue, (double)emote + extra.Emote),
-            chain, rolled.Exceptional)
+        if (chain && settings.ChainIgnoreSizeLimit is { } ignoreLimit)
         {
-            // Existing source allowances already cover part of this bonus.
-            // Only the remaining exceptional extra needs its own allowance.
-            ExceptionalAllowance = rolled.Exceptional
-                ? (float)Math.Max(0, (double)extra.Growth - extra.Aether - extra.Emote) : 0,
+            // A chain's own rule replaces the root source's permissions.
+            aether = ignoreLimit ? growth : 0;
+            emote = 0;
+        }
+        var rolled = allowExceptional ? Resolve(growth, settings, random, chain) : new GrowthBonusResult(growth, false);
+        return new(rolled.TotalGrowth, aether, emote, chain, rolled.Exceptional)
+        {
+            // Only the multiplier's extra amount follows the exceptional rule.
+            ExceptionalAllowance = rolled.Exceptional && settings.ExceptionalIgnoreSizeLimit
+                ? Math.Max(0, rolled.TotalGrowth - growth) : 0,
         };
     }
 }
